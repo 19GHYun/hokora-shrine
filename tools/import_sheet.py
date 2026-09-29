@@ -45,30 +45,50 @@ PRESETS = {
 }
 
 
-def chroma_key(src: QImage) -> QImage:
-    """초록 배경을 투명하게. 캐릭터 안의 초록(사쿠야 리본 등)은 남긴다.
+def key_color(img: QImage) -> str:
+    """배경색 자동 판별: 그림 테두리 픽셀 평균이 초록이면 "green", 자홍(마젠타)이면 "magenta"."""
+    w, h = img.width(), img.height()
+    pts = [(x, y) for x in range(0, w, max(1, w // 40)) for y in (0, h - 1)]
+    pts += [(x, y) for y in range(0, h, max(1, h // 40)) for x in (0, w - 1)]
+    r = g = b = 0
+    for x, y in pts:
+        c = img.pixel(x, y)
+        r, g, b = r + ((c >> 16) & 255), g + ((c >> 8) & 255), b + (c & 255)
+    return "magenta" if min(r, b) > g else "green"
 
-    1. 그림 가장자리에서 이어진 '초록 계열' 픽셀만 배경으로 (윤곽선 안쪽의 초록 옷·리본은 닿지 않음)
-    2. 윤곽선에 갇힌 배경 틈(팔과 몸 사이 등)은 배경색과 거의 같은 '순수한 초록'만 추가로 배경 처리
-    3. 배경 바로 옆 픽셀만 초록 번짐을 눌러줌 (안쪽 초록 색은 건드리지 않음)
+
+def chroma_key(src: QImage, key: str | None = None) -> QImage:
+    """초록(또는 자홍) 배경을 투명하게. 캐릭터 안의 같은 계열 색(사쿠야의 초록 리본 등)은 남긴다.
+
+    1. 그림 가장자리에서 이어진 '배경 계열' 픽셀만 배경으로 (윤곽선 안쪽의 옷·리본은 닿지 않음)
+    2. 윤곽선에 갇힌 배경 틈(팔과 몸 사이 등)은 배경색과 거의 같은 '순수한 배경색'만 추가로 배경 처리
+    3. 배경 바로 옆 픽셀만 색 번짐을 눌러줌 (안쪽 색은 건드리지 않음)
+    초록 머리(사나에)·초록 옷(요우무) 캐릭터는 자홍 배경(#FF00FF)으로 뽑으면 된다.
     """
     src = src.convertToFormat(QImage.Format_ARGB32)
+    key = key or key_color(src)
+    magenta = key == "magenta"
     w, h = src.width(), src.height()
     n = w * h
     data = bytearray(bytes(src.constBits()))  # BGRA
-    spill = bytearray(n)       # 초록이 r·b 보다 얼마나 센지 (0~255)
+    spill = bytearray(n)       # 배경색 성분이 나머지보다 얼마나 센지 (0~255)
     loose = bytearray(n)       # 배경이거나 배경과 섞인 가장자리일 수 있음
     bg = bytearray(n)
     for k in range(n):
         i = k * 4
         b, g, r = data[i], data[i + 1], data[i + 2]
-        m = r if r > b else b
-        s = g - m
-        if s > 0:
-            spill[k] = s
-            if g > 100 and s > 60:
+        if magenta:                # 자홍: r·b 가 함께 세고 g 가 약함
+            on, off = (r if r < b else b), g
+            pure = r > 170 and b > 170 and g < 110
+        else:                      # 초록: g 가 세고 r·b 가 약함
+            on, off = g, (r if r > b else b)
+            pure = g > 170 and r < 110 and b < 110
+        sv = on - off
+        if sv > 0:
+            spill[k] = sv
+            if on > 100 and sv > 60:
                 loose[k] = 1
-                if g > 170 and r < 110 and b < 110 and s > 120:
+                if pure and sv > 120:
                     bg[k] = 1          # 순수한 배경색 → 갇힌 틈이어도 배경
     # 1. 가장자리에서 flood fill
     q = deque(k for k in list(range(w)) + list(range(n - w, n)) + list(range(0, n, w)) + list(range(w - 1, n, w))
@@ -82,20 +102,29 @@ def chroma_key(src: QImage) -> QImage:
             if 0 <= nk < n and loose[nk] and not (bg[nk] & 2):
                 bg[nk] = 3             # 1 = 배경, 2 = 방문함
                 q.append(nk)
-    # 2·3. 배경은 투명하게, 배경 바로 옆은 초록 번짐만 제거
+
+    def despill(i: int, amount: int) -> None:
+        """배경색 성분만 amount 만큼 빼기."""
+        if amount <= 0:
+            return
+        if magenta:
+            data[i] -= min(amount, data[i])            # b
+            data[i + 2] -= min(amount, data[i + 2])    # r
+        else:
+            data[i + 1] -= min(amount, data[i + 1])    # g
+
+    # 2·3. 배경은 투명하게, 배경 바로 옆은 색 번짐만 제거
     for k in range(n):
-        s = spill[k]
+        sv = spill[k]
         if bg[k]:
             i = k * 4
-            m = max(data[i], data[i + 2])
-            data[i + 3] = max(0, 255 - min(255, s * 3))
-            data[i + 1] = m
-        elif s > 20:
+            data[i + 3] = max(0, 255 - min(255, sv * 3))
+            despill(i, sv)
+        elif sv > 20:
             x = k % w
             if ((k >= w and bg[k - w]) or (k + w < n and bg[k + w])
                     or (x and bg[k - 1]) or (x < w - 1 and bg[k + 1])):
-                i = k * 4
-                data[i + 1] = max(data[i], data[i + 2]) + 20
+                despill(k * 4, sv - 20)
     return QImage(bytes(data), w, h, QImage.Format_ARGB32).copy()
 
 

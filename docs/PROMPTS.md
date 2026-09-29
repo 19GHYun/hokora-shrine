@@ -16,6 +16,9 @@ python tools/import_sheet.py 시트C.png <캐릭터> --preset life
 | B. 반응 (`react`) | 앉기 2, 던져짐 1, 쓰다듬기 4, 잡힘 3 | 새 캐릭터 |
 | C. 생활 (`life`) | 낮잠 2, 손 흔들기 2, 특기 2, 뛰기 2, 붙잡힘 1 | 모든 캐릭터 |
 
+**배경색**: 기본은 초록(`#00FF00`)입니다. 캐릭터에 초록이 많으면(사나에 머리, 요우무 옷) 프롬프트의 `#00FF00` 과
+`green` 을 **자홍 `#FF00FF` / `magenta`** 로 바꿔서 뽑으세요. 가져오기 도구가 배경색을 알아서 판별합니다.
+
 AI가 칸 순서를 틀리게 그리면 `--names` 로 직접 이름을 붙이고, 이상한 장면은 이름 자리에 `-` 를 써서 뺍니다.
 
 ## 공통 프롬프트
@@ -92,3 +95,35 @@ flat colors, cute chibi style), draw 9 small Japanese shrine decoration props as
 9. A big donation box (saisen-bako) with a golden coin on top.
 Background: solid flat pure green (#00FF00). No text, no shadows, no grid lines.
 ```
+
+## 새 캐릭터 기준 그림 (1단계)
+
+기존 캐릭터의 서 있는 그림(예: 레이무 `idle_0.png`)을 **그림체 참고용**으로 첨부합니다.
+뽑은 기준 그림을 다시 첨부해서 시트 A·B·C 를 뽑습니다.
+
+```
+The attached image is ONLY a style reference. Copy its art style exactly: chibi plush doll
+proportions (very big round head, small bean-shaped body, stubby arms, round nub feet),
+thick soft dark-brown outline, big sparkly eyes, cat-like mouth, soft pink blush, flat colors
+with gentle shading. Do NOT copy the reference character's hair, bow, or outfit.
+
+Draw this character instead, standing still, full body, body turned slightly to the viewer's right,
+arms relaxed, feet at the bottom, centered, portrait canvas 5:6:
+[캐릭터 설명]
+
+Background: solid flat pure [BG]. No shadow, no text, no other objects.
+```
+
+| 캐릭터 | 배경 `[BG]` | `[캐릭터 특기]` |
+| --- | --- | --- |
+| 사나에 | `magenta (#FF00FF)` | `Waving a gohei (white paper wand) overhead, summoning a small swirl of wind (a miracle)` |
+| 플랑드르 | `green (#00FF00)` | `Swinging a black twisted wand (Laevatein) with a playful fanged grin` |
+| 레밀리아 | `green (#00FF00)` | `Spreading her bat wings wide and pointing forward with a proud, confident smirk` |
+| 요우무 | `magenta (#FF00FF)` | `Drawing her long katana in a quick slash, with a sharp sword glint` |
+
+**캐릭터 설명**
+
+- 사나에: `Kochiya Sanae from Touhou Project: long bright green hair with one side lock, a white frog-shaped hair clip on the left, a white snake-shaped hair ornament wrapped around the side lock, green eyes, a white shrine maiden top with blue trim, detached white sleeves with blue trim, a blue skirt with a white frill hem, blue-and-white shoes.`
+- 플랑드르: `Flandre Scarlet from Touhou Project: short blonde hair with a small side ponytail on her left, a white mob cap with a red ribbon, red eyes, a small fang, a red vest and red skirt with white frills, a white blouse with short puffy sleeves, a small yellow ascot, red shoes. Wings: two thin black branch-like wings with hanging crystal gems colored red, orange, yellow, cyan, blue and purple (NO green crystals). The wings must stay close to her body.`
+- 레밀리아: `Remilia Scarlet from Touhou Project: short light lavender-blue hair, a pale pink mob cap with a red ribbon, red eyes, a small fang, a pale pink dress with short puffy sleeves, red ribbons and white frills, pink shoes, small dark purple bat wings on her back close to her body.`
+- 요우무: `Konpaku Youmu from Touhou Project: short silver-white bob hair, a black hairband with a black ribbon bow, blue-gray eyes, a green vest over a white short-sleeved blouse, a green skirt, a small black bow tie, brown shoes, two katanas on her back (one long, one short). Her white ghost half (a round white wispy spirit with a short tail) floats right behind her shoulder, overlapping her body so it touches her.`
