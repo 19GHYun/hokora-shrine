@@ -35,23 +35,60 @@ _qt_app = None
 
 
 def chroma_key(src: QImage) -> QImage:
-    """초록이 다른 색보다 확실히 강한 픽셀을 투명하게. 가장자리는 반투명 + 초록 번짐 제거."""
+    """초록 배경을 투명하게. 캐릭터 안의 초록(사쿠야 리본 등)은 남긴다.
+
+    1. 그림 가장자리에서 이어진 '초록 계열' 픽셀만 배경으로 (윤곽선 안쪽의 초록 옷·리본은 닿지 않음)
+    2. 윤곽선에 갇힌 배경 틈(팔과 몸 사이 등)은 배경색과 거의 같은 '순수한 초록'만 추가로 배경 처리
+    3. 배경 바로 옆 픽셀만 초록 번짐을 눌러줌 (안쪽 초록 색은 건드리지 않음)
+    """
     src = src.convertToFormat(QImage.Format_ARGB32)
     w, h = src.width(), src.height()
+    n = w * h
     data = bytearray(bytes(src.constBits()))  # BGRA
-    for i in range(0, len(data), 4):
+    spill = bytearray(n)       # 초록이 r·b 보다 얼마나 센지 (0~255)
+    loose = bytearray(n)       # 배경이거나 배경과 섞인 가장자리일 수 있음
+    bg = bytearray(n)
+    for k in range(n):
+        i = k * 4
         b, g, r = data[i], data[i + 1], data[i + 2]
         m = r if r > b else b
-        spill = g - m
-        if g > 100 and spill > 60:
-            data[i + 3] = max(0, 255 - min(255, spill * 3))
+        s = g - m
+        if s > 0:
+            spill[k] = s
+            if g > 100 and s > 60:
+                loose[k] = 1
+                if g > 170 and r < 110 and b < 110 and s > 120:
+                    bg[k] = 1          # 순수한 배경색 → 갇힌 틈이어도 배경
+    # 1. 가장자리에서 flood fill
+    q = deque(k for k in list(range(w)) + list(range(n - w, n)) + list(range(0, n, w)) + list(range(w - 1, n, w))
+              if loose[k])
+    for k in q:
+        bg[k] = 3
+    while q:
+        k = q.popleft()
+        x = k % w
+        for nk in (k - w, k + w, k - 1 if x else -1, k + 1 if x < w - 1 else -1):
+            if 0 <= nk < n and loose[nk] and not (bg[nk] & 2):
+                bg[nk] = 3             # 1 = 배경, 2 = 방문함
+                q.append(nk)
+    # 2·3. 배경은 투명하게, 배경 바로 옆은 초록 번짐만 제거
+    for k in range(n):
+        s = spill[k]
+        if bg[k]:
+            i = k * 4
+            m = max(data[i], data[i + 2])
+            data[i + 3] = max(0, 255 - min(255, s * 3))
             data[i + 1] = m
-        elif spill > 20:          # 초록빛이 살짝 도는 윤곽 → 초록만 눌러줌
-            data[i + 1] = m + 20
+        elif s > 20:
+            x = k % w
+            if ((k >= w and bg[k - w]) or (k + w < n and bg[k + w])
+                    or (x and bg[k - 1]) or (x < w - 1 and bg[k + 1])):
+                i = k * 4
+                data[i + 1] = max(data[i], data[i + 2]) + 20
     return QImage(bytes(data), w, h, QImage.Format_ARGB32).copy()
 
 
-def find_blobs(img: QImage):
+def find_blobs(img: QImage, expected: int | None = None):
     """불투명한 덩어리(캐릭터)들을 읽는 순서로.
 
     돌려주는 값: ([(경계 상자 (x0, y0, x1, y1), 라벨)...], 격자 라벨 배열, 격자 폭)
@@ -108,6 +145,8 @@ def find_blobs(img: QImage):
         remap[c[5]] = tgt[5]
     if remap:
         labels = [remap.get(v, v) for v in labels]
+    if expected:
+        _split_touching(main, labels, gw, expected, next_label=max(c[5] for c in comps) + 1)
     blobs = [((c[0] * GRID, c[1] * GRID, min(w, (c[2] + 1) * GRID), min(h, (c[3] + 1) * GRID)), c[5])
              for c in main]
     # 읽는 순서: 줄(가운데 y가 비슷한 것끼리) → 줄 안에서 왼쪽부터
@@ -123,6 +162,40 @@ def find_blobs(img: QImage):
             row.append(b)
     rows.append(row)
     return [b for r in rows for b in sorted(r, key=lambda b: b[0][0])], labels, gw
+
+
+def _split_touching(main: list, labels: list, gw: int, expected: int, next_label: int) -> None:
+    """캐릭터끼리 닿아서(모자 챙 등) 한 덩어리로 잡혔을 때: 기대 개수가 될 때까지
+    유난히 넓은 덩어리를 가운데 30~70% 구간에서 가장 가는 세로줄로 잘라 둘로 나눈다."""
+    while len(main) < expected:
+        widths = sorted(c[2] - c[0] + 1 for c in main)
+        med_w = widths[len(widths) // 2]
+        wide = max(main, key=lambda c: c[2] - c[0])
+        x0, y0, x1, y1, _, lab = wide
+        if x1 - x0 + 1 < med_w * 1.5:
+            print("붙은 캐릭터를 더 나눌 수 없습니다 (유난히 넓은 덩어리 없음)")
+            return
+        span = x1 - x0
+
+        def thickness(x: int) -> int:
+            return sum(1 for y in range(y0, y1 + 1) if labels[y * gw + x] == lab)
+
+        cut = min(range(x0 + span * 3 // 10, x0 + span * 7 // 10 + 1), key=thickness)
+        parts = {lab: [10 ** 9, 10 ** 9, -1, -1, 0], next_label: [10 ** 9, 10 ** 9, -1, -1, 0]}
+        for y in range(y0, y1 + 1):
+            for x in range(x0, x1 + 1):
+                k = y * gw + x
+                if labels[k] != lab:
+                    continue
+                if x >= cut:
+                    labels[k] = next_label
+                b = parts[labels[k]]
+                b[0], b[1], b[2], b[3] = min(b[0], x), min(b[1], y), max(b[2], x), max(b[3], y)
+                b[4] += 1
+        main.remove(wide)
+        main.extend([*b, key] for key, b in parts.items())
+        print(f"붙어 있던 캐릭터를 나눔 (세로줄 x={cut * GRID})")
+        next_label += 1
 
 
 def tight(img: QImage, blob, labels, gw) -> tuple[QImage, float]:
@@ -186,9 +259,10 @@ def main() -> int:
         print(f"그림을 읽지 못했습니다: {args.sheet}")
         return 1
     keyed = chroma_key(src)
-    blobs, labels, gw = find_blobs(keyed)
+    wanted = [n.strip() for n in args.names.split(",")] if args.names else None
+    blobs, labels, gw = find_blobs(keyed, expected=len(wanted) if wanted else None)
     print(f"캐릭터 {len(blobs)}개 찾음")
-    names = [n.strip() for n in args.names.split(",")] if args.names else [f"frame_{i + 1}" for i in range(len(blobs))]
+    names = wanted or [f"frame_{i + 1}" for i in range(len(blobs))]
     if len(names) != len(blobs):
         print(f"이름 {len(names)}개와 찾은 캐릭터 {len(blobs)}개의 수가 다릅니다. 미리보기를 보고 다시 지정하세요.")
         names = [f"frame_{i + 1}" for i in range(len(blobs))]

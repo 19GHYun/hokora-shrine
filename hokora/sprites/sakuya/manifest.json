@@ -1,0 +1,26 @@
+{
+  "canvas": [
+    160,
+    212
+  ],
+  "anchor": [
+    80,
+    206
+  ],
+  "standing_height": 200,
+  "facing": 1,
+  "frames": [
+    "idle",
+    "blink",
+    "walk_0",
+    "walk_1",
+    "sit",
+    "happy",
+    "held",
+    "sit_1",
+    "happy_1",
+    "fall",
+    "sleep"
+  ],
+  "source": "Gemini_Generated_Image_w9b67cw9b67cw9b6.png"
+}
