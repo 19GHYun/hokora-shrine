@@ -1,0 +1,59 @@
+# v* 태그를 올리면 exe를 빌드해서 릴리스에 올린다.
+# 태그 없이 Actions 탭에서 수동 실행하면 빌드 결과만 아티팩트로 남긴다.
+name: Build & Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 릴리스 생성
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"   # 러너 콘솔(cp1252)에서도 한글 출력이 멈추지 않게
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt pyinstaller
+
+      - name: Check tag matches __version__
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          v="$(python build.py --print-version)"
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::태그($GITHUB_REF_NAME)와 hokora/__init__.py 의 __version__($v)이 다릅니다."
+            exit 1
+          fi
+
+      - name: Build exe
+        run: python build.py
+
+      - name: Upload exe
+        uses: actions/upload-artifact@v7
+        with:
+          name: hokora
+          path: dist/hokora.exe
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/hokora.exe --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/hokora.exe \
+              --title "Hokora $GITHUB_REF_NAME" --generate-notes
+          fi
