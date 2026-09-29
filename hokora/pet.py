@@ -19,9 +19,12 @@ from .render import Character, Pose, draw_character
 from .sprites import image_sprites
 from .state import PAT_COOLDOWN
 
-WIN_W, WIN_H = 84, 104          # 창 크기 (하트 등 효과가 머리 위로 나갈 공간 포함)
+# 창은 캐릭터가 빙글 돌아도(대각선 ≈ 94px) 잘리지 않을 만큼 넉넉하게.
+# 투명한 부분은 클릭이 뒤로 통과하므로(레이어드 창) 작업표시줄을 가리지 않는다.
+WIN_W, WIN_H = 120, 132
 CHAR_W, CHAR_H = 56, 67         # 캐릭터 크기
-FOOT_MARGIN = 3                 # 창 아래쪽과 발 사이
+FOOT_MARGIN = 18                # 창 아래쪽과 발 사이 (돌 때 발이 이만큼 아래로 내려감)
+SPIN_PIVOT = CHAR_H * 0.5       # 던져져 돌 때의 회전 중심: 발에서 몸 가운데까지
 GRAVITY = 2200.0                # px/s²
 WALK_SPEED = (22.0, 34.0)       # px/s
 MAX_THROW = 2600.0
@@ -234,11 +237,13 @@ class PetWindow(QWidget):
         pm, anchor = sprites().get(self.ch, kind, frame, facing, blink)
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
-        # 발을 기준으로 찌그러짐·기울기
+        # 찌그러짐은 발을 기준으로, 빙글 도는 건 몸 가운데를 기준으로 (발 기준이면 몸이 창 밖으로 휘둘려 잘림)
         fx, fy = WIN_W / 2, WIN_H - FOOT_MARGIN
         p.translate(fx, fy)
         if self.tilt:
+            p.translate(0, -SPIN_PIVOT)
             p.rotate(self.tilt)
+            p.translate(0, SPIN_PIVOT)
         if self.squash:
             sq = min(0.3, self.squash)
             p.scale(1 + sq * 0.6, 1 - sq)
