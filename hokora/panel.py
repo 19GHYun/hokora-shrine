@@ -9,6 +9,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton,
                                QVBoxLayout, QWidget)
 
+from .omikuji import can_draw
 from .progress import UNLOCKS
 from .render import CHARACTERS, Pose, draw_character
 from .sprites import image_sprites
@@ -61,7 +62,7 @@ def portrait(key: str, size: int, silhouette: bool) -> QPixmap:
 
 
 class ShrinePanel(QWidget):
-    def __init__(self, state: GameState, on_upgrade: Callable[[], None]):
+    def __init__(self, state: GameState, on_upgrade: Callable[[], None], on_omikuji: Callable[[], None]):
         super().__init__(None, Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_DeleteOnClose, True)
@@ -69,6 +70,7 @@ class ShrinePanel(QWidget):
         self.setStyleSheet(STYLE)
         self.state = state
         self.on_upgrade = on_upgrade
+        self.on_omikuji = on_omikuji
         self.setFixedWidth(490)
 
         v = QVBoxLayout(self)
@@ -94,6 +96,16 @@ class ShrinePanel(QWidget):
         up.addLayout(col, 1)
         up.addWidget(self.up_btn)
         v.addLayout(up)
+
+        # ── 오미쿠지 ──
+        omi = QHBoxLayout()
+        self.omi_label = QLabel(objectName="goal")
+        self.omi_btn = QPushButton(objectName="upgrade")
+        self.omi_btn.setCursor(Qt.PointingHandCursor)
+        self.omi_btn.clicked.connect(self._omikuji)
+        omi.addWidget(self.omi_label, 1)
+        omi.addWidget(self.omi_btn)
+        v.addLayout(omi)
 
         # ── 도감 ──
         v.addWidget(QLabel("도감", objectName="section"))
@@ -154,6 +166,16 @@ class ShrinePanel(QWidget):
             self.up_btn.setText(f"{nxt_name}로 올리기")   # 신사·대신사 모두 받침 없음 → "로"
             self.up_btn.setEnabled(s.saisen >= cost)
 
+        if can_draw(s):
+            self.omi_label.setText("오늘의 오미쿠지를 뽑아 보세요. 좋은 운세일수록 새전을 많이 받아요.")
+            self.omi_btn.setText("오미쿠지 뽑기")
+            self.omi_btn.setEnabled(True)
+        else:
+            self.omi_label.setText("오늘은 이미 뽑았어요. 내일 또 만나요!")
+            self.omi_btn.setText("내일 다시")
+            self.omi_btn.setEnabled(False)
+        self.omi_label.setWordWrap(True)
+
         for key, (pic, name, goals) in self.cards.items():
             met = key in s.unlocked
             if pic.property("met") != met:          # 그림은 만났을 때만 다시 그림
@@ -185,6 +207,10 @@ class ShrinePanel(QWidget):
                     bar.hide()
         hours = s.runtime_sec / 3600
         self.stats.setText(f"모은 새전 {s.saisen_total:,}   ·   쓰다듬기 {s.pats:,}번   ·   함께한 시간 {hours:.1f}시간")
+
+    def _omikuji(self) -> None:
+        self.close()             # 오미쿠지 종이를 띄우려고 창은 닫음
+        self.on_omikuji()
 
     def _upgrade(self) -> None:
         self.on_upgrade()

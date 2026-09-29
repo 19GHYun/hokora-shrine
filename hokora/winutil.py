@@ -46,6 +46,22 @@ def fullscreen_app_running() -> bool:
     return state.value in (2, 3, 4)
 
 
+class _LastInputInfo(ctypes.Structure):
+    _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+
+
+def idle_seconds() -> float:
+    """키보드·마우스를 마지막으로 쓴 뒤 지난 시간(초)."""
+    if not IS_WIN:
+        return 0.0
+    info = _LastInputInfo()
+    info.cbSize = ctypes.sizeof(info)
+    if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+        return 0.0
+    now = ctypes.windll.kernel32.GetTickCount() & 0xFFFFFFFF
+    return ((now - info.dwTime) & 0xFFFFFFFF) / 1000.0     # 49일마다 한 바퀴 도는 값이라 뺄셈을 32비트로
+
+
 # ── 창 위를 걸어 다니기: 열려 있는 창들의 윗변 중 보이는 부분 = 발판 ──
 @dataclass
 class Platform:
@@ -62,60 +78,106 @@ _DWMWA_EXTENDED_FRAME_BOUNDS, _DWMWA_CLOAKED = 9, 14
 _WS_EX_TOOLWINDOW = 0x80
 
 
-def window_platforms(dpr: float, area: tuple[float, float, float, float],
-                     min_len: float = 60.0) -> list[Platform]:
+@dataclass
+class Area:
+    """모니터 하나. geo·avail 은 Qt 논리 좌표 (왼, 위, 오른, 아래 — 오른·아래는 끝 다음 칸),
+    phys 는 Windows 물리 픽셀 좌표. 모니터마다 배율이 달라 창 위치를 바꿀 때 모니터별로 계산해야 한다."""
+    geo: tuple[float, float, float, float]
+    avail: tuple[float, float, float, float]
+    dpr: float
+    phys: tuple[int, int, int, int]
+
+    def contains_phys(self, px: float, py: float) -> bool:
+        return self.phys[0] <= px < self.phys[2] and self.phys[1] <= py < self.phys[3]
+
+    def to_logical(self, px: float, py: float) -> tuple[float, float]:
+        return self.geo[0] + (px - self.phys[0]) / self.dpr, self.geo[1] + (py - self.phys[1]) / self.dpr
+
+
+class _MonitorInfo(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+
+def monitor_rects() -> list[tuple[int, int, int, int]]:
+    """연결된 모니터들의 물리 픽셀 영역."""
+    if not IS_WIN:
+        return []
+    rects: list[tuple[int, int, int, int]] = []
+    user32 = ctypes.windll.user32
+
+    @ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
+    def collect(hmon, _hdc, _rect, _lp):
+        info = _MonitorInfo()
+        info.cbSize = ctypes.sizeof(info)
+        if user32.GetMonitorInfoW(ctypes.c_void_p(hmon), ctypes.byref(info)):
+            r = info.rcMonitor
+            rects.append((r.left, r.top, r.right, r.bottom))
+        return 1
+
+    user32.EnumDisplayMonitors(None, None, collect, 0)
+    return rects
+
+
+def window_platforms(areas: list[Area], min_len: float = 60.0) -> list[Platform]:
     """화면에 보이는 일반 창들의 윗변을 발판으로. 좌표는 Qt 논리 픽셀.
 
-    area = (왼쪽, 위, 오른쪽, 아래) 작업 영역. 최대화 창처럼 윗변이 화면 맨 위에 붙은 창,
-    작은 창, 도구 창, 이 프로그램의 창은 제외. 윗변이 다른 창에 가려진 부분도 제외.
+    최대화 창처럼 윗변이 모니터 맨 위에 붙은 창, 작은 창, 도구 창, 이 프로그램의 창은 제외.
+    윗변이 다른 창에 가려진 부분도 제외. 창이 있는 모니터의 배율로 좌표를 바꾼다.
     """
-    if not IS_WIN:
+    if not IS_WIN or not areas:
         return []
     user32, dwm = ctypes.windll.user32, ctypes.windll.dwmapi
     my_pid = os.getpid()
-    left, top, right, bottom = area
-    windows: list[tuple[int, tuple[float, float, float, float], bool]] = []  # 위쪽 창부터 (z 순서)
+    windows: list[tuple[int, tuple[float, float, float, float], bool, Area]] = []  # 위쪽 창부터 (z 순서)
 
-    @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+    @ctypes.WINFUNCTYPE(ctypes.c_int, wintypes.HWND, wintypes.LPARAM)
     def collect(hwnd, _lp):
         try:
             if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
-                return True
+                return 1
             cloaked = ctypes.c_int(0)
             dwm.DwmGetWindowAttribute(hwnd, _DWMWA_CLOAKED, ctypes.byref(cloaked), 4)
             if cloaked.value:
-                return True
+                return 1
             pid = wintypes.DWORD()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
             if pid.value == my_pid:
-                return True
+                return 1
             cls = ctypes.create_unicode_buffer(64)
             user32.GetClassNameW(hwnd, cls, 64)
             if cls.value in _SKIP_CLASSES:
-                return True
+                return 1
             r = wintypes.RECT()
             if dwm.DwmGetWindowAttribute(hwnd, _DWMWA_EXTENDED_FRAME_BOUNDS, ctypes.byref(r), ctypes.sizeof(r)):
                 user32.GetWindowRect(hwnd, ctypes.byref(r))
-            rect = (r.left / dpr, r.top / dpr, r.right / dpr, r.bottom / dpr)
-            if rect[2] - rect[0] < 4 or rect[3] - rect[1] < 4:
-                return True
+            if r.right - r.left < 4 or r.bottom - r.top < 4:
+                return 1
+            # 창 윗변 가운데가 있는 모니터 기준으로 좌표 변환
+            cx, cy = (r.left + r.right) / 2, r.top + 1
+            area = next((a for a in areas if a.contains_phys(cx, cy)), None)
+            if area is None:
+                return 1
+            l, t = area.to_logical(r.left, r.top)
+            rr, b = area.to_logical(r.right, r.bottom)
             ex = user32.GetWindowLongW(hwnd, -20)
             # 발판이 될 수 있는 창: 제목이 있는 보통 크기의 일반 창
             standable = (not ex & _WS_EX_TOOLWINDOW and user32.GetWindowTextLengthW(hwnd) > 0
-                         and rect[2] - rect[0] >= 120 and rect[3] - rect[1] >= 80)
-            windows.append((int(hwnd), rect, standable))
+                         and rr - l >= 120 and b - t >= 80)
+            windows.append((int(hwnd), (l, t, rr, b), standable, area))
         except OSError:
             pass
-        return True
+        return 1
 
     user32.EnumWindows(collect, 0)
 
     platforms: list[Platform] = []
-    for i, (hwnd, (l, t, r, b), standable) in enumerate(windows):
-        if not standable or t <= top + 40 or t >= bottom - 40:   # 최대화 창·화면 밖·바닥에 붙은 창
+    for i, (hwnd, (l, t, r, b), standable, area) in enumerate(windows):
+        al, at, ar, ab = area.avail
+        if not standable or t <= at + 40 or t >= ab - 40:   # 최대화 창·화면 밖·바닥에 붙은 창
             continue
-        segments = [(max(l, left), min(r, right))]
-        for _, (ol, ot, orr, ob), _ in windows[:i]:              # 이 창보다 위에 있는 창들이 가린 부분 빼기
+        segments = [(max(l, al), min(r, ar))]
+        for _, (ol, ot, orr, ob), _, _ in windows[:i]:     # 이 창보다 위에 있는 창들이 가린 부분 빼기
             if ot <= t <= ob:
                 segments = [part for s1, s2 in segments
                             for part in ((s1, min(s2, ol)), (max(s1, orr), s2)) if part[1] - part[0] > 0]

@@ -38,6 +38,11 @@ FALLBACK = {
     "held": ["fall", "idle"],
     "fall": ["held", "idle"],
     "sleep": ["sit", "idle"],
+    "startled": ["caught", "held", "fall", "idle"],
+    "wave": ["happy", "idle"],
+    "skill": ["idle"],
+    "run": ["walk", "idle"],
+    "caught": ["held", "fall", "idle"],
 }
 
 

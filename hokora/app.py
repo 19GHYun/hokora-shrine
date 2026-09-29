@@ -17,6 +17,8 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import __version__, winutil
 from .bubble import say
+from .omikuji import FortuneSlip, can_draw
+from .omikuji import draw as draw_omikuji
 from .panel import ShrinePanel
 from .pet import PetWindow
 from .progress import UNLOCKS, newly_unlocked
@@ -32,6 +34,8 @@ FPS_CALM = 15            # 평소 (걷기·가만히) — CPU 를 아끼려고
 PLATFORM_SLOW = 400      # 창 발판을 다시 읽는 간격(ms)
 PLATFORM_FAST = 100      # 캐릭터가 창 위에 있을 때 (창을 끌면 바로 따라가게)
 JUMP_UP_MAX = 700        # 이보다 높은 창으로는 점프하지 않음 (px) — 작업표시줄에서 화면 중간쯤 창까지
+NAP_AFTER = float(os.environ.get("HOKORA_NAP_AFTER", 600))   # 이만큼(초) 자리를 비우면 낮잠
+GREETINGS = ["어서 와요!", "잘 다녀왔어요?", "기다렸어요~", "zZ… 앗, 왔다!"]
 JUMP_REACH = 600         # 옆으로 이보다 먼 창으로는 점프하지 않음 (px)
 INCOME_EVERY = 30        # 새전이 들어오는 간격(초)
 SAVE_EVERY = 60
@@ -87,7 +91,8 @@ class Game(QObject):
         self._update_bounds()
         self.pets: list[PetWindow] = []
         self.hidden_for_fullscreen = False
-        self.shrine = ShrineWindow(self, self.left + self.state.shrine_x * (self.right - self.left),
+        prim = self.app.primaryScreen().availableGeometry()
+        self.shrine = ShrineWindow(self, prim.x() + self.state.shrine_x * prim.width(),
                                    self.state.shrine_level)
         self.shrine.set_saisen(self.state.saisen)
         keys = list(CHARACTERS) if os.environ.get("HOKORA_ALL") == "1" else self.state.unlocked
@@ -101,30 +106,84 @@ class Game(QObject):
         self.save_timer = QTimer(self, timeout=self.save, interval=SAVE_EVERY * 1000)
         self.unlock_timer = QTimer(self, timeout=self.check_unlocks, interval=30_000)   # 시간 조건(사쿠야)
         self.panel: ShrinePanel | None = None
+        self.napping = False
+        self.nap_timer = QTimer(self, timeout=self._check_nap, interval=3000)
         self.watch_timer = QTimer(self, timeout=self._watch, interval=1500)
         # 창 위 발판: 캐릭터가 창 위에 있으면 자주(창을 끌면 따라가게), 아니면 가끔 새로 읽음
-        self.platforms: list[winutil.Platform] = []
+        self.window_platforms: list[winutil.Platform] = []
         self.platform_timer = QTimer(self, timeout=self._refresh_platforms, interval=PLATFORM_SLOW)
 
-        screen = app.primaryScreen()
-        screen.availableGeometryChanged.connect(self._on_screen_changed)
+        for sc in app.screens():
+            sc.availableGeometryChanged.connect(self._on_screen_changed)
+        app.screenAdded.connect(self._on_screen_added)
+        app.screenRemoved.connect(self._on_screen_changed)
         self.tray = self._make_tray()
 
     # ── 화면 ──
     def _update_bounds(self) -> None:
-        g = self.app.primaryScreen().availableGeometry()
-        self.left, self.right = float(g.left()), float(g.right() + 1)
-        self.top = float(g.top())
-        self.ground_y = float(g.bottom() + 1)   # 작업표시줄 윗변
+        """모니터마다 작업 영역을 읽어, 작업표시줄 윗변을 모니터별 바닥 발판으로 만든다.
+
+        바닥 발판은 창 발판과 똑같이 다루고(hwnd 자리에 음수 번호), 옆 모니터로 걸어가다
+        바닥 높이가 다르면 떨어지거나(낮을 때) 돌아서거나 점프한다(높을 때).
+        배율이 다른 모니터는 Qt 좌표에 틈이 생기므로, 물리적으로 붙어 있으면 통로로 잇는다.
+        """
+        monitors = winutil.monitor_rects()
+        self.areas: list[winutil.Area] = []
+        for sc in self.app.screens():
+            g, a, dpr = sc.geometry(), sc.availableGeometry(), sc.devicePixelRatio()
+            size = (round(g.width() * dpr), round(g.height() * dpr))
+            phys = (next((m for m in monitors if (m[0], m[1]) == (g.x(), g.y())
+                          and (m[2] - m[0], m[3] - m[1]) == size), None)
+                    or next((m for m in monitors if (m[2] - m[0], m[3] - m[1]) == size), None)
+                    or (g.x(), g.y(), g.x() + size[0], g.y() + size[1]))
+            self.areas.append(winutil.Area((g.x(), g.y(), g.x() + g.width(), g.y() + g.height()),
+                                           (a.x(), a.y(), a.x() + a.width(), a.y() + a.height()), dpr, phys))
+        self.left = float(min(a.avail[0] for a in self.areas))
+        self.right = float(max(a.avail[2] for a in self.areas))
+        self.top = float(min(a.avail[1] for a in self.areas))
+        self.bottom = float(max(a.avail[3] for a in self.areas))
+        prim = self.app.primaryScreen().availableGeometry()
+        self.ground_y = float(prim.bottom() + 1)   # 주 모니터의 작업표시줄 윗변
+        # 바닥 발판: 붙어 있고 높이가 같은 모니터끼리는 하나로
+        merged: list[list[float]] = []
+        for x1, x2, y in sorted((a.avail[0], a.avail[2], a.avail[3]) for a in self.areas):
+            if merged and merged[-1][1] == x1 and merged[-1][2] == y:
+                merged[-1][1] = x2
+            else:
+                merged.append([x1, x2, y])
+        self.grounds = [winutil.Platform(-(i + 1), x1, x2, y, x1) for i, (x1, x2, y) in enumerate(merged)]
+        # 모니터 사이 통로 (가장자리 x, 방향, 도착 x)
+        self.portals: list[tuple[float, int, float]] = []
+        for a in self.areas:
+            for b in self.areas:
+                side_by_side = a.phys[2] == b.phys[0] and a.phys[1] < b.phys[3] and b.phys[1] < a.phys[3]
+                if a is not b and side_by_side and a.avail[2] != b.avail[0]:
+                    self.portals += [(a.avail[2], 1, b.avail[0]), (b.avail[0], -1, a.avail[2])]
+        log.info("모니터 %d개, 바닥 %s, 통로 %d개", len(self.areas),
+                 [(g.x1, g.x2, g.y) for g in self.grounds], len(self.portals))
+
+    def _on_screen_added(self, sc) -> None:
+        sc.availableGeometryChanged.connect(self._on_screen_changed)
+        self._on_screen_changed()
 
     def _on_screen_changed(self, *_):
         self._update_bounds()
-        self.shrine.pos_x = min(max(self.shrine.pos_x, self.left + 60), self.right - 60)
-        self.shrine._place()
-        log.info("화면 영역 변경 → 바닥 y=%s", self.ground_y)
+        self.shrine.set_level(self.shrine.level)     # 신사를 새 바닥 위로
+        log.info("화면 구성 변경")
+
+    def ground_under(self, x: float) -> winutil.Platform:
+        """x 에 있는 바닥 (모니터 사이 빈 곳이면 가장 가까운 바닥)."""
+        inside = [g for g in self.grounds if g.x1 <= x < g.x2]
+        if inside:
+            return max(inside, key=lambda g: g.y)
+        return min(self.grounds, key=lambda g: min(abs(x - g.x1), abs(x - g.x2)))
+
+    def ground_at(self, x: float) -> float:
+        return self.ground_under(x).y
 
     def _spawn(self, key: str) -> PetWindow:
-        x = random.uniform(self.left + 80, self.right - 80)
+        g = self.ground_under(self.shrine.pos_x)
+        x = random.uniform(g.x1 + 80, g.x2 - 80)
         pet = PetWindow(CHARACTERS[key], self, x)
         self.pets.append(pet)
         return pet
@@ -139,6 +198,7 @@ class Game(QObject):
         self.income_timer.start()
         self.save_timer.start()
         self.unlock_timer.start()
+        self.nap_timer.start()
         self.watch_timer.start()
         self.platform_timer.start()
         self._refresh_platforms()
@@ -186,18 +246,32 @@ class Game(QObject):
     def climbing(self) -> bool:
         return self.state.climb
 
+    @property
+    def platforms(self) -> list[winutil.Platform]:
+        """올라설 수 있는 모든 곳: 모니터별 작업표시줄 바닥 + 창 윗변."""
+        return self.grounds + self.window_platforms
+
     def _refresh_platforms(self) -> None:
         if not self.state.climb or self.hidden_for_fullscreen:
-            self.platforms = []
+            self.window_platforms = []
         else:
-            dpr = self.app.primaryScreen().devicePixelRatio()
-            self.platforms = winutil.window_platforms(dpr, (self.left, self.top, self.right, self.ground_y))
-        fast = any(p.on is not None for p in self.pets)
+            self.window_platforms = winutil.window_platforms(self.areas)
+        fast = any(p.on is not None and p.on > 0 for p in self.pets)
         self.platform_timer.setInterval(PLATFORM_FAST if fast else PLATFORM_SLOW)
 
-    def find_landing(self, x: float, y0: float, y1: float) -> tuple[float, int | None] | None:
+    def has_surface_below(self, x: float, y: float) -> bool:
+        return any(p.x1 <= x <= p.x2 and p.y > y + 1 for p in self.platforms)
+
+    def portal(self, x: float, direction: int) -> float | None:
+        """모니터 사이 틈 앞이면 건너편 x."""
+        for edge, d, to in self.portals:
+            if d == direction and abs(x - edge) < 24:
+                return to + d * 14
+        return None
+
+    def find_landing(self, x: float, y0: float, y1: float) -> tuple[float, int] | None:
         """y0 → y1 로 내려오는 동안 처음 닿는 곳 (창 윗변 또는 작업표시줄)."""
-        best: tuple[float, int | None] | None = (self.ground_y, None) if y1 >= self.ground_y else None
+        best: tuple[float, int] | None = None
         for p in self.platforms:
             if p.x1 <= x <= p.x2 and y0 <= p.y <= y1 and (best is None or p.y < best[0]):
                 best = (p.y, p.hwnd)
@@ -213,18 +287,15 @@ class Game(QObject):
         return None
 
     def jump_target(self, pet: PetWindow) -> tuple[float, float] | None:
-        """점프해서 갈 만한 곳: 닿을 만한 다른 창 윗변, 또는 (창 위라면) 작업표시줄."""
+        """점프해서 갈 만한 곳: 닿을 만한 다른 창 윗변이나 (높이가 다른) 작업표시줄."""
         targets: list[tuple[float, float]] = []
         for p in self.platforms:
             if p.hwnd == pet.on or p.x2 - p.x1 < 80:
                 continue
             up = pet.pos_y - p.y
-            reach = max(p.x1 - pet.pos_x, 0.0, pet.pos_x - p.x2)
-            if 30 < abs(up) and -700 <= up <= JUMP_UP_MAX and reach <= JUMP_REACH:
-                targets.append((random.uniform(p.x1 + 25, p.x2 - 25), p.y))
-        if pet.on is not None:
-            tx = pet.pos_x + random.choice((-1, 1)) * random.uniform(60, 160)
-            targets.append((min(max(tx, self.left + 40), self.right - 40), self.ground_y))
+            lo, hi = max(p.x1 + 25, pet.pos_x - JUMP_REACH), min(p.x2 - 25, pet.pos_x + JUMP_REACH)
+            if 30 < abs(up) and -700 <= up <= JUMP_UP_MAX and lo < hi:
+                targets.append((random.uniform(lo, hi), p.y))
         return random.choice(targets) if targets else None
 
     def set_climb(self, on: bool) -> None:
@@ -242,7 +313,8 @@ class Game(QObject):
             self.check_unlocks()
 
     def on_shrine_moved(self, x: float) -> None:
-        self.state.shrine_x = (x - self.left) / max(1.0, self.right - self.left)
+        prim = self.app.primaryScreen().availableGeometry()   # 주 모니터 기준 비율 (다른 모니터면 0~1 밖)
+        self.state.shrine_x = (x - prim.x()) / max(1, prim.width())
 
     def on_shrine_clicked(self, global_pos: QPoint = None) -> None:
         self.open_panel()
@@ -251,13 +323,48 @@ class Game(QObject):
     def open_panel(self) -> None:
         if self.panel is not None:
             self.panel.close()
-        self.panel = ShrinePanel(self.state, self.upgrade)
+        self.panel = ShrinePanel(self.state, self.upgrade, self.omikuji)
         self.panel.destroyed.connect(lambda *_: setattr(self, "panel", None))
         top = self.shrine.y() + 20
         self.panel.show_above(self.shrine.pos_x, top, self.left, self.right)
 
     def _say_at_shrine(self, text: str) -> None:
         say(text, self.shrine.pos_x, self.shrine.y() + 26)
+
+    def _check_nap(self) -> None:
+        """자리를 비우면 다들 그 자리에서 낮잠, 돌아오면 깨어나 반긴다."""
+        idle = winutil.idle_seconds()
+        if not self.napping and idle >= NAP_AFTER:
+            self.napping = True
+            log.info("자리 비움 %.0f초 → 낮잠", idle)
+        elif self.napping and idle < 3:
+            self.napping = False
+            log.info("돌아옴 → 깨어남")
+            for pet in self.pets:
+                pet.wake()
+            awake = [p for p in self.pets if p.isVisible()]
+            if awake and not self.hidden_for_fullscreen:
+                pet = random.choice(awake)
+                say(random.choice(GREETINGS), pet.pos_x, pet.pos_y - 72)
+            return
+        if self.napping:                     # 늦게 착지한 캐릭터도 잠들게
+            for pet in self.pets:
+                pet.nap()
+
+    def omikuji(self) -> None:
+        """하루 한 번 운세. 새전을 받고, 캐릭터들이 기뻐하거나 깜짝 놀란다."""
+        if not can_draw(self.state):
+            return
+        result = draw_omikuji(self.state)
+        log.info("오미쿠지: %s (+%d)", result.fortune.rank, result.reward)
+        self.shrine.set_saisen(self.state.saisen)
+        self.shrine.pop(f"+{result.reward}")
+        for pet in self.pets:
+            pet.react(result.fortune.good)
+        slip = FortuneSlip(result)
+        slip.show_above(self.shrine.pos_x, self.shrine.y() + 20)
+        self.save()
+        self.check_unlocks()
 
     def upgrade(self) -> None:
         if not self.state.upgrade_shrine():
@@ -278,8 +385,9 @@ class Game(QObject):
             log.info("해금: %s", key)
             if all(p.ch.key != key for p in self.pets):
                 pet = self._spawn(key)
-                pet.pos_x = min(max(self.shrine.pos_x + random.uniform(-160, 160), self.left + 40), self.right - 40)
-                pet.pos_y, pet.vx, pet.vy, pet.state = self.top + 80, 0.0, 0.0, "fall"
+                g = self.ground_under(self.shrine.pos_x)
+                pet.pos_x = min(max(self.shrine.pos_x + random.uniform(-160, 160), g.x1 + 40), g.x2 - 40)
+                pet.pos_y, pet.vx, pet.vy, pet.state, pet.on = max(self.top + 80, g.y - 600), 0.0, 0.0, "fall", None
                 pet._place()
                 if not self.hidden_for_fullscreen:
                     pet.show()
@@ -299,6 +407,8 @@ class Game(QObject):
         info.setEnabled(False)
         menu.addSeparator()
         menu.addAction("신사 관리 · 도감", self.open_panel)
+        if can_draw(s):
+            menu.addAction("오늘의 오미쿠지 뽑기", self.omikuji)
         menu.addAction("모두 불러오기", self.gather)
         climb = QAction("창 위에도 올라가기", menu, checkable=True)
         climb.setChecked(s.climb)
@@ -314,9 +424,10 @@ class Game(QObject):
 
     def gather(self) -> None:
         """화면 밖이나 구석에 간 캐릭터를 신사 옆으로."""
+        g = self.ground_under(self.shrine.pos_x)
         for pet in self.pets:
-            pet.pos_x = min(max(self.shrine.pos_x + random.uniform(-120, 120), self.left + 40), self.right - 40)
-            pet.pos_y, pet.vx, pet.vy, pet.state, pet.on = self.ground_y - 200, 0.0, 0.0, "fall", None
+            pet.pos_x = min(max(self.shrine.pos_x + random.uniform(-120, 120), g.x1 + 40), g.x2 - 40)
+            pet.pos_y, pet.vx, pet.vy, pet.state, pet.on = g.y - 200, 0.0, 0.0, "fall", None
             pet.show()
 
     def _make_tray(self) -> QSystemTrayIcon | None:

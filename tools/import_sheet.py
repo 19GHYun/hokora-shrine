@@ -6,6 +6,7 @@ AI로 뽑은 초록 배경 스프라이트 시트 → 게임용 캐릭터 그림
   python tools/import_sheet.py 시트.png reimu            (이름 없이: 번호가 붙은 미리보기만)
   python tools/import_sheet.py 걷기.png reimu --append --names walk_0,walk_1,...   (기존 그림에 추가)
   이름 자리에 - 를 쓰면 그 장면은 버림 (예: happy_0,-,happy_1)
+  python tools/import_sheet.py 생활.png reimu --preset life    (표준 세트 시트: 이름 자동, 기존 그림에 추가)
 
 하는 일
   1. 초록 배경(#00FF00 근처)과 워터마크를 투명하게, 가장자리의 초록 번짐 제거
@@ -35,6 +36,13 @@ STANDING_PX = 200      # 저장할 때 서 있는 자세(idle)의 높이
 PAD = 6
 GRID = 4               # 캐릭터 찾기는 1/4 크기 격자로 (속도)
 _qt_app = None
+
+# 표준 세트 (README 의 Gemini 프롬프트와 같은 순서). 캐릭터당 시트 3장.
+PRESETS = {
+    "move": ["idle_0", "idle_1", "blink", "walk_0", "walk_1", "walk_2", "walk_3", "walk_4", "walk_5"],
+    "react": ["sit_0", "sit_1", "fall", "happy_0", "happy_1", "happy_2", "happy_3", "held_0", "held_1", "held_2"],
+    "life": ["sleep_0", "sleep_1", "wave_0", "wave_1", "skill_0", "skill_1", "run_0", "run_1", "caught"],
+}
 
 
 def chroma_key(src: QImage) -> QImage:
@@ -258,6 +266,8 @@ def main() -> int:
     ap.add_argument("sheet", type=Path)
     ap.add_argument("character", help="캐릭터 키 (reimu, marisa, ...)")
     ap.add_argument("--names", help="찾은 순서대로 붙일 프레임 이름, 쉼표로 구분")
+    ap.add_argument("--preset", choices=sorted(PRESETS),
+                    help="표준 세트 시트의 이름을 자동으로 (move / react / life). --append 도 자동으로 켜짐")
     ap.add_argument("--append", action="store_true",
                     help="기존 그림을 지우지 않고 추가 (같은 이름은 덮어씀) — 시트 여러 장을 합칠 때")
     args = ap.parse_args()
@@ -269,6 +279,9 @@ def main() -> int:
         print(f"그림을 읽지 못했습니다: {args.sheet}")
         return 1
     keyed = chroma_key(src)
+    if args.preset:
+        args.names = args.names or ",".join(PRESETS[args.preset])
+        args.append = True
     wanted = [n.strip() for n in args.names.split(",")] if args.names else None
     blobs, labels, gw = find_blobs(keyed, expected=len(wanted) if wanted else None)
     print(f"캐릭터 {len(blobs)}개 찾음")

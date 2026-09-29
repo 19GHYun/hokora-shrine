@@ -13,7 +13,7 @@ from collections import deque
 from typing import Protocol
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPixmap
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from .render import Character, Pose, draw_character
@@ -42,6 +42,8 @@ FRAMES = {
     "held": (12, 0.628),   # sin(10t) — 버둥 한 번
     "fall": (12, 0.628),
     "jump": (1, 1.0),      # 점프는 만세 자세 한 장
+    "startled": (12, 0.628),
+    "sleep": (8, 4.0),     # 낮잠: 두 장이면 2초마다 숨쉬기  # 깜짝 놀람 (오미쿠지 흉 등) — 붙잡힌 그림 또는 잡혔을 때 그림
 }
 
 
@@ -74,7 +76,8 @@ class SpriteCache:
                 pm.setDevicePixelRatio(self.dpr)
                 pm.fill(Qt.transparent)
                 p = QPainter(pm)
-                draw_character(p, ch, Pose(kind="happy" if kind == "jump" else kind, t=t, facing=facing, blink=blink),
+                code_kind = {"jump": "happy", "startled": "held"}.get(kind, kind)
+                draw_character(p, ch, Pose(kind=code_kind, t=t, facing=facing, blink=blink),
                                QRectF(0, 0, CHAR_W, CHAR_H))
                 p.end()
                 hit = (pm, QPointF(CHAR_W / 2, CHAR_H))
@@ -93,11 +96,11 @@ def sprites() -> SpriteCache:
 
 
 class World(Protocol):
-    """캐릭터가 사는 곳 (Game 이 구현)."""
-    ground_y: float
+    """캐릭터가 사는 곳 (Game 이 구현). 바닥(모니터별 작업표시줄)도 창과 같은 발판이다."""
     left: float
     right: float
     top: float
+    bottom: float      # 가장 낮은 바닥 — 이보다 한참 아래로 떨어지면 구조
 
     climbing: bool     # 창 위에도 올라가기 켜짐
     platforms: list    # 지금 올라설 수 있는 창 윗변들 (winutil.Platform)
@@ -107,6 +110,9 @@ class World(Protocol):
     def find_landing(self, x: float, y0: float, y1: float) -> tuple[float, int | None] | None: ...
     def platform(self, hwnd: int, x: float, win_left: float): ...  # 그 창 윗변 중 올라선 구간 (없으면 None)
     def jump_target(self, pet: "PetWindow") -> tuple[float, float] | None: ...
+    def ground_under(self, x: float): ...                   # x 에 있는 바닥 발판
+    def has_surface_below(self, x: float, y: float) -> bool: ...
+    def portal(self, x: float, direction: int) -> float | None: ...   # 모니터 사이 틈 건너편
 
 
 class PetWindow(QWidget):
@@ -121,7 +127,8 @@ class PetWindow(QWidget):
         self.ch = ch
         self.world = world
         # 발 위치(화면 좌표, 논리 픽셀). QWidget.x()/y() 와 겹치지 않게 pos_ 로.
-        self.pos_x, self.pos_y = x, world.ground_y
+        ground = world.ground_under(x)
+        self.pos_x, self.pos_y = x, ground.y
         self.vx = self.vy = 0.0
         self.facing = random.choice((-1, 1))
         self.state = "idle"
@@ -138,8 +145,8 @@ class PetWindow(QWidget):
         self._drawn_key = None
         self._placed = None
         self._anim_kind, self._anim_start = self.state, self.t
-        self.on: int | None = None       # 올라서 있는 창 (None = 작업표시줄)
-        self._on_left = 0.0              # 그 창의 왼쪽 끝 — 창이 옮겨지면 같이 따라감
+        self.on: int | None = ground.hwnd  # 올라서 있는 발판 (창 hwnd, 작업표시줄 바닥은 음수, 공중은 None)
+        self._on_left = ground.win_left    # 그 창의 왼쪽 끝 — 창이 옮겨지면 같이 따라감
         self._edge_choice: bool | None = None   # 창 끝에 왔을 때 떨어질지(True) 돌아설지(False)
         self._place()
 
@@ -188,6 +195,38 @@ class PetWindow(QWidget):
         self.squash = 0.12
         return True
 
+    def _through_portal(self, x: float) -> None:
+        """모니터 사이 틈 건너편으로. 건너편 바닥이 낮으면 떨어지고, 같거나 높으면 그 위에 선다."""
+        g = self.world.ground_under(x)
+        self.pos_x = x
+        if g.y > self.pos_y + 1:
+            self._drop()
+        else:
+            self.pos_y, self.on, self._on_left = g.y, g.hwnd, g.win_left
+
+    def nap(self) -> None:
+        """그 자리에서 낮잠. 공중·잡힌 상태면 착지한 다음에."""
+        if self.state in ("fall", "jump", "held", "sleep") or self.on is None:
+            return
+        self.state, self.vx = "sleep", 0.0
+        self.state_until = float("inf")
+
+    def wake(self) -> None:
+        if self.state == "sleep":
+            self.state = "idle"
+            self.react(True)
+
+    def react(self, good: bool) -> None:
+        """좋은 일이면 폴짝 기뻐하고, 나쁜 일이면 깜짝 놀란다. 공중·잡힌 상태면 그냥 둔다."""
+        if self.state in ("fall", "jump", "held") or self.on is None:
+            return
+        self.state = "happy" if good else "startled"
+        self._anim_kind, self._anim_start = self.state, self.t
+        self.vx = 0
+        self.state_until = time.monotonic() + (1.0 if good else 1.2)
+        if good:
+            self.hearts.append([0.0, WIN_W / 2, WIN_H - FOOT_MARGIN - CHAR_H])
+
     def _drop(self) -> None:
         """발판이 사라지거나 끝에서 걸어 나감 → 떨어지기 (걷던 속도는 유지)."""
         self.state, self.vy, self.on = "fall", 0.0, None
@@ -233,6 +272,10 @@ class PetWindow(QWidget):
             if self.pos_y - CHAR_H < w.top:
                 self.pos_y = w.top + CHAR_H
                 self.vy = abs(self.vy) * 0.3
+            if self.pos_y > w.bottom + 300:                   # 모니터 사이 빈 곳으로 빠지면 가까운 바닥 위로
+                g = w.ground_under(self.pos_x)
+                self.pos_x = min(max(self.pos_x, g.x1 + 30), g.x2 - 30)
+                self.pos_y, self.vy = g.y - 200, 0.0
             if self.vy > 0:                                   # 내려올 때만 창·작업표시줄에 착지
                 hit = w.find_landing(self.pos_x, prev_y, self.pos_y)
                 if hit is not None:
@@ -245,41 +288,38 @@ class PetWindow(QWidget):
                     else:
                         self._land(y, hwnd, now)
         else:
-            plat = None
-            if self.on is not None:                           # 창 위: 창이 사라지거나 끝을 벗어나면 떨어짐
-                plat = w.platform(self.on, self.pos_x, self._on_left)
-                if plat is None:
-                    self._drop()
-                else:
-                    if plat.win_left != self._on_left:        # 창을 끌어 옮기면 같이
-                        self.pos_x += plat.win_left - self._on_left
-                        self._on_left = plat.win_left
-                    self.pos_y = plat.y
-            elif self.pos_y < w.ground_y - 1:                 # 작업표시줄 높이가 바뀌면 떨어짐
+            # 발판(창 윗변·작업표시줄) 위: 발판이 사라지거나 끝을 벗어나면 떨어짐
+            plat = w.platform(self.on, self.pos_x, self._on_left) if self.on is not None else None
+            if plat is None:
                 self._drop()
-            if self.state == "walk":
+            else:
+                if plat.win_left != self._on_left:            # 창을 끌어 옮기면 같이
+                    self.pos_x += plat.win_left - self._on_left
+                    self._on_left = plat.win_left
+                self.pos_y = plat.y
+            if self.state == "walk" and plat is not None:
                 self.pos_x += self.vx * dt
-                if plat is not None:                          # 창 끝: 돌아서거나 폴짝 떨어지기
-                    at_edge = (self.vx > 0 and self.pos_x > plat.x2 - EDGE) or (self.vx < 0 and self.pos_x < plat.x1 + EDGE)
-                    if at_edge:
+                d = 1 if self.vx > 0 else -1
+                if (d > 0 and self.pos_x > plat.x2 - EDGE) or (d < 0 and self.pos_x < plat.x1 + EDGE):
+                    through = w.portal(self.pos_x, d) if plat.hwnd < 0 else None
+                    if through is not None:                   # 배율이 다른 옆 모니터로 건너가기
+                        self._through_portal(through)
+                    else:                                     # 끝: 아래에 착지할 곳이 있으면 가끔 뛰어내림
                         if self._edge_choice is None:
-                            self._edge_choice = random.random() < 0.45
+                            beyond = (plat.x2 if d > 0 else plat.x1) + d * (EDGE + 6)
+                            chance = 0.6 if plat.hwnd < 0 else 0.45
+                            self._edge_choice = w.has_surface_below(beyond, self.pos_y) and random.random() < chance
                         if not self._edge_choice:
                             self.vx = -self.vx
-                            self.facing = 1 if self.vx > 0 else -1
+                            self.facing = -d
                             self._edge_choice = None
-                else:
-                    lo, hi = w.left + CHAR_W / 2, w.right - CHAR_W / 2
-                    if self.pos_x <= lo or self.pos_x >= hi:
-                        self.pos_x = min(max(self.pos_x, lo), hi)
-                        self.vx = -self.vx
-                        self.facing = 1 if self.vx > 0 else -1
             self.tilt = self.tilt * max(0.0, 1 - dt * 10) if abs(self.tilt) > 0.5 else 0.0
-            if self.state in ("idle", "walk", "sit", "happy") and now >= self.state_until:
+            if self.state in ("idle", "walk", "sit", "happy", "startled") and now >= self.state_until:
                 self._choose_next()
         self._place()
-        # 그림이 바뀔 때만 다시 그림
-        if self._frame_key() != self._drawn_key or self.squash or self.tilt or self.hearts:
+        # 그림이 바뀔 때만 다시 그림 (낮잠 중엔 z 가 떠오르므로 계속)
+        if (self._frame_key() != self._drawn_key or self.squash or self.tilt or self.hearts
+                or self.state == "sleep"):
             self.update()
 
     def _frame_key(self) -> tuple:
@@ -337,6 +377,8 @@ class PetWindow(QWidget):
             p.scale(1 + sq * 0.6, 1 - sq)
         p.drawPixmap(-anchor, pm)
         p.resetTransform()
+        if self.state == "sleep":
+            _zzz(p, WIN_W / 2 + 14, WIN_H - FOOT_MARGIN - CHAR_H + 6, self.t)
         if self.hearts:
             p.setRenderHint(QPainter.Antialiasing)
             for age, hx, hy in self.hearts:
@@ -390,6 +432,18 @@ class PetWindow(QWidget):
             self.state = "fall"
         else:
             self.world.on_pat(self)
+
+
+def _zzz(p: QPainter, x: float, y: float, t: float) -> None:
+    """머리 위로 떠오르며 사라지는 z z z."""
+    f = QFont("Malgun Gothic")
+    f.setBold(True)
+    for i in range(3):
+        phase = (t / 2.4 + i / 3) % 1.0
+        f.setPointSizeF(6 + phase * 5)
+        p.setFont(f)
+        p.setPen(QColor(90, 110, 170, int(230 * (1 - phase))))
+        p.drawText(QPointF(x + phase * 14, y - phase * 26), "z")
 
 
 def _heart(p: QPainter, cx: float, cy: float, size: float, color: QColor) -> None:

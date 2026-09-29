@@ -15,9 +15,10 @@ OUTLINE = QColor(50, 34, 30, 210)
 
 
 class ShrineHost(Protocol):
-    ground_y: float
     left: float
     right: float
+
+    def ground_under(self, x: float): ...     # x 에 있는 바닥 발판 (winutil.Platform)
 
     def on_shrine_clicked(self, global_pos) -> None: ...
     def on_shrine_moved(self, x: float) -> None: ...
@@ -47,13 +48,19 @@ class ShrineWindow(QWidget):
         self.level = level
         w, h = STAGE_SIZE[level]
         self.setFixedSize(w + 20, h + LABEL_SPACE)
-        half = self.width() / 2
-        self.pos_x = min(max(self.pos_x, self.host.left + half), self.host.right - half)
+        self.pos_x = self._clamp(self.pos_x)
         self._place()
         self.update()
 
+    def _clamp(self, x: float) -> float:
+        """신사가 바닥(모니터) 밖으로 나가지 않게."""
+        g = self.host.ground_under(x)
+        half = self.width() / 2
+        return min(max(x, g.x1 + half), g.x2 - half)
+
     def _place(self) -> None:
-        self.move(round(self.pos_x - self.width() / 2), round(self.host.ground_y - self.height() + GROUND_MARGIN))
+        ground = self.host.ground_under(self.pos_x).y
+        self.move(round(self.pos_x - self.width() / 2), round(ground - self.height() + GROUND_MARGIN))
 
     def set_saisen(self, amount: int) -> None:
         self.saisen = amount
@@ -117,8 +124,7 @@ class ShrineWindow(QWidget):
             return
         self._dragging = True
         self.setCursor(Qt.SizeHorCursor)
-        half = self.width() / 2
-        self.pos_x = min(max(x0 + dx, self.host.left + half), self.host.right - half)
+        self.pos_x = self._clamp(x0 + dx)
         self._place()
 
     def mouseReleaseEvent(self, e) -> None:

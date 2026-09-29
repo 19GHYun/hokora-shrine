@@ -39,6 +39,8 @@ class GameState:
     shrine_x: float = 0.82           # 신사 위치 (화면 폭 대비 0~1)
     income_carry: float = 0.0        # 분당 수입의 소수점 이월
     climb: bool = True               # 캐릭터가 열려 있는 창 위에도 올라감
+    omikuji_date: str = ""           # 마지막으로 오미쿠지를 뽑은 날 (YYYY-MM-DD)
+    omikuji_count: int = 0
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
     @property
