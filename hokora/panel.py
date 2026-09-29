@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QPro
 
 from .decor import decor_image
 from .omikuji import can_draw
+from .prayer import WISHES, blocked, fmt_left, income_multiplier, left
 from .progress import UNLOCKS
 from .render import CHARACTERS, Pose, draw_character
 from .sprites import image_sprites
@@ -93,7 +94,7 @@ def _decor_icon(key: str, size: int) -> QPixmap:
 
 class ShrinePanel(QWidget):
     def __init__(self, state: GameState, on_upgrade: Callable[[], None], on_omikuji: Callable[[], None],
-                 on_decor: Callable[[str, str], None], tab: int = 0):
+                 on_decor: Callable[[str, str], None], on_pray: Callable[[str], None], tab: int = 0):
         super().__init__(None, Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_DeleteOnClose, True)
@@ -103,6 +104,7 @@ class ShrinePanel(QWidget):
         self.on_upgrade = on_upgrade
         self.on_omikuji = on_omikuji
         self.on_decor = on_decor
+        self.on_pray = on_pray
         self.setFixedWidth(490)
 
         v = QVBoxLayout(self)
@@ -116,12 +118,13 @@ class ShrinePanel(QWidget):
         v.addWidget(self.sub)
         self.tabs = QTabWidget()
         v.addWidget(self.tabs)
-        page1, page2, page3 = QWidget(), QWidget(), QWidget()
-        p1, p3 = QVBoxLayout(page1), QVBoxLayout(page3)
-        for lay in (p1, p3):
+        page1, page2, page3, page4 = QWidget(), QWidget(), QWidget(), QWidget()
+        p1, p3, p4 = QVBoxLayout(page1), QVBoxLayout(page3), QVBoxLayout(page4)
+        for lay in (p1, p3, p4):
             lay.setContentsMargins(0, 10, 0, 0)
             lay.setSpacing(10)
         self.tabs.addTab(page1, "신사")
+        self.tabs.addTab(page4, "참배")
         self.tabs.addTab(page2, "도감")
         self.tabs.addTab(page3, "꾸미기")
         up = QHBoxLayout()
@@ -185,6 +188,38 @@ class ShrinePanel(QWidget):
             grid.addWidget(card, i // 2, i % 2)
             self.cards[key] = (pic, name, goals)
 
+        # ── 참배 ──
+        tip = QLabel("새전을 넣고 소원을 빌어요. 효과는 껐다 켜도 이어져요.", objectName="goal")
+        tip.setWordWrap(True)
+        p4.addWidget(tip)
+        self.wish_rows: dict[str, tuple] = {}
+        for key, w in WISHES.items():
+            card = QWidget(objectName="card")
+            card.setAttribute(Qt.WA_StyledBackground, True)
+            h = QHBoxLayout(card)
+            h.setContentsMargins(12, 8, 10, 8)
+            icon = QLabel(w.icon)
+            icon.setStyleSheet("font-size: 22px;")
+            icon.setFixedWidth(34)
+            col = QVBoxLayout()
+            col.setSpacing(1)
+            col.addWidget(QLabel(w.name, objectName="name"))
+            desc = QLabel(w.desc, objectName="goal")
+            desc.setWordWrap(True)
+            col.addWidget(desc)
+            status = QLabel(objectName="done")
+            col.addWidget(status)
+            btn = QPushButton(objectName="small")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setMinimumWidth(96)
+            btn.clicked.connect(lambda _=False, k=key: self._pray(k))
+            h.addWidget(icon)
+            h.addLayout(col, 1)
+            h.addWidget(btn)
+            p4.addWidget(card)
+            self.wish_rows[key] = (btn, status)
+        p4.addStretch(1)
+
         # ── 꾸미기 ──
         tip = QLabel("장식을 사서 신사 옆에 놓으면 분당 새전이 늘어요. 놓은 장식은 좌우로 끌어서 옮길 수 있어요.",
                      objectName="goal")
@@ -233,7 +268,18 @@ class ShrinePanel(QWidget):
     def refresh(self) -> None:
         s = self.state
         self.title.setText(f"⛩  {s.stage_name}  ({s.shrine_level}단계)")
-        self.sub.setText(f"새전 {s.saisen:,}   ·   분당 새전 {s.income_per_min}")
+        boost = income_multiplier(s)
+        self.sub.setText(f"새전 {s.saisen:,}   ·   분당 새전 {s.income_per_min * boost}"
+                         + ("  (번영 기원 ×2)" if boost > 1 else ""))
+        drawable = can_draw(s)
+        for key, (btn, status) in self.wish_rows.items():
+            remain = left(s, key)
+            why = blocked(s, key, drawable)
+            status.setText(fmt_left(remain) if remain else "")
+            status.setVisible(bool(remain))
+            btn.setText("효과 중" if remain else f"새전 {WISHES[key].cost(s):,}")
+            btn.setEnabled(not why)
+            btn.setToolTip(why)
         cost = s.next_stage_cost
         if cost is None:
             self.up_label.setText("최고 단계예요. 훌륭한 신사가 됐어요!")
@@ -314,6 +360,13 @@ class ShrinePanel(QWidget):
     def _omikuji(self) -> None:
         self.close()             # 오미쿠지 종이를 띄우려고 창은 닫음
         self.on_omikuji()
+
+    def _pray(self, key: str) -> None:
+        if key == "snack":
+            self.close()                 # 모두 모이는 걸 보이게 창은 닫음
+        self.on_pray(key)
+        if key != "snack":
+            self.refresh()
 
     def _decor_clicked(self, key: str) -> None:
         s = self.state

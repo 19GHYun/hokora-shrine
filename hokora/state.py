@@ -59,7 +59,13 @@ class GameState:
     show_decor: bool = True          # 장식을 화면에 보일지 (꺼도 놓아 둔 장식의 효과는 그대로)
     thief_caught: int = 0
     night_sec: float = 0.0           # 밤(20시~5시)에 함께한 시간 — 레밀리아
-    fate_boost: bool = False         # 레밀리아가 운명을 조작함 → 다음 오미쿠지는 좋은 운세
+    fate_boost: bool = False
+    # 참배(prayer.py): 효과가 끝나는 시각(time.time 기준)
+    buff_income_until: float = 0.0
+    buff_pat_until: float = 0.0
+    charm_until: float = 0.0
+    omikuji_extra: int = 0           # 오늘 더 뽑을 수 있는 오미쿠지 수
+    wishes_made: int = 0         # 레밀리아가 운명을 조작함 → 다음 오미쿠지는 좋은 운세
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
     @property

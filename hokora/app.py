@@ -24,6 +24,8 @@ from .omikuji import FortuneSlip, can_draw
 from .omikuji import draw as draw_omikuji
 from .panel import ShrinePanel
 from .pet import PetWindow
+from .prayer import WISHES, income_multiplier, pat_multiplier
+from .prayer import buy as buy_wish
 from .progress import UNLOCKS, newly_unlocked
 from .render import CHARACTERS, Pose, draw_character
 from .shrine import ShrineWindow
@@ -240,7 +242,7 @@ class Game(QObject):
 
     def _income(self) -> None:
         s = self.state
-        s.income_carry += s.income_per_min * INCOME_EVERY / 60
+        s.income_carry += s.income_per_min * income_multiplier(s) * INCOME_EVERY / 60
         gained = int(s.income_carry)
         if gained:
             s.income_carry -= gained
@@ -330,10 +332,11 @@ class Game(QObject):
             self.events.catch()
             return
         if pet.pat():
+            reward = PAT_REWARD * pat_multiplier(self.state)
             self.state.pats += 1
-            self.state.add_saisen(PAT_REWARD)
+            self.state.add_saisen(reward)
             self.shrine.set_saisen(self.state.saisen)
-            self.shrine.pop(f"+{PAT_REWARD}")
+            self.shrine.pop(f"+{reward}")
             self.check_unlocks()
 
     def on_shrine_moved(self, x: float) -> None:
@@ -347,7 +350,7 @@ class Game(QObject):
     def open_panel(self) -> None:
         if self.panel is not None:
             self.panel.close()
-        self.panel = ShrinePanel(self.state, self.upgrade, self.omikuji, self.on_decor, self._panel_tab)
+        self.panel = ShrinePanel(self.state, self.upgrade, self.omikuji, self.on_decor, self.pray, self._panel_tab)
         self.panel.tabs.currentChanged.connect(lambda i: setattr(self, "_panel_tab", i))
         self.panel.destroyed.connect(lambda *_: setattr(self, "panel", None))
         top = self.shrine.y() + 20
@@ -376,6 +379,23 @@ class Game(QObject):
         if self.napping:                     # 늦게 착지한 캐릭터도 잠들게
             for pet in self.pets:
                 pet.nap()
+
+    # ── 참배 ──
+    def pray(self, key: str) -> None:
+        if not buy_wish(self.state, key, can_draw(self.state)):
+            return
+        w = WISHES[key]
+        log.info("참배: %s", key)
+        self.shrine.set_saisen(self.state.saisen)
+        if key == "snack":
+            self.gather()
+            self.later(1.6, lambda: [p.react(True) for p in self.pets])
+            self._say_at_shrine("간식 시간이다~!")
+        elif key == "omikuji":
+            self._say_at_shrine("소원을 빌었다. 오미쿠지를 한 번 더 뽑을 수 있어요!")
+        else:
+            self._say_at_shrine(f"{w.icon} {w.name}!  {w.desc}")
+        self.save()
 
     # ── 신사 꾸미기 ──
     def set_show_decor(self, on: bool) -> None:

@@ -51,7 +51,7 @@ class Draw:
 
 
 def can_draw(s: GameState, today: date | None = None) -> bool:
-    return s.omikuji_date != (today or date.today()).isoformat()
+    return s.omikuji_date != (today or date.today()).isoformat() or s.omikuji_extra > 0
 
 
 def draw(s: GameState, rng: random.Random | None = None, today: date | None = None) -> Draw:
@@ -60,6 +60,11 @@ def draw(s: GameState, rng: random.Random | None = None, today: date | None = No
     pool = FORTUNES[:2] if s.fate_boost else FORTUNES   # 레밀리아가 운명을 조작했으면 대길·중길만
     fortune = rng.choices(pool, weights=[f.weight for f in pool])[0]
     s.fate_boost = False
+    today_s = (today or date.today()).isoformat()
+    if s.omikuji_date == today_s and s.omikuji_extra > 0:   # 참배로 산 "한 번 더"
+        s.omikuji_extra -= 1
+    elif s.omikuji_date != today_s:
+        s.omikuji_extra = 0                                   # 날이 바뀌면 남은 "한 번 더"는 사라짐
     reward = fortune.reward * s.shrine_level
     s.add_saisen(reward)
     s.omikuji_date = (today or date.today()).isoformat()

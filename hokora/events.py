@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from .bubble import say
 from .omikuji import can_draw
+from .prayer import charm_active
 from .pet import RUN_SPEED as RUN
 
 if TYPE_CHECKING:
@@ -160,7 +161,8 @@ class Events:
         if self.thief is None:
             if now >= self._thief_next_check:
                 self._thief_next_check = now + THIEF_CHECK
-                if now - self._thief_last >= THIEF_COOLDOWN and random.random() < THIEF_CHANCE:
+                if (now - self._thief_last >= THIEF_COOLDOWN and not charm_active(self.game.state)
+                        and random.random() < THIEF_CHANCE):
                     self.start_thief()
             return
         m = self.thief
