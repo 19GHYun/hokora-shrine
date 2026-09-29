@@ -7,6 +7,7 @@ import logging
 import os
 import random
 import sys
+import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -227,6 +228,8 @@ class Game(QObject):
         if self.hidden_for_fullscreen:
             return
         self.state.runtime_sec += dt
+        if not 5 <= time.localtime().tm_hour < 20:
+            self.state.night_sec += dt
         for pet in self.pets:
             pet.step(dt)
         self.shrine.step(dt)

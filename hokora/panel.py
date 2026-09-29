@@ -332,7 +332,7 @@ class ShrinePanel(QWidget):
         lay = page.layout()
         width = self.width() - 36
         ph = lay.heightForWidth(width) if lay.hasHeightForWidth() else page.sizeHint().height()
-        ph = max(ph, page.minimumSizeHint().height())
+        ph = max(ph, page.minimumSizeHint().height()) + 14   # 줄바꿈된 글자가 잘리지 않게 여유
         chrome = self.sizeHint().height() - self.tabs.sizeHint().height()
         self.setFixedHeight(chrome + self.tabs.tabBar().sizeHint().height() + ph + 8)
         if self._anchor is not None:

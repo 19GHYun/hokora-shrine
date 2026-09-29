@@ -454,6 +454,18 @@ CHARACTERS: dict[str, Character] = {
         hair="#E3E7F0", hair_dark="#BCC3D2", eyes="#4F70C8",
         dress="#4764B4", dress_dark="#2F4788", sleeves="#4764B4", shoes="#2E2E3C",
         accessory_front=_sakuya_front),
+    "sanae": Character(
+        key="sanae", name="코치야 사나에",
+        hair="#5FB84E", hair_dark="#469A3A", eyes="#4E9A48",
+        dress="#4A5FB0", dress_dark="#34468A", sleeves="#FFFFFF", shoes="#3C4C8A"),
+    "remilia": Character(
+        key="remilia", name="레밀리아 스칼렛",
+        hair="#9AA4DC", hair_dark="#7A84C0", eyes="#C0303A",
+        dress="#F4C8D0", dress_dark="#E0A4B0", sleeves="#F4C8D0", shoes="#E8A0AC"),
+    "flandre": Character(
+        key="flandre", name="플랑드르 스칼렛",
+        hair="#F4D35E", hair_dark="#D9B23C", eyes="#C0303A",
+        dress="#D8263A", dress_dark="#A8182B", sleeves="#FFFFFF", shoes="#B01E30"),
     "cirno": Character(
         key="cirno", name="치르노",
         hair="#78CCF4", hair_dark="#56AEE0", eyes="#3478E0",

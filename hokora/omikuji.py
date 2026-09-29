@@ -57,7 +57,9 @@ def can_draw(s: GameState, today: date | None = None) -> bool:
 def draw(s: GameState, rng: random.Random | None = None, today: date | None = None) -> Draw:
     """오늘의 운세를 뽑고 새전을 준다 (하루 한 번 — 이미 뽑았으면 호출하지 말 것)."""
     rng = rng or random.Random()
-    fortune = rng.choices(FORTUNES, weights=[f.weight for f in FORTUNES])[0]
+    pool = FORTUNES[:2] if s.fate_boost else FORTUNES   # 레밀리아가 운명을 조작했으면 대길·중길만
+    fortune = rng.choices(pool, weights=[f.weight for f in pool])[0]
+    s.fate_boost = False
     reward = fortune.reward * s.shrine_level
     s.add_saisen(reward)
     s.omikuji_date = (today or date.today()).isoformat()

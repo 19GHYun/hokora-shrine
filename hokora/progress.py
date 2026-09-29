@@ -55,6 +55,17 @@ UNLOCKS: dict[str, Unlock] = {
         "sakuya", "제대로 된 신사가 생겨서 사쿠야가 들렀다.",
         (Goal("신사 키우기", lambda s: s.shrine_level, 2, "단계"),
          Goal("함께한 시간", lambda s: s.runtime_sec, 2 * 3600, "시간"))),
+    "sanae": Unlock(
+        "sanae", "기적을 믿는 무녀, 사나에가 찾아왔다!",
+        (Goal("오미쿠지 뽑기", lambda s: s.omikuji_count, 3, "번"),
+         Goal("신사 키우기", lambda s: s.shrine_level, 2, "단계"))),
+    "remilia": Unlock(
+        "remilia", "달밤에 레밀리아가 날아왔다.",
+        (Goal("밤(저녁 8시~새벽 5시)에 함께한 시간", lambda s: s.night_sec, 3600, "시간"),)),
+    "flandre": Unlock(
+        "flandre", "언니를 따라 플랑드르가 놀러 왔다!",
+        (Goal("레밀리아 만나기", lambda s: 1 if "remilia" in s.unlocked else 0, 1, "명"),
+         Goal("새전 도둑 잡기", lambda s: s.thief_caught, 3, "번"))),
 }
 
 

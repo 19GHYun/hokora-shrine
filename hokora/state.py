@@ -58,6 +58,8 @@ class GameState:
     decor_pos: dict[str, float] = field(default_factory=dict)  # 놓아 둔 장식 → x 위치
     show_decor: bool = True          # 장식을 화면에 보일지 (꺼도 놓아 둔 장식의 효과는 그대로)
     thief_caught: int = 0
+    night_sec: float = 0.0           # 밤(20시~5시)에 함께한 시간 — 레밀리아
+    fate_boost: bool = False         # 레밀리아가 운명을 조작함 → 다음 오미쿠지는 좋은 운세
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
     @property

@@ -15,6 +15,7 @@ import time
 from typing import TYPE_CHECKING
 
 from .bubble import say
+from .omikuji import can_draw
 from .pet import RUN_SPEED as RUN
 
 if TYPE_CHECKING:
@@ -25,7 +26,9 @@ log = logging.getLogger("Hokora.events")
 
 MEET_DIST = 36           # 이만큼 가까이 스치면 인사
 MEET_COOLDOWN = 45.0     # 같은 둘은 이 시간(초) 동안 다시 인사하지 않음
-SKILL_COOLDOWN = {"reimu": 90.0, "cirno": 120.0, "sakuya": 300.0}
+SKILL_COOLDOWN = {"reimu": 90.0, "cirno": 120.0, "sakuya": 300.0,
+                  "sanae": 240.0, "flandre": 180.0, "remilia": 600.0}
+MIRACLE_SAISEN = 10
 TIME_STOP = 3.0
 THIEF_CHECK = 60.0       # 이 간격으로 도둑질할지 주사위
 THIEF_CHANCE = 0.15      # → 평균 7분쯤에 한 번 (최소 간격 아래)
@@ -100,7 +103,43 @@ class Events:
         elif key == "sakuya":
             pet.act("skill", 1.2)
             self.game.later(0.9, lambda: self._time_stop(pet))
+        elif key == "sanae":
+            pet.act("skill", 1.4)
+            self.game.later(1.0, lambda: self._miracle(pet))
+        elif key == "flandre":
+            pet.act("skill", 1.2)
+            targets = [o for o in self.game.pets if o is not pet and o.grounded and o.on == pet.on
+                       and abs(o.pos_x - pet.pos_x) < 220]
+            if targets:
+                pet.facing = 1 if targets[0].pos_x > pet.pos_x else -1
+            self.game.later(0.6, lambda: self._blast(pet, targets))
+            self._say(pet, random.choice(["와장창~!", "같이 놀자!", "꽈광!"]))
+        elif key == "remilia":
+            if not can_draw(self.game.state) or self.game.state.fate_boost:
+                self._skill_at[key] = now - cool + 60    # 조작할 운명이 없으면 1분 뒤 다시
+                return False
+            pet.act("skill", 1.6)
+            self.game.state.fate_boost = True
+            self._say(pet, "오늘의 운명은 내가 정했어.")
+            log.info("레밀리아 운명 조작 → 다음 오미쿠지 대길·중길")
         return True
+
+    def _miracle(self, sanae: "PetWindow") -> None:
+        g = self.game
+        g.state.add_saisen(MIRACLE_SAISEN)
+        g.shrine.set_saisen(g.state.saisen)
+        g.shrine.pop(f"+{MIRACLE_SAISEN}")
+        self._say(sanae, "기적이 일어났어요!")
+        g.check_unlocks()
+
+    def _blast(self, flan: "PetWindow", targets: list) -> None:
+        """레바테인 한 방: 근처 친구들이 통 튕겨 날아간다 (다치진 않음)."""
+        for o in targets:
+            if not o.grounded:
+                continue
+            away = 1 if o.pos_x >= flan.pos_x else -1
+            o.on, o.state = None, "fall"
+            o.vx, o.vy = away * random.uniform(220, 360), -random.uniform(450, 650)
 
     def _nearest(self, pet: "PetWindow", reach: float):
         others = [o for o in self.game.pets if o is not pet and o.on == pet.on and abs(o.pos_x - pet.pos_x) < reach]

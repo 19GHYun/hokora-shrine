@@ -70,7 +70,7 @@ class ImageSprites:
             for k in [kind, *FALLBACK.get(kind, ["idle"])]:
                 numbered = sorted((n for n in self.images if re.fullmatch(rf"{k}_\d+", n)),
                                   key=lambda n: int(n.rsplit("_", 1)[1]))
-                if f"{k}_0" in self.images:             # walk_0, walk_1 … 차례로
+                if numbered and (f"{k}_0" in self.images or k not in self.images):   # walk_0, walk_1 … 차례로 (0번이 빠져도)
                     seq = numbered
                 elif k in self.images:                  # 한 장 (+ 예전 방식 변형 _1, _2)
                     seq = [k] + (numbered if k != "idle" else [])
