@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -55,6 +56,7 @@ class GameState:
     omikuji_count: int = 0
     decor_owned: list[str] = field(default_factory=list)       # 산 장식
     decor_pos: dict[str, float] = field(default_factory=dict)  # 놓아 둔 장식 → x 위치
+    show_decor: bool = True          # 장식을 화면에 보일지 (꺼도 놓아 둔 장식의 효과는 그대로)
     thief_caught: int = 0
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
@@ -94,6 +96,18 @@ class GameState:
         self.saisen -= cost
         self.shrine_level += 1
         return True
+
+
+def _replace_retry(src: Path, dst: Path, tries: int = 8) -> None:
+    """Windows 에선 방금 쓴 파일을 백신·검색 색인이 잠깐 잡고 있어 교체가 거부될 때가 있다 → 잠깐 뒤 다시."""
+    for i in range(tries):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.05 * (i + 1))
 
 
 class SaveStore:
@@ -148,7 +162,7 @@ class SaveStore:
                 json.dump(asdict(state), f, ensure_ascii=False, indent=2)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp, self.path)
+            _replace_retry(tmp, self.path)
             return True
         except OSError:
             log.exception("저장 실패: %s", self.path)

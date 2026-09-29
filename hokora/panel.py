@@ -6,7 +6,7 @@ from typing import Callable
 
 from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton,
+from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton,
                                QTabWidget, QVBoxLayout, QWidget)
 
 from .decor import decor_image
@@ -43,6 +43,8 @@ QPushButton#small:disabled { background: rgba(200,16,46,70); }
 QPushButton#ghost { background: #FFFFFF; color: #9E1027; border: 1px solid rgba(200,16,46,110); border-radius: 6px;
                     padding: 4px 8px; font-family: 'Malgun Gothic'; font-size: 11px; font-weight: 700; }
 QPushButton#ghost:hover { background: #FBE3E7; }
+QCheckBox { color: #2B1D21; font-family: 'Malgun Gothic'; font-size: 12px; font-weight: 700; }
+QCheckBox::indicator { width: 15px; height: 15px; }
 QTabWidget::pane { border: none; }
 QTabBar::tab { background: transparent; color: #8C7479; padding: 6px 16px; margin-right: 4px;
                font-family: 'Malgun Gothic'; font-size: 12px; font-weight: 700;
@@ -188,6 +190,11 @@ class ShrinePanel(QWidget):
                      objectName="goal")
         tip.setWordWrap(True)
         p3.addWidget(tip)
+        self.view_box = QCheckBox("신사 옆에 장식 보이기  (꺼도 효과는 그대로)")
+        self.view_box.setCursor(Qt.PointingHandCursor)
+        self.view_box.setChecked(state.show_decor)
+        self.view_box.toggled.connect(lambda on: self.on_decor("", "show" if on else "hide"))
+        p3.addWidget(self.view_box)
         dgrid = QGridLayout()
         dgrid.setSpacing(6)
         self.decor_rows: dict[str, tuple] = {}

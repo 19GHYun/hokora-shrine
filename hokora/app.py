@@ -199,7 +199,8 @@ class Game(QObject):
 
     def windows(self):
         """뒤 → 앞 순서 (맨 위로 다시 올릴 때 이 순서대로라 캐릭터가 가장 앞)."""
-        return [*self.decors.values(), self.shrine, *self.pets]
+        decors = list(self.decors.values()) if self.state.show_decor else []   # 숨긴 장식은 다시 띄우지 않음
+        return [*decors, self.shrine, *self.pets]
 
     def later(self, seconds: float, fn) -> None:
         QTimer.singleShot(int(seconds * 1000), fn)
@@ -374,8 +375,19 @@ class Game(QObject):
                 pet.nap()
 
     # ── 신사 꾸미기 ──
+    def set_show_decor(self, on: bool) -> None:
+        """장식을 보이거나 숨김. 숨겨도 놓아 둔 장식의 새전 보너스는 그대로."""
+        self.state.show_decor = on
+        for win in self.decors.values():
+            win.setVisible(on and not self.hidden_for_fullscreen)
+        log.info("장식 %s", "보임" if on else "숨김")
+        self.save()
+
     def on_decor(self, key: str, action: str) -> None:
         s = self.state
+        if action in ("show", "hide"):
+            self.set_show_decor(action == "show")
+            return
         if action == "buy":
             if not s.buy_decor(key):
                 return
@@ -386,10 +398,11 @@ class Game(QObject):
             win = DecorWindow(self, key, self._decor_spot(key))
             self.decors[key] = win
             s.decor_pos[key] = win.pos_x
-            if not self.hidden_for_fullscreen:
+            if not self.hidden_for_fullscreen and s.show_decor:
                 win.show()
             name = DECOR[key][0]
-            self._say_at_shrine(f"{name}{_eul(name)} 놓았다!  분당 새전 +{DECOR[key][2]}")
+            hidden = "" if s.show_decor else "  (장식 숨김 중)"
+            self._say_at_shrine(f"{name}{_eul(name)} 놓았다!  분당 새전 +{DECOR[key][2]}{hidden}")
         elif action == "remove" and key in self.decors:
             self.decors.pop(key).close()
             s.decor_pos.pop(key, None)
@@ -473,6 +486,11 @@ class Game(QObject):
         if can_draw(s):
             menu.addAction("오늘의 오미쿠지 뽑기", self.omikuji)
         menu.addAction("모두 불러오기", self.gather)
+        if s.decor_pos:
+            view = QAction("장식 보이기  (꺼도 효과는 그대로)", menu, checkable=True)
+            view.setChecked(s.show_decor)
+            view.toggled.connect(self.set_show_decor)
+            menu.addAction(view)
         climb = QAction("창 위에도 올라가기", menu, checkable=True)
         climb.setChecked(s.climb)
         climb.toggled.connect(self.set_climb)
