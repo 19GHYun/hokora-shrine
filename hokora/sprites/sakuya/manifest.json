@@ -1,26 +1,97 @@
 {
-  "canvas": [
-    160,
-    212
-  ],
-  "anchor": [
-    80,
-    206
-  ],
+  "version": 2,
   "standing_height": 200,
   "facing": 1,
-  "frames": [
-    "idle",
-    "blink",
-    "walk_0",
-    "walk_1",
-    "sit",
-    "happy",
-    "held",
-    "sit_1",
-    "happy_1",
-    "fall",
-    "sleep"
-  ],
-  "source": "Gemini_Generated_Image_w9b67cw9b67cw9b6.png"
+  "frames": {
+    "idle": [
+      80,
+      206
+    ],
+    "blink": [
+      81,
+      206
+    ],
+    "walk_0": [
+      75,
+      200
+    ],
+    "walk_1": [
+      74,
+      198
+    ],
+    "sit": [
+      80,
+      206
+    ],
+    "happy": [
+      80,
+      206
+    ],
+    "held": [
+      80,
+      206
+    ],
+    "sit_1": [
+      80,
+      206
+    ],
+    "happy_1": [
+      65,
+      212
+    ],
+    "fall": [
+      80,
+      206
+    ],
+    "sleep": [
+      80,
+      206
+    ],
+    "walk_2": [
+      75,
+      203
+    ],
+    "walk_3": [
+      76,
+      203
+    ],
+    "walk_4": [
+      76,
+      202
+    ],
+    "walk_5": [
+      76,
+      203
+    ],
+    "idle_0": [
+      81,
+      206
+    ],
+    "idle_1": [
+      81,
+      206
+    ],
+    "happy_0": [
+      77,
+      202
+    ],
+    "happy_2": [
+      65,
+      187
+    ],
+    "held_0": [
+      82,
+      217
+    ],
+    "held_1": [
+      81,
+      219
+    ]
+  },
+  "sources": [
+    "Gemini_Generated_Image_w9b67cw9b67cw9b6.png",
+    "sakuya1.png",
+    "sakuya2.png",
+    "sakuya1.png"
+  ]
 }

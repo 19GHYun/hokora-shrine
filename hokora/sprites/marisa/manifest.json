@@ -1,26 +1,105 @@
 {
-  "canvas": [
-    162,
-    212
-  ],
-  "anchor": [
-    81,
-    206
-  ],
+  "version": 2,
   "standing_height": 200,
   "facing": 1,
-  "frames": [
-    "idle",
-    "blink",
-    "walk_0",
-    "walk_1",
-    "sit",
-    "happy",
-    "held",
-    "sit_1",
-    "happy_1",
-    "fall",
-    "sleep"
-  ],
-  "source": "Gemini_Generated_Image_u1flfzu1flfzu1fl.png"
+  "frames": {
+    "idle": [
+      81,
+      206
+    ],
+    "blink": [
+      71,
+      206
+    ],
+    "walk_0": [
+      74,
+      201
+    ],
+    "walk_1": [
+      73,
+      198
+    ],
+    "sit": [
+      81,
+      206
+    ],
+    "happy": [
+      81,
+      206
+    ],
+    "held": [
+      81,
+      206
+    ],
+    "sit_1": [
+      81,
+      206
+    ],
+    "happy_1": [
+      65,
+      209
+    ],
+    "fall": [
+      81,
+      206
+    ],
+    "sleep": [
+      81,
+      206
+    ],
+    "walk_2": [
+      75,
+      203
+    ],
+    "walk_3": [
+      74,
+      203
+    ],
+    "walk_4": [
+      74,
+      202
+    ],
+    "walk_5": [
+      75,
+      205
+    ],
+    "idle_0": [
+      72,
+      206
+    ],
+    "idle_1": [
+      72,
+      206
+    ],
+    "happy_0": [
+      66,
+      184
+    ],
+    "happy_2": [
+      65,
+      224
+    ],
+    "happy_3": [
+      66,
+      175
+    ],
+    "held_0": [
+      67,
+      195
+    ],
+    "held_1": [
+      69,
+      198
+    ],
+    "held_2": [
+      74,
+      193
+    ]
+  },
+  "sources": [
+    "Gemini_Generated_Image_u1flfzu1flfzu1fl.png",
+    "marisa1.png",
+    "marisa2.png",
+    "marisa1.png"
+  ]
 }

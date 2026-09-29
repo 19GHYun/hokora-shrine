@@ -1,26 +1,105 @@
 {
-  "canvas": [
-    156,
-    216
-  ],
-  "anchor": [
-    78,
-    210
-  ],
+  "version": 2,
   "standing_height": 200,
   "facing": 1,
-  "frames": [
-    "idle",
-    "blink",
-    "walk_0",
-    "walk_1",
-    "sit",
-    "happy",
-    "held",
-    "sit_1",
-    "happy_1",
-    "fall",
-    "sleep"
-  ],
-  "source": "Gemini_Generated_Image_yizj9yizj9yizj9y.png"
+  "frames": {
+    "idle": [
+      78,
+      210
+    ],
+    "blink": [
+      75,
+      206
+    ],
+    "walk_0": [
+      68,
+      203
+    ],
+    "walk_1": [
+      67,
+      200
+    ],
+    "sit": [
+      78,
+      210
+    ],
+    "happy": [
+      78,
+      210
+    ],
+    "held": [
+      78,
+      210
+    ],
+    "sit_1": [
+      78,
+      210
+    ],
+    "happy_1": [
+      71,
+      257
+    ],
+    "fall": [
+      78,
+      210
+    ],
+    "sleep": [
+      78,
+      210
+    ],
+    "walk_2": [
+      64,
+      208
+    ],
+    "walk_3": [
+      67,
+      202
+    ],
+    "walk_4": [
+      67,
+      201
+    ],
+    "walk_5": [
+      67,
+      205
+    ],
+    "idle_0": [
+      75,
+      206
+    ],
+    "idle_1": [
+      74,
+      206
+    ],
+    "happy_0": [
+      73,
+      204
+    ],
+    "happy_2": [
+      76,
+      269
+    ],
+    "happy_3": [
+      72,
+      202
+    ],
+    "held_0": [
+      75,
+      225
+    ],
+    "held_1": [
+      81,
+      231
+    ],
+    "held_2": [
+      83,
+      230
+    ]
+  },
+  "sources": [
+    "Gemini_Generated_Image_yizj9yizj9yizj9y.png",
+    "cirno1.png",
+    "cirno2.png",
+    "cirno1.png"
+  ]
 }

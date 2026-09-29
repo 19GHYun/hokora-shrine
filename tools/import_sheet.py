@@ -5,6 +5,7 @@ AI로 뽑은 초록 배경 스프라이트 시트 → 게임용 캐릭터 그림
   python tools/import_sheet.py 시트.png reimu --names idle,blink,walk_0,walk_1,sit,...
   python tools/import_sheet.py 시트.png reimu            (이름 없이: 번호가 붙은 미리보기만)
   python tools/import_sheet.py 걷기.png reimu --append --names walk_0,walk_1,...   (기존 그림에 추가)
+  이름 자리에 - 를 쓰면 그 장면은 버림 (예: happy_0,-,happy_1)
 
 하는 일
   1. 초록 배경(#00FF00 근처)과 워터마크를 투명하게, 가장자리의 초록 번짐 제거
@@ -131,6 +132,11 @@ def find_blobs(img: QImage, expected: int | None = None):
                         labels[n] = lab
                         q.append(n)
         comps.append([x0, y0, x1, y1, area, lab])
+    # 칸 구분선처럼 아주 가늘고 긴 것은 캐릭터가 아님 (라벨은 남겨 두어 잘라낼 때 지워지게)
+    lines = [c for c in comps if (c[2] - c[0] + 1) <= 3 or (c[3] - c[1] + 1) > 8 * (c[2] - c[0] + 1)]
+    if lines:
+        print(f"선 {len(lines)}개는 캐릭터가 아니라서 무시")
+        comps = [c for c in comps if c not in lines]
     if not comps:
         return [], labels, gw
     # 작은 조각(떨어진 손끝·먼지)은 가장 가까운 큰 덩어리에 합치기
@@ -273,15 +279,33 @@ def main() -> int:
         args.names = None
 
     frames = [tight(keyed, b, labels, gw) for b in blobs]
-    lifts = _lifts(frames, names)
+    lifts = _lifts(frames, names)          # 점프 높이는 빼는 장면까지 포함한 같은 줄 기준으로
+    keep = [i for i, n in enumerate(names) if n != "-"]   # 이름이 - 인 장면은 버림
+    if len(keep) != len(names):
+        print(f"{len(names) - len(keep)}개 장면은 빼고 저장")
+    frames, names, lifts = [frames[i] for i in keep], [names[i] for i in keep], [lifts[i] for i in keep]
     for name, lift in zip(names, lifts):
         if lift:
             print(f"  {name}: 바닥에서 {lift / frames[0][0].height() * 100:.0f}% 떠 있음 (점프 유지)")
-    # 크기 기준: 서 있는 그림(idle / idle_0), 없으면(걷기 시트 등) 가장 키가 큰 그림 = 서 있는 높이
-    ref = next((names.index(n) for n in ("idle", "idle_0") if n in names),
-               max(range(len(frames)), key=lambda i: frames[i][0].height() if not names[i].startswith("happy")
-                   else 0))
-    scale = STANDING_PX / frames[ref][0].height()
+    # 걷기 그림 중 AI가 유난히 크게/작게 그린 장면은 중앙값 ±3% 안으로 (걸을 때 몸이 커졌다 작아지는 것 방지,
+    # 몸이 살짝 오르내리는 정도의 차이는 남김)
+    fix = [1.0] * len(frames)
+    walk_h = sorted(frames[i][0].height() for i, n in enumerate(names) if n.startswith("walk"))
+    if walk_h:
+        med = walk_h[len(walk_h) // 2]
+        for i, n in enumerate(names):
+            h = frames[i][0].height()
+            if n.startswith("walk") and not med * 0.97 <= h <= med * 1.03:
+                fix[i] = min(max(h, med * 0.97), med * 1.03) / h
+                print(f"  {n}: 다른 걷기 장면보다 {(h / med - 1) * 100:+.0f}% 커서 맞춤")
+    # 크기 기준: 서 있는 그림(idle / idle_0). 없으면(걷기 시트) 걷기 중앙값이 서 있는 키의 98.5%가 되게
+    ref = next((names.index(n) for n in ("idle", "idle_0") if n in names), None)
+    if ref is not None:
+        scale = STANDING_PX / frames[ref][0].height()
+    elif walk_h:
+        scale = STANDING_PX * 0.985 / walk_h[len(walk_h) // 2]
+    else:
+        scale = STANDING_PX / max(img.height() for img, _, _ in frames)
 
     out_dir = SPRITES / args.character
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -295,16 +319,17 @@ def main() -> int:
             old.unlink()
 
     # 그림마다 딱 맞는 캔버스 + 발 위치(몸 무게중심 x, 바닥 y)를 따로 저장
-    for (img, cx, _), name, lift in zip(frames, names, lifts):
-        tw, th = img.width() * scale, img.height() * scale
+    for (img, cx, _), name, lift, f in zip(frames, names, lifts, fix):
+        sc = scale * f
+        tw, th = img.width() * sc, img.height() * sc
         lift *= scale                                         # 점프 높이 (바닥선 위로)
-        ax = int(max(cx * scale, tw - cx * scale)) + PAD      # 무게중심 좌우로 같은 폭
+        ax = int(max(cx * sc, tw - cx * sc)) + PAD            # 무게중심 좌우로 같은 폭
         canvas = QImage(ax * 2, int(th + lift) + PAD * 2, QImage.Format_ARGB32_Premultiplied)
         canvas.fill(Qt.transparent)
         p = QPainter(canvas)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         ay = canvas.height() - PAD
-        p.drawImage(QRectF(ax - cx * scale, ay - lift - th, tw, th), img)
+        p.drawImage(QRectF(ax - cx * sc, ay - lift - th, tw, th), img)
         p.end()
         canvas.save(str(out_dir / f"{name}.png"))
         anchors[name] = [ax, ay]
