@@ -17,11 +17,12 @@ SAVE_FILE = DATA_DIR / "save.json"
 LOG_DIR = DATA_DIR / "logs"
 
 # ── 경제 ──
-SHRINE_STAGES = {  # 단계 → (이름, 분당 새전)
-    1: ("호코라", 2),
-    2: ("신사", 5),
-    3: ("대신사", 12),
+SHRINE_STAGES = {  # 단계 → (이름, 분당 새전, 이 단계로 올리는 비용)
+    1: ("호코라", 2, 0),
+    2: ("신사", 5, 300),
+    3: ("대신사", 12, 1500),
 }
+MAX_STAGE = max(SHRINE_STAGES)
 PAT_REWARD = 1           # 쓰다듬기 한 번에 새전
 PAT_COOLDOWN = 1.5       # 같은 캐릭터를 연타해도 보상은 이 간격(초)마다
 
@@ -48,9 +49,23 @@ class GameState:
     def income_per_min(self) -> int:
         return SHRINE_STAGES[self.shrine_level][1]
 
+    @property
+    def next_stage_cost(self) -> int | None:
+        """다음 단계로 올리는 비용 (이미 최고 단계면 None)."""
+        nxt = SHRINE_STAGES.get(self.shrine_level + 1)
+        return nxt[2] if nxt else None
+
     def add_saisen(self, amount: int) -> None:
         self.saisen += amount
         self.saisen_total += amount
+
+    def upgrade_shrine(self) -> bool:
+        cost = self.next_stage_cost
+        if cost is None or self.saisen < cost:
+            return False
+        self.saisen -= cost
+        self.shrine_level += 1
+        return True
 
 
 class SaveStore:

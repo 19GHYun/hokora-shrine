@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""작업표시줄 위의 신사 건물. 단계가 오를수록 커진다 (1단계: 작은 호코라)."""
+"""작업표시줄 위의 신사 건물. 단계가 오를수록 커진다 (호코라 → 신사 → 대신사)."""
 from __future__ import annotations
 
 from typing import Protocol
@@ -8,8 +8,9 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
-WIN_W, WIN_H = 120, 132
 GROUND_MARGIN = 2
+LABEL_SPACE = 32          # 건물 위 말풍선(새전 수·+N) 자리
+STAGE_SIZE = {1: (100, 100), 2: (150, 120), 3: (200, 140)}   # 단계별 건물 그림 크기 (바닥 = 아래)
 OUTLINE = QColor(50, 34, 30, 210)
 
 
@@ -29,21 +30,30 @@ class ShrineWindow(QWidget):
                          | Qt.NoDropShadowWindowHint | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
-        self.setFixedSize(WIN_W, WIN_H)
         self.setCursor(Qt.PointingHandCursor)
         self.setMouseTracking(True)
         self.host = host
         self.pos_x = x  # 가운데 x (QWidget.x() 와 겹치지 않게)
-        self.level = level
+        self.level = 0
         self.saisen = 0
         self.pops: list[list] = []      # [나이, 글자]
         self.hover = False
         self._press = None
         self._dragging = False
+        self.set_level(level)
+
+    def set_level(self, level: int) -> None:
+        """신사 단계가 바뀌면 창 크기도 건물에 맞게."""
+        self.level = level
+        w, h = STAGE_SIZE[level]
+        self.setFixedSize(w + 20, h + LABEL_SPACE)
+        half = self.width() / 2
+        self.pos_x = min(max(self.pos_x, self.host.left + half), self.host.right - half)
         self._place()
+        self.update()
 
     def _place(self) -> None:
-        self.move(round(self.pos_x - WIN_W / 2), round(self.host.ground_y - WIN_H + GROUND_MARGIN))
+        self.move(round(self.pos_x - self.width() / 2), round(self.host.ground_y - self.height() + GROUND_MARGIN))
 
     def set_saisen(self, amount: int) -> None:
         self.saisen = amount
@@ -64,21 +74,22 @@ class ShrineWindow(QWidget):
     def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        # 건물은 창 아래쪽 100×100 영역에 (바닥 = 창 아래)
+        # 건물은 창 아래쪽에 (바닥 = 창 아래)
+        bw, bh = STAGE_SIZE[self.level]
         p.save()
-        p.translate((WIN_W - 100) / 2, WIN_H - GROUND_MARGIN - 100)
-        draw_hokora(p)
+        p.translate((self.width() - bw) / 2, self.height() - GROUND_MARGIN - bh)
+        DRAW_STAGE[self.level](p)
         p.restore()
         f = QFont("Malgun Gothic", 9)
         f.setBold(True)
         p.setFont(f)
         if self.hover and not self._dragging:
-            _label(p, QRectF(0, 0, WIN_W, 22), f"새전 {self.saisen:,}")
+            _label(p, QRectF(0, 0, self.width(), 22), f"새전 {self.saisen:,}")
         for age, text in self.pops:
             a = max(0.0, 1 - age / 1.6)
             y = 26 - age * 18
             p.setPen(QColor(200, 140, 20, int(255 * a)))
-            p.drawText(QRectF(0, y, WIN_W, 20), Qt.AlignCenter, text)
+            p.drawText(QRectF(0, y, self.width(), 20), Qt.AlignCenter, text)
         p.end()
 
     # ── 마우스: 누르면 메뉴, 끌면 옆으로 옮기기 ──
@@ -106,7 +117,7 @@ class ShrineWindow(QWidget):
             return
         self._dragging = True
         self.setCursor(Qt.SizeHorCursor)
-        half = WIN_W / 2
+        half = self.width() / 2
         self.pos_x = min(max(x0 + dx, self.host.left + half), self.host.right - half)
         self._place()
 
@@ -220,3 +231,149 @@ def draw_hokora(p: QPainter) -> None:
     p.setFont(QFont("Malgun Gothic", 5))
     p.setPen(QColor("#F3E3B0"))
     p.drawText(QRectF(38, 91, 24, 7), Qt.AlignCenter, "賽銭")
+
+
+# ─────────────────────────────── 2·3단계 ───────────────────────────────
+VERMILION = QColor("#D9412E")       # 신사 주홍색
+VERMILION_DARK = QColor("#A82A1E")
+
+
+def _torii(p: QPainter, x: float, ground: float, w: float, h: float) -> None:
+    """빨간 도리이. x = 왼쪽 끝."""
+    p.setPen(QPen(OUTLINE, 1.4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    post_w = w * 0.12
+    top = ground - h
+    grad = QLinearGradient(x, 0, x + w, 0)
+    grad.setColorAt(0, VERMILION)
+    grad.setColorAt(1, VERMILION_DARK)
+    p.setBrush(grad)
+    for px in (x + w * 0.14, x + w * 0.86 - post_w):          # 기둥 두 개
+        p.drawRect(QRectF(px, top + h * 0.14, post_w, h * 0.86))
+    p.drawRect(QRectF(x + w * 0.08, top + h * 0.32, w * 0.84, h * 0.07))   # 아래 가로대(누키)
+    kasagi = QPainterPath()                                   # 위 가로대(가사기): 양끝이 살짝 올라감
+    kasagi.moveTo(x - w * 0.06, top)
+    kasagi.quadTo(x + w / 2, top + h * 0.08, x + w * 1.06, top)
+    kasagi.lineTo(x + w * 1.0, top + h * 0.12)
+    kasagi.quadTo(x + w / 2, top + h * 0.17, x, top + h * 0.12)
+    kasagi.closeSubpath()
+    p.setBrush(QColor("#3A2E32"))
+    p.drawPath(kasagi)
+    p.setBrush(VERMILION)
+    p.drawRect(QRectF(x + w * 0.02, top + h * 0.12, w * 0.96, h * 0.06))
+    p.drawRect(QRectF(x + w * 0.46, top + h * 0.17, w * 0.08, h * 0.15))   # 가운데 현판 기둥
+
+
+def _lantern(p: QPainter, cx: float, ground: float, h: float) -> None:
+    """돌등롱."""
+    p.setPen(QPen(OUTLINE, 1.2))
+    stone = QLinearGradient(cx - h * 0.3, 0, cx + h * 0.3, 0)
+    stone.setColorAt(0, QColor("#C4BFB8"))
+    stone.setColorAt(1, QColor("#8E8882"))
+    p.setBrush(stone)
+    w = h * 0.42
+    p.drawRect(QRectF(cx - w * 0.55, ground - h * 0.12, w * 1.1, h * 0.12))         # 받침
+    p.drawRect(QRectF(cx - w * 0.14, ground - h * 0.55, w * 0.28, h * 0.43))        # 기둥
+    p.drawRect(QRectF(cx - w * 0.42, ground - h * 0.78, w * 0.84, h * 0.23))        # 불집
+    p.setBrush(QColor(255, 214, 120, 230))
+    p.drawRect(QRectF(cx - w * 0.2, ground - h * 0.73, w * 0.4, h * 0.13))          # 불빛
+    p.setBrush(stone)
+    p.drawPath(_poly([(cx - w * 0.62, ground - h * 0.78), (cx, ground - h * 0.98),
+                      (cx + w * 0.62, ground - h * 0.78)]))                          # 지붕
+
+
+def _hall(p: QPainter, x: float, ground: float, w: float, h: float, grand: bool) -> None:
+    """본전: 돌 기단 + 주홍 기둥과 흰 벽 + 휘어 올라간 지붕(대신사는 2층 지붕)."""
+    pen = QPen(OUTLINE, 1.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    p.setPen(pen)
+    base_h = h * 0.14
+    stone = QLinearGradient(0, ground - base_h, 0, ground)
+    stone.setColorAt(0, QColor("#B9B4AE"))
+    stone.setColorAt(1, QColor("#8E8882"))
+    p.setBrush(stone)
+    p.drawRoundedRect(QRectF(x, ground - base_h, w, base_h), 2, 2)
+    body_top = ground - base_h - h * 0.34
+    body = QRectF(x + w * 0.12, body_top, w * 0.76, h * 0.34)
+    p.setBrush(QColor("#F4EDE2"))
+    p.drawRect(body)
+    p.setBrush(VERMILION)
+    for i in range(4):                                         # 주홍 기둥
+        px = body.left() + i * (body.width() - w * 0.05) / 3
+        p.drawRect(QRectF(px, body_top, w * 0.05, body.height()))
+    p.setBrush(QColor("#7C5230"))                              # 가운데 문
+    p.drawRect(QRectF(x + w * 0.42, body_top + body.height() * 0.3, w * 0.16, body.height() * 0.7))
+
+    def roof(top_y: float, span: float, depth: float) -> None:
+        cx = x + w / 2
+        path = QPainterPath()
+        path.moveTo(cx - span / 2, top_y + depth)
+        path.quadTo(cx - span * 0.25, top_y + depth * 0.8, cx, top_y)
+        path.quadTo(cx + span * 0.25, top_y + depth * 0.8, cx + span / 2, top_y + depth)
+        path.lineTo(cx + span / 2 - 4, top_y + depth + 4)
+        path.quadTo(cx, top_y + depth * 0.45, cx - span / 2 + 4, top_y + depth + 4)
+        path.closeSubpath()
+        g = QLinearGradient(0, top_y, 0, top_y + depth)
+        g.setColorAt(0, QColor("#5B4A4E"))
+        g.setColorAt(1, QColor("#3A2E32"))
+        p.setPen(pen)
+        p.setBrush(g)
+        p.drawPath(path)
+        p.setBrush(QColor("#E8C048"))
+        p.drawEllipse(QRectF(cx - 3, top_y - 3, 6, 6))           # 용마루 금장식
+
+    if grand:  # 2층: 작은 벽 위에 윗지붕 (아래 지붕보다 먼저 그려 아래 지붕이 벽 밑동을 덮게)
+        p.setPen(pen)
+        p.setBrush(QColor("#F4EDE2"))
+        p.drawRect(QRectF(x + w * 0.3, body_top - h * 0.36, w * 0.4, h * 0.24))
+        p.setBrush(VERMILION)
+        for fx in (0.3, 0.675):
+            p.drawRect(QRectF(x + w * fx, body_top - h * 0.36, w * 0.025, h * 0.24))
+        roof(body_top - h * 0.56, w * 0.62, h * 0.24)
+    roof(body_top - h * 0.30, w * 1.02, h * 0.34)
+    # 금줄 + 방울 줄
+    rope = QPainterPath()
+    rope.moveTo(x + w * 0.2, body_top + 3)
+    rope.quadTo(x + w / 2, body_top + 12, x + w * 0.8, body_top + 3)
+    p.setPen(QPen(QColor("#E6D29A"), 3.2, Qt.SolidLine, Qt.RoundCap))
+    p.setBrush(Qt.NoBrush)
+    p.drawPath(rope)
+    p.setPen(QPen(QColor("#C8102E"), 2.0))
+    p.drawLine(QPointF(x + w / 2, body_top + 8), QPointF(x + w / 2, body_top + body.height() * 0.8))
+    p.setPen(QPen(OUTLINE, 1.0))
+    p.setBrush(QColor("#E8C048"))
+    p.drawEllipse(QRectF(x + w / 2 - 4, body_top + 6, 8, 8))     # 방울
+    # 새전함
+    p.setPen(pen)
+    box = QRectF(x + w * 0.34, ground - base_h - 2, w * 0.32, base_h * 0.9)
+    g = QLinearGradient(0, box.top(), 0, box.bottom())
+    g.setColorAt(0, QColor("#B77E4C"))
+    g.setColorAt(1, QColor("#8A5A32"))
+    p.setBrush(g)
+    p.drawRect(box)
+    p.setPen(QPen(QColor(60, 36, 20, 170), 1.2))
+    for i in range(6):
+        bx = box.left() + 3 + i * (box.width() - 6) / 5
+        p.drawLine(QPointF(bx, box.top() + 2), QPointF(bx, box.top() + box.height() * 0.45))
+
+
+def _shadow(p: QPainter, x: float, w: float, ground: float) -> None:
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(0, 0, 0, 45))
+    p.drawEllipse(QRectF(x, ground - 4, w, 8))
+
+
+def draw_jinja(p: QPainter) -> None:
+    """2단계 신사: 도리이 + 본전. 150×120, 바닥 y=120."""
+    _shadow(p, 4, 142, 120)
+    _torii(p, 4, 120, 50, 78)
+    _hall(p, 58, 120, 90, 100, grand=False)
+
+
+def draw_taisha(p: QPainter) -> None:
+    """3단계 대신사: 도리이 + 돌등롱 + 2층 지붕 본전. 200×140, 바닥 y=140."""
+    _shadow(p, 4, 192, 140)
+    _torii(p, 4, 140, 58, 96)
+    _lantern(p, 74, 140, 44)
+    _hall(p, 84, 140, 112, 132, grand=True)
+
+
+DRAW_STAGE = {1: draw_hokora, 2: draw_jinja, 3: draw_taisha}

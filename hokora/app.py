@@ -16,7 +16,10 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import __version__, winutil
+from .bubble import say
+from .panel import ShrinePanel
 from .pet import PetWindow
+from .progress import UNLOCKS, newly_unlocked
 from .render import CHARACTERS, Pose, draw_character
 from .shrine import ShrineWindow
 from .state import APP_NAME, LOG_DIR, PAT_REWARD, SaveStore
@@ -96,6 +99,8 @@ class Game(QObject):
         self.tick_timer = QTimer(self, timeout=self._tick, interval=1000 // FPS_CALM)
         self.income_timer = QTimer(self, timeout=self._income, interval=INCOME_EVERY * 1000)
         self.save_timer = QTimer(self, timeout=self.save, interval=SAVE_EVERY * 1000)
+        self.unlock_timer = QTimer(self, timeout=self.check_unlocks, interval=30_000)   # 시간 조건(사쿠야)
+        self.panel: ShrinePanel | None = None
         self.watch_timer = QTimer(self, timeout=self._watch, interval=1500)
         # 창 위 발판: 캐릭터가 창 위에 있으면 자주(창을 끌면 따라가게), 아니면 가끔 새로 읽음
         self.platforms: list[winutil.Platform] = []
@@ -118,10 +123,11 @@ class Game(QObject):
         self.shrine._place()
         log.info("화면 영역 변경 → 바닥 y=%s", self.ground_y)
 
-    def _spawn(self, key: str) -> None:
+    def _spawn(self, key: str) -> PetWindow:
         x = random.uniform(self.left + 80, self.right - 80)
         pet = PetWindow(CHARACTERS[key], self, x)
         self.pets.append(pet)
+        return pet
 
     def windows(self):
         return [self.shrine, *self.pets]
@@ -132,6 +138,7 @@ class Game(QObject):
         self.tick_timer.start()
         self.income_timer.start()
         self.save_timer.start()
+        self.unlock_timer.start()
         self.watch_timer.start()
         self.platform_timer.start()
         self._refresh_platforms()
@@ -160,6 +167,7 @@ class Game(QObject):
             self.shrine.set_saisen(s.saisen)
             if not self.hidden_for_fullscreen:
                 self.shrine.pop(f"+{gained}")
+            self.check_unlocks()
 
     def _watch(self) -> None:
         """전체화면(게임·영상)이면 숨기고, 아니면 다시 맨 위로."""
@@ -231,12 +239,53 @@ class Game(QObject):
             self.state.add_saisen(PAT_REWARD)
             self.shrine.set_saisen(self.state.saisen)
             self.shrine.pop(f"+{PAT_REWARD}")
+            self.check_unlocks()
 
     def on_shrine_moved(self, x: float) -> None:
         self.state.shrine_x = (x - self.left) / max(1.0, self.right - self.left)
 
-    def on_shrine_clicked(self, global_pos: QPoint) -> None:
-        self.on_context_menu(global_pos)
+    def on_shrine_clicked(self, global_pos: QPoint = None) -> None:
+        self.open_panel()
+
+    # ── 신사 키우기 / 해금 ──
+    def open_panel(self) -> None:
+        if self.panel is not None:
+            self.panel.close()
+        self.panel = ShrinePanel(self.state, self.upgrade)
+        self.panel.destroyed.connect(lambda *_: setattr(self, "panel", None))
+        top = self.shrine.y() + 20
+        self.panel.show_above(self.shrine.pos_x, top, self.left, self.right)
+
+    def _say_at_shrine(self, text: str) -> None:
+        say(text, self.shrine.pos_x, self.shrine.y() + 26)
+
+    def upgrade(self) -> None:
+        if not self.state.upgrade_shrine():
+            return
+        s = self.state
+        self.shrine.set_level(s.shrine_level)
+        self.shrine.set_saisen(s.saisen)
+        self.on_shrine_moved(self.shrine.pos_x)
+        log.info("신사 업그레이드 → %s", s.stage_name)
+        self._say_at_shrine(f"{s.stage_name}로 커졌다!  분당 새전 {s.income_per_min}")
+        self.save()
+        self.check_unlocks()
+
+    def check_unlocks(self) -> None:
+        """조건을 채운 캐릭터가 있으면 하늘에서 신사 옆으로 떨어뜨리며 등장."""
+        for key in newly_unlocked(self.state):
+            self.state.unlocked.append(key)
+            log.info("해금: %s", key)
+            if all(p.ch.key != key for p in self.pets):
+                pet = self._spawn(key)
+                pet.pos_x = min(max(self.shrine.pos_x + random.uniform(-160, 160), self.left + 40), self.right - 40)
+                pet.pos_y, pet.vx, pet.vy, pet.state = self.top + 80, 0.0, 0.0, "fall"
+                pet._place()
+                if not self.hidden_for_fullscreen:
+                    pet.show()
+            if not self.hidden_for_fullscreen:
+                self._say_at_shrine(UNLOCKS[key].arrive_line)
+            self.save()
 
     def on_context_menu(self, global_pos: QPoint) -> None:
         menu = QMenu()
@@ -249,6 +298,7 @@ class Game(QObject):
         info = menu.addAction(f"새전 {s.saisen:,}   ·   {s.stage_name} (분당 {s.income_per_min})")
         info.setEnabled(False)
         menu.addSeparator()
+        menu.addAction("신사 관리 · 도감", self.open_panel)
         menu.addAction("모두 불러오기", self.gather)
         climb = QAction("창 위에도 올라가기", menu, checkable=True)
         climb.setChecked(s.climb)
