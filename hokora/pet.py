@@ -29,14 +29,18 @@ GRAVITY = 2200.0                # px/s²
 WALK_SPEED = (22.0, 34.0)       # px/s
 MAX_THROW = 2600.0
 # 동작 → (프레임 수, 한 바퀴 시간). 애니메이션 식의 주기에 맞춰 끊김 없이 반복되게.
+# 프레임 수는 그림 장수(2·3·4·6장)로 나누어떨어지게 12.
 FRAMES = {
-    "idle": (12, 2.856),   # sin(2.2t)
-    "walk": (8, 0.698),    # sin(9t)
+    "idle": (12, 2.856),   # sin(2.2t) — 숨쉬기 한 번
+    "walk": (12, 0.698),   # sin(9t) — 두 발짝(왼발+오른발)
     "sit": (8, 8.0),       # 그림 캐릭터는 4초마다 앉은 자세를 바꿔 두리번거림
-    "happy": (8, 0.52),
-    "held": (8, 0.628),    # sin(10t)
-    "fall": (8, 0.628),
+    "happy": (12, 1.0),    # 쓰다듬은 순간부터 1초 동안 한 번 (움츠림 → 점프 → 착지)
+    "held": (12, 0.628),   # sin(10t) — 버둥 한 번
+    "fall": (12, 0.628),
 }
+
+
+ONE_SHOT = {"happy"}
 
 
 class SpriteCache:
@@ -56,9 +60,10 @@ class SpriteCache:
         if hit is None:
             n, loop = FRAMES[kind]
             t = frame * loop / n
+            phase = frame / n
             images = image_sprites(ch.key)
             if images is not None:
-                hit = images.render(kind, t, facing, blink, self.dpr)
+                hit = images.render(kind, phase, t, facing, blink, self.dpr)
             else:
                 pm = QPixmap(round(CHAR_W * self.dpr), round(CHAR_H * self.dpr))
                 pm.setDevicePixelRatio(self.dpr)
@@ -121,6 +126,7 @@ class PetWindow(QWidget):
         self._trail: deque[tuple[float, QPointF]] = deque(maxlen=6)
         self._drawn_key = None
         self._placed = None
+        self._anim_kind, self._anim_start = self.state, self.t
         self._place()
 
     @property
@@ -202,8 +208,13 @@ class PetWindow(QWidget):
 
     def _frame_key(self) -> tuple:
         kind = self.state if self.state in FRAMES else "idle"
+        if kind != self._anim_kind:          # 새 동작은 첫 장면부터
+            self._anim_kind, self._anim_start = kind, self.t
         n, loop = FRAMES[kind]
-        frame = int((self.t % loop) / loop * n)
+        if kind in ONE_SHOT:                 # 한 번만 재생하고 마지막 장면에서 멈춤
+            frame = min(n - 1, int((self.t - self._anim_start) / loop * n))
+        else:
+            frame = int((self.t % loop) / loop * n)
         now = time.monotonic()
         blink = self.blink_at <= now < self.blink_at + 0.14
         if now >= self.blink_at + 0.14:
@@ -219,6 +230,7 @@ class PetWindow(QWidget):
     def pat(self) -> bool:
         """쓰다듬기. 보상을 받을 수 있으면 True."""
         self.state = "happy"
+        self._anim_kind, self._anim_start = "happy", self.t   # 연달아 쓰다듬어도 다시 폴짝
         self.vx = 0
         self.state_until = time.monotonic() + 1.0
         self.squash = 0.18

@@ -4,6 +4,7 @@ AI로 뽑은 초록 배경 스프라이트 시트 → 게임용 캐릭터 그림
 
   python tools/import_sheet.py 시트.png reimu --names idle,blink,walk_0,walk_1,sit,...
   python tools/import_sheet.py 시트.png reimu            (이름 없이: 번호가 붙은 미리보기만)
+  python tools/import_sheet.py 걷기.png reimu --append --names walk_0,walk_1,...   (기존 그림에 추가)
 
 하는 일
   1. 초록 배경(#00FF00 근처)과 워터마크를 투명하게, 가장자리의 초록 번짐 제거
@@ -13,7 +14,8 @@ AI로 뽑은 초록 배경 스프라이트 시트 → 게임용 캐릭터 그림
      → hokora/sprites/<캐릭터>/<이름>.png + manifest.json
   4. 번호가 붙은 미리보기: hokora/sprites/<캐릭터>/_preview.png
 
-프레임 이름 규칙: idle, blink, walk_0.., sit, happy, held, fall, sleep  (뒤에 _1, _2 로 변형 추가 가능)
+프레임 이름 규칙: <동작> 한 장, 또는 <동작>_0, <동작>_1 … 여러 장(차례로 재생)
+  동작: idle, walk, sit, happy, held, fall, sleep  + 눈 깜빡임 blink
 """
 from __future__ import annotations
 
@@ -198,7 +200,7 @@ def _split_touching(main: list, labels: list, gw: int, expected: int, next_label
         next_label += 1
 
 
-def tight(img: QImage, blob, labels, gw) -> tuple[QImage, float]:
+def tight(img: QImage, blob, labels, gw) -> tuple[QImage, float, int]:
     """상자 안에서 이 캐릭터 픽셀만 남겨(옆 캐릭터 조각은 지움) 딱 맞게 자르고,
     몸 무게중심 x(잘린 그림 기준)를 돌려준다."""
     (x0, y0, x1, y1), lab = blob
@@ -242,7 +244,7 @@ def tight(img: QImage, blob, labels, gw) -> tuple[QImage, float]:
                 sa += a
     clean = QImage(bytes(data), w, h, stride, QImage.Format_ARGB32).copy()
     out = clean.copy(minx, miny, maxx - minx + 1, maxy - miny + 1)
-    return out, (sx / max(1, sa)) - minx
+    return out, (sx / max(1, sa)) - minx, y0 + maxy   # 마지막: 시트에서 발(맨 아래)의 y
 
 
 def main() -> int:
@@ -250,6 +252,8 @@ def main() -> int:
     ap.add_argument("sheet", type=Path)
     ap.add_argument("character", help="캐릭터 키 (reimu, marisa, ...)")
     ap.add_argument("--names", help="찾은 순서대로 붙일 프레임 이름, 쉼표로 구분")
+    ap.add_argument("--append", action="store_true",
+                    help="기존 그림을 지우지 않고 추가 (같은 이름은 덮어씀) — 시트 여러 장을 합칠 때")
     args = ap.parse_args()
     global _qt_app  # QImage 스케일링·글꼴에 필요, 끝날 때까지 살아 있어야 함
     _qt_app = QGuiApplication.instance() or QGuiApplication(sys.argv)
@@ -269,55 +273,107 @@ def main() -> int:
         args.names = None
 
     frames = [tight(keyed, b, labels, gw) for b in blobs]
-    ref = names.index("idle") if "idle" in names else 0
+    lifts = _lifts(frames, names)
+    for name, lift in zip(names, lifts):
+        if lift:
+            print(f"  {name}: 바닥에서 {lift / frames[0][0].height() * 100:.0f}% 떠 있음 (점프 유지)")
+    # 크기 기준: 서 있는 그림(idle / idle_0), 없으면(걷기 시트 등) 가장 키가 큰 그림 = 서 있는 높이
+    ref = next((names.index(n) for n in ("idle", "idle_0") if n in names),
+               max(range(len(frames)), key=lambda i: frames[i][0].height() if not names[i].startswith("happy")
+                   else 0))
     scale = STANDING_PX / frames[ref][0].height()
-    # 모든 프레임에 같은 캔버스: 발(아래) = 바닥선, 몸 무게중심 = 가운데
-    left = max(cx * scale for img, cx in frames)
-    right = max((img.width() - cx) * scale for img, cx in frames)
-    half = int(max(left, right)) + PAD
-    canvas_w, canvas_h = half * 2, int(max(img.height() * scale for img, _ in frames)) + PAD * 2
-    anchor = (half, canvas_h - PAD)
 
     out_dir = SPRITES / args.character
     out_dir.mkdir(parents=True, exist_ok=True)
-    for old in out_dir.glob("*.png"):
-        old.unlink()
-    for (img, cx), name in zip(frames, names):
-        canvas = QImage(canvas_w, canvas_h, QImage.Format_ARGB32_Premultiplied)
+    manifest_path = out_dir / "manifest.json"
+    anchors: dict[str, list[float]] = {}
+    sources: list[str] = []
+    if args.append and manifest_path.exists():
+        anchors, sources = _load_anchors(manifest_path)
+    else:
+        for old in out_dir.glob("*.png"):
+            old.unlink()
+
+    # 그림마다 딱 맞는 캔버스 + 발 위치(몸 무게중심 x, 바닥 y)를 따로 저장
+    for (img, cx, _), name, lift in zip(frames, names, lifts):
+        tw, th = img.width() * scale, img.height() * scale
+        lift *= scale                                         # 점프 높이 (바닥선 위로)
+        ax = int(max(cx * scale, tw - cx * scale)) + PAD      # 무게중심 좌우로 같은 폭
+        canvas = QImage(ax * 2, int(th + lift) + PAD * 2, QImage.Format_ARGB32_Premultiplied)
         canvas.fill(Qt.transparent)
         p = QPainter(canvas)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
-        tw, th = img.width() * scale, img.height() * scale
-        p.drawImage(QRectF(anchor[0] - cx * scale, anchor[1] - th, tw, th), img)
+        ay = canvas.height() - PAD
+        p.drawImage(QRectF(ax - cx * scale, ay - lift - th, tw, th), img)
         p.end()
         canvas.save(str(out_dir / f"{name}.png"))
+        anchors[name] = [ax, ay]
     if args.names:
-        manifest = {"canvas": [canvas_w, canvas_h], "anchor": list(anchor), "standing_height": STANDING_PX,
-                    "facing": 1, "frames": names, "source": args.sheet.name}
-        (out_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        sources.append(args.sheet.name)
+        manifest = {"version": 2, "standing_height": STANDING_PX, "facing": 1,
+                    "frames": anchors, "sources": sources}
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # 번호 붙은 미리보기 (바닥선 확인용)
-    cols = min(6, len(frames))
-    rows = (len(frames) + cols - 1) // cols
-    cell_w, cell_h = canvas_w + 10, canvas_h + 28
-    prev = QImage(cell_w * cols, cell_h * rows, QImage.Format_ARGB32)
-    prev.fill(QColor("#EDE6EA"))
-    p = QPainter(prev)
-    p.setFont(QFont("Malgun Gothic", 10))
-    for i, name in enumerate(names):
-        x, y = (i % cols) * cell_w + 5, (i // cols) * cell_h + 4
-        p.setPen(QColor(200, 16, 46, 120))
-        p.drawLine(QPointF(x, y + anchor[1]), QPointF(x + canvas_w, y + anchor[1]))       # 바닥선
-        p.drawLine(QPointF(x + anchor[0], y), QPointF(x + anchor[0], y + canvas_h))       # 가운데
-        p.drawImage(x, y, QImage(str(out_dir / f"{name}.png")))
-        p.setPen(QColor("#2B1D21"))
-        p.drawText(QRectF(x, y + canvas_h + 2, canvas_w, 20), Qt.AlignCenter, f"{i + 1}. {name}")
-    p.end()
-    prev.save(str(out_dir / "_preview.png"))
+    _save_preview(out_dir, names, anchors)
     print(f"저장: {out_dir}")
     if not args.names:
         print("미리보기(_preview.png)를 보고 --names 로 이름을 붙여 다시 실행하세요.")
     return 0
+
+
+def _lifts(frames, names) -> list[float]:
+    """같은 줄에서 다른 그림보다 발이 떠 있는 만큼(점프). 시트 픽셀 단위.
+
+    AI가 바닥선을 완벽히 맞추진 못하므로 키의 4% 미만 차이는 무시하고(떨림 방지),
+    원래 공중에 있는 자세(held, fall)는 제외한다."""
+    bottoms = [b for _, _, b in frames]
+    heights = [img.height() for img, _, _ in frames]
+    med_h = sorted(heights)[len(heights) // 2]
+    lifts = []
+    for i, name in enumerate(names):
+        if name.startswith(("held", "fall")):
+            lifts.append(0.0)
+            continue
+        # 같은 줄 = 발 위치가 키의 절반 이내로 비슷한 그림들 (위아래 줄은 키만큼 떨어져 있음)
+        row = [b for b in bottoms if abs(b - bottoms[i]) < med_h * 0.5]
+        lift = max(row) - bottoms[i]
+        lifts.append(float(lift) if lift >= med_h * 0.04 else 0.0)
+    return lifts
+
+
+def _load_anchors(path: Path) -> tuple[dict[str, list[float]], list[str]]:
+    """manifest 의 그림별 발 위치. 예전 형식(모든 그림이 같은 캔버스·발 위치)도 읽는다."""
+    m = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(m.get("frames"), dict):
+        return dict(m["frames"]), list(m.get("sources", []))
+    return {n: list(m["anchor"]) for n in m["frames"]}, [m["source"]] if m.get("source") else []
+
+
+def _save_preview(out_dir: Path, names: list[str], anchors: dict[str, list[float]]) -> None:
+    """이번에 넣은 그림들을 같은 바닥선·가운데선에 맞춰 번호와 함께 (정렬 확인용)."""
+    imgs = [QImage(str(out_dir / f"{n}.png")) for n in names]
+    left = max(anchors[n][0] for n in names)
+    right = max(img.width() - anchors[n][0] for n, img in zip(names, imgs))
+    up = max(anchors[n][1] for n in names)
+    down = max(img.height() - anchors[n][1] for n, img in zip(names, imgs))
+    cell_w, cell_h = int(left + right) + 10, int(up + down) + 28
+    cols = min(6, len(names))
+    rows = (len(names) + cols - 1) // cols
+    prev = QImage(cell_w * cols, cell_h * rows, QImage.Format_ARGB32)
+    prev.fill(QColor("#EDE6EA"))
+    p = QPainter(prev)
+    p.setFont(QFont("Malgun Gothic", 10))
+    for i, (name, img) in enumerate(zip(names, imgs)):
+        ox, oy = (i % cols) * cell_w + 5 + left, (i // cols) * cell_h + 4 + up   # 이 칸의 발 위치
+        p.setPen(QColor(200, 16, 46, 120))
+        p.drawLine(QPointF(ox - left, oy), QPointF(ox + right, oy))       # 바닥선
+        p.drawLine(QPointF(ox, oy - up), QPointF(ox, oy + down))          # 가운데
+        ax, ay = anchors[name]
+        p.drawImage(QPointF(ox - ax, oy - ay), img)
+        p.setPen(QColor("#2B1D21"))
+        p.drawText(QRectF(ox - left, oy + down + 2, cell_w - 10, 20), Qt.AlignCenter, f"{i + 1}. {name}")
+    p.end()
+    prev.save(str(out_dir / "_preview.png"))
 
 
 if __name__ == "__main__":
