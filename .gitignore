@@ -8,3 +8,6 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# import_sheet.py 가 만드는 확인용 미리보기
+hokora/sprites/*/_preview.png

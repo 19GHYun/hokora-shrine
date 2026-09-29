@@ -91,6 +91,8 @@ def main() -> int:
            "--name", EXE_NAME,
            "--icon", str(ICON),
            "--version-file", str(version_file),
+           # AI 등으로 만든 캐릭터 그림 (없는 캐릭터는 코드 그림)
+           "--add-data", f"{HERE / 'hokora' / 'sprites'}{';' if sys.platform == 'win32' else ':'}hokora/sprites",
            "--specpath", str(BUILD_DIR),
            str(ENTRY)]
     print(f"{PRODUCT} {version} 빌드 중…", flush=True)

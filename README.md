@@ -58,6 +58,34 @@ python build.py
 
 `dist\hokora.exe`가 생깁니다.
 
+## 캐릭터 그림 바꾸기
+
+캐릭터는 기본적으로 코드로 그립니다. `hokora/sprites/<캐릭터>/` 폴더에 그림이 있으면 그 그림을 씁니다.
+
+AI 이미지 도구로 **초록 배경(#00FF00)에 여러 자세를 한 장에** 그린 스프라이트 시트를 만들고:
+
+```
+python tools/import_sheet.py 시트.png reimu
+```
+
+를 실행하면 배경을 지우고 캐릭터를 하나씩 찾아 번호를 붙인 미리보기(`_preview.png`)를 만듭니다.
+번호 순서대로 이름을 붙여 다시 실행하면 게임에 들어갑니다.
+
+```
+python tools/import_sheet.py 시트.png reimu --names idle,blink,walk_0,walk_1,sit,happy,held,sit_1,idle_1,fall,sleep
+```
+
+| 이름 | 쓰이는 곳 |
+| --- | --- |
+| `idle` / `blink` | 가만히 서 있기 / 눈 깜빡임 |
+| `walk_0`, `walk_1` … | 걷기 (번갈아) |
+| `sit`, `sit_1` … | 앉기 (4초마다 바꿔 두리번) |
+| `happy` | 쓰다듬기 |
+| `held` / `fall` | 잡혔을 때 / 던져졌을 때 |
+| `sleep` | 잠자기 |
+
+그림은 오른쪽을 보는 방향으로 그리면 됩니다. 왼쪽으로 갈 때는 뒤집어서 씁니다. 코드 그림으로 비교해 보려면 `HOKORA_CODE_ART=1`로 실행합니다.
+
 ## 데이터 위치
 
 | 항목 | 경로 |

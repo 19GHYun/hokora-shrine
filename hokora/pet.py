@@ -16,6 +16,7 @@ from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPixm
 from PySide6.QtWidgets import QWidget
 
 from .render import Character, Pose, draw_character
+from .sprites import image_sprites
 from .state import PAT_COOLDOWN
 
 WIN_W, WIN_H = 84, 104          # 창 크기 (하트 등 효과가 머리 위로 나갈 공간 포함)
@@ -28,7 +29,7 @@ MAX_THROW = 2600.0
 FRAMES = {
     "idle": (12, 2.856),   # sin(2.2t)
     "walk": (8, 0.698),    # sin(9t)
-    "sit": (8, 2.856),
+    "sit": (8, 8.0),       # 그림 캐릭터는 4초마다 앉은 자세를 바꿔 두리번거림
     "happy": (8, 0.52),
     "held": (8, 0.628),    # sin(10t)
     "fall": (8, 0.628),
@@ -36,27 +37,36 @@ FRAMES = {
 
 
 class SpriteCache:
-    """(캐릭터, 동작, 프레임, 방향, 깜빡임) → 미리 그린 그림."""
+    """(캐릭터, 동작, 프레임, 방향, 깜빡임) → (미리 그린 그림, 그림 안의 발 위치).
+
+    그림 파일이 있는 캐릭터(hokora/sprites/<키>/)는 그 그림을, 없으면 코드 그림을 쓴다.
+    """
 
     def __init__(self):
-        self._cache: dict[tuple, QPixmap] = {}
+        self._cache: dict[tuple, tuple[QPixmap, QPointF]] = {}
         screen = QGuiApplication.primaryScreen()
         self.dpr = max(1.0, screen.devicePixelRatio() if screen else 1.0)
 
-    def get(self, ch: Character, kind: str, frame: int, facing: int, blink: bool) -> QPixmap:
+    def get(self, ch: Character, kind: str, frame: int, facing: int, blink: bool) -> tuple[QPixmap, QPointF]:
         key = (ch.key, kind, frame, facing, blink)
-        pm = self._cache.get(key)
-        if pm is None:
+        hit = self._cache.get(key)
+        if hit is None:
             n, loop = FRAMES[kind]
-            pm = QPixmap(round(CHAR_W * self.dpr), round(CHAR_H * self.dpr))
-            pm.setDevicePixelRatio(self.dpr)
-            pm.fill(Qt.transparent)
-            p = QPainter(pm)
-            draw_character(p, ch, Pose(kind=kind, t=frame * loop / n, facing=facing, blink=blink),
-                           QRectF(0, 0, CHAR_W, CHAR_H))
-            p.end()
-            self._cache[key] = pm
-        return pm
+            t = frame * loop / n
+            images = image_sprites(ch.key)
+            if images is not None:
+                hit = images.render(kind, t, facing, blink, self.dpr)
+            else:
+                pm = QPixmap(round(CHAR_W * self.dpr), round(CHAR_H * self.dpr))
+                pm.setDevicePixelRatio(self.dpr)
+                pm.fill(Qt.transparent)
+                p = QPainter(pm)
+                draw_character(p, ch, Pose(kind=kind, t=t, facing=facing, blink=blink),
+                               QRectF(0, 0, CHAR_W, CHAR_H))
+                p.end()
+                hit = (pm, QPointF(CHAR_W / 2, CHAR_H))
+            self._cache[key] = hit
+        return hit
 
 
 _sprites: SpriteCache | None = None
@@ -221,7 +231,7 @@ class PetWindow(QWidget):
         key = self._frame_key()
         self._drawn_key = key
         kind, frame, facing, blink = key
-        pm = sprites().get(self.ch, kind, frame, facing, blink)
+        pm, anchor = sprites().get(self.ch, kind, frame, facing, blink)
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         # 발을 기준으로 찌그러짐·기울기
@@ -232,7 +242,7 @@ class PetWindow(QWidget):
         if self.squash:
             sq = min(0.3, self.squash)
             p.scale(1 + sq * 0.6, 1 - sq)
-        p.drawPixmap(QPointF(-CHAR_W / 2, -CHAR_H), pm)
+        p.drawPixmap(-anchor, pm)
         p.resetTransform()
         if self.hearts:
             p.setRenderHint(QPainter.Antialiasing)
