@@ -37,6 +37,7 @@ class GameState:
     runtime_sec: float = 0.0         # 켜 둔 시간 누적
     shrine_x: float = 0.82           # 신사 위치 (화면 폭 대비 0~1)
     income_carry: float = 0.0        # 분당 수입의 소수점 이월
+    climb: bool = True               # 캐릭터가 열려 있는 창 위에도 올라감
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
     @property

@@ -26,6 +26,10 @@ ENTRY_SCRIPT = Path(sys.argv[0]).resolve()
 INSTANCE_SERVER = f"{APP_NAME}-{getpass.getuser()}"
 FPS_BUSY = 30            # 던지거나 잡고 있을 때
 FPS_CALM = 15            # 평소 (걷기·가만히) — CPU 를 아끼려고
+PLATFORM_SLOW = 400      # 창 발판을 다시 읽는 간격(ms)
+PLATFORM_FAST = 100      # 캐릭터가 창 위에 있을 때 (창을 끌면 바로 따라가게)
+JUMP_UP_MAX = 700        # 이보다 높은 창으로는 점프하지 않음 (px) — 작업표시줄에서 화면 중간쯤 창까지
+JUMP_REACH = 600         # 옆으로 이보다 먼 창으로는 점프하지 않음 (px)
 INCOME_EVERY = 30        # 새전이 들어오는 간격(초)
 SAVE_EVERY = 60
 
@@ -93,6 +97,9 @@ class Game(QObject):
         self.income_timer = QTimer(self, timeout=self._income, interval=INCOME_EVERY * 1000)
         self.save_timer = QTimer(self, timeout=self.save, interval=SAVE_EVERY * 1000)
         self.watch_timer = QTimer(self, timeout=self._watch, interval=1500)
+        # 창 위 발판: 캐릭터가 창 위에 있으면 자주(창을 끌면 따라가게), 아니면 가끔 새로 읽음
+        self.platforms: list[winutil.Platform] = []
+        self.platform_timer = QTimer(self, timeout=self._refresh_platforms, interval=PLATFORM_SLOW)
 
         screen = app.primaryScreen()
         screen.availableGeometryChanged.connect(self._on_screen_changed)
@@ -126,6 +133,8 @@ class Game(QObject):
         self.income_timer.start()
         self.save_timer.start()
         self.watch_timer.start()
+        self.platform_timer.start()
+        self._refresh_platforms()
         log.info("시작 — 캐릭터 %d, 신사 %s", len(self.pets), self.state.stage_name)
 
     # ── 시간 ──
@@ -164,6 +173,57 @@ class Game(QObject):
             for w in self.windows():
                 winutil.keep_topmost(int(w.winId()))
 
+    # ── 창 위 발판 (PetWindow 가 부름) ──
+    @property
+    def climbing(self) -> bool:
+        return self.state.climb
+
+    def _refresh_platforms(self) -> None:
+        if not self.state.climb or self.hidden_for_fullscreen:
+            self.platforms = []
+        else:
+            dpr = self.app.primaryScreen().devicePixelRatio()
+            self.platforms = winutil.window_platforms(dpr, (self.left, self.top, self.right, self.ground_y))
+        fast = any(p.on is not None for p in self.pets)
+        self.platform_timer.setInterval(PLATFORM_FAST if fast else PLATFORM_SLOW)
+
+    def find_landing(self, x: float, y0: float, y1: float) -> tuple[float, int | None] | None:
+        """y0 → y1 로 내려오는 동안 처음 닿는 곳 (창 윗변 또는 작업표시줄)."""
+        best: tuple[float, int | None] | None = (self.ground_y, None) if y1 >= self.ground_y else None
+        for p in self.platforms:
+            if p.x1 <= x <= p.x2 and y0 <= p.y <= y1 and (best is None or p.y < best[0]):
+                best = (p.y, p.hwnd)
+        return best
+
+    def platform(self, hwnd: int, x: float, win_left: float):
+        """그 창 윗변 중 캐릭터가 서 있는 구간. 창이 옮겨졌으면 옮겨진 만큼 감안해서 찾는다."""
+        for p in self.platforms:
+            if p.hwnd == hwnd:
+                moved_x = x + (p.win_left - win_left)
+                if p.x1 - 2 <= moved_x <= p.x2 + 2:
+                    return p
+        return None
+
+    def jump_target(self, pet: PetWindow) -> tuple[float, float] | None:
+        """점프해서 갈 만한 곳: 닿을 만한 다른 창 윗변, 또는 (창 위라면) 작업표시줄."""
+        targets: list[tuple[float, float]] = []
+        for p in self.platforms:
+            if p.hwnd == pet.on or p.x2 - p.x1 < 80:
+                continue
+            up = pet.pos_y - p.y
+            reach = max(p.x1 - pet.pos_x, 0.0, pet.pos_x - p.x2)
+            if 30 < abs(up) and -700 <= up <= JUMP_UP_MAX and reach <= JUMP_REACH:
+                targets.append((random.uniform(p.x1 + 25, p.x2 - 25), p.y))
+        if pet.on is not None:
+            tx = pet.pos_x + random.choice((-1, 1)) * random.uniform(60, 160)
+            targets.append((min(max(tx, self.left + 40), self.right - 40), self.ground_y))
+        return random.choice(targets) if targets else None
+
+    def set_climb(self, on: bool) -> None:
+        self.state.climb = on
+        self._refresh_platforms()      # 끄면 발판이 사라져 창 위의 캐릭터들이 내려옴
+        log.info("창 위에도 올라가기: %s", "켬" if on else "끔")
+
     # ── 상호작용 (PetWindow / ShrineWindow 가 부름) ──
     def on_pat(self, pet: PetWindow) -> None:
         if pet.pat():
@@ -190,6 +250,10 @@ class Game(QObject):
         info.setEnabled(False)
         menu.addSeparator()
         menu.addAction("모두 불러오기", self.gather)
+        climb = QAction("창 위에도 올라가기", menu, checkable=True)
+        climb.setChecked(s.climb)
+        climb.toggled.connect(self.set_climb)
+        menu.addAction(climb)
         if winutil.IS_WIN:
             a = QAction("Windows 시작 시 자동 실행", menu, checkable=True)
             a.setChecked(winutil.get_autostart() is not None)
@@ -202,7 +266,7 @@ class Game(QObject):
         """화면 밖이나 구석에 간 캐릭터를 신사 옆으로."""
         for pet in self.pets:
             pet.pos_x = min(max(self.shrine.pos_x + random.uniform(-120, 120), self.left + 40), self.right - 40)
-            pet.pos_y, pet.vx, pet.vy, pet.state = self.ground_y - 200, 0.0, 0.0, "fall"
+            pet.pos_y, pet.vx, pet.vy, pet.state, pet.on = self.ground_y - 200, 0.0, 0.0, "fall", None
             pet.show()
 
     def _make_tray(self) -> QSystemTrayIcon | None:

@@ -77,8 +77,12 @@ class ImageSprites:
     def render(self, kind: str, phase: float, t: float, facing: int, blink: bool,
                dpr: float) -> tuple[QPixmap, QPointF]:
         """(그림, 발 위치). phase 는 이 동작 한 바퀴 중 어디쯤인지(0~1), t 는 초 단위 시간."""
-        seq = self.sequence(kind)
-        name = seq[min(len(seq) - 1, int(phase * len(seq)))]
+        if kind == "jump":                   # 점프: 쓰다듬기 동작 중 가장 높이 뛴 장면 한 장
+            seq = self.sequence("happy")
+            name = seq[min(len(seq) - 1, int(len(seq) * 0.6))]
+        else:
+            seq = self.sequence(kind)
+            name = seq[min(len(seq) - 1, int(phase * len(seq)))]
         if blink and kind == "idle" and "blink" in self.images:
             name = "blink"
         img, anchor = self.images[name]
@@ -94,7 +98,7 @@ class ImageSprites:
         p = QPainter(pm)
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
-        if kind not in ("held", "fall"):  # 그림자
+        if kind not in ("held", "fall", "jump"):  # 그림자 (공중에서는 없음)
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(0, 0, 0, 40))
             p.drawEllipse(QRectF(ax - 20, ay - 3.5, 40, 7))
