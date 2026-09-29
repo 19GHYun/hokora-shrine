@@ -5,6 +5,8 @@
 
 ![작업표시줄 위의 호코라와 캐릭터들](docs/screenshot.png)
 
+![등장 캐릭터](docs/characters.png)
+
 > 동방 프로젝트의 비공식 2차 창작입니다. / 東方Project二次創作です。 / Unofficial Touhou Project fan work.
 
 ## 노는 법

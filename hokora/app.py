@@ -62,10 +62,10 @@ def app_icon() -> QIcon:
         img = QImage(size, size, QImage.Format_ARGB32_Premultiplied)
         img.fill(Qt.transparent)
         p = QPainter(img)
-        # 리본 끝(설계 y≈-10)부터 턱(y≈78)까지가 아이콘을 채우게: 88 단위 = size
-        scale = size / 88
+        # 리본 끝(설계 y≈-6)부터 턱(y≈86)까지가 아이콘을 채우게: 92 단위 = size
+        scale = size / 92
         draw_character(p, CHARACTERS["reimu"], Pose(kind="idle", t=0.3),
-                       QRectF((size - 100 * scale) / 2, 10 * scale, 100 * scale, 120 * scale))
+                       QRectF((size - 100 * scale) / 2, 6 * scale, 100 * scale, 120 * scale))
         p.end()
         icon.addPixmap(QPixmap.fromImage(img))
     return icon

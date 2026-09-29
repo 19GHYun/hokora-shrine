@@ -2,7 +2,9 @@
 """
 작은 봉제인형 스타일 캐릭터를 QPainter 로 그린다.
 
-모든 캐릭터는 같은 몸(큰 머리 + 짧은 몸통)을 쓰고, 색과 장식만 다르다.
+모든 캐릭터는 같은 몸(아주 큰 찹쌀떡 머리 + 콩 모양 몸통)을 쓰고, 색과 장식만 다르다.
+딱딱해 보이지 않게: 완전한 원 대신 볼이 살짝 부푼 곡선, 바깥 윤곽선은 굵게·안쪽 선은 가늘게,
+큰 눈(윗눈꺼풀 선 + 홍채 그라데이션 + 반짝임 두 개), 볼 빗금, 레이스 치마 끝단.
 설계 좌표계는 폭 100 × 높이 120, 발바닥 가운데가 (50, 118).
 """
 from __future__ import annotations
@@ -12,15 +14,17 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QRadialGradient
+from PySide6.QtGui import (QBrush, QColor, QLinearGradient, QPainter, QPainterPath, QPen,
+                           QRadialGradient)
 
 DESIGN_W, DESIGN_H = 100.0, 120.0
 FOOT_X, FOOT_Y = 50.0, 118.0
 
-SKIN = QColor("#FFE6D8")
-SKIN_SHADE = QColor("#F6C9B5")
-OUTLINE = QColor(60, 36, 40, 200)
-BLUSH = QColor(255, 120, 140, 110)
+SKIN = QColor("#FFEBDF")
+SKIN_SHADE = QColor("#F8CDBE")
+OUTLINE = QColor(84, 48, 52, 225)     # 따뜻한 갈색 윤곽선
+LINE_OUTER = 2.2                       # 바깥 윤곽선
+LINE_INNER = 1.3                       # 안쪽 선
 
 
 @dataclass
@@ -43,7 +47,7 @@ class Character:
     eyes: str
     dress: str
     dress_dark: str
-    trim: str = "#FFFFFF"     # 옷 가장자리
+    trim: str = "#FFFFFF"     # 옷 가장자리 레이스
     shoes: str = "#4A3036"
     sleeves: str | None = None  # 소매 색 (None 이면 dress)
     side_locks: bool = True
@@ -59,178 +63,258 @@ class Painter:
     def __init__(self, p: QPainter):
         self.p = p
 
-    def shape(self, path: QPainterPath, fill: QColor | QBrush, outline: bool = True, width: float = 1.6) -> None:
+    def shape(self, path: QPainterPath, fill: QColor | QBrush, outline: bool = True,
+              width: float = LINE_OUTER) -> None:
         self.p.setPen(QPen(OUTLINE, width, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin) if outline else Qt.NoPen)
         self.p.setBrush(fill)
         self.p.drawPath(path)
 
-    def ellipse(self, cx, cy, w, h, fill, outline=True, width=1.6) -> None:
+    def ellipse(self, cx, cy, w, h, fill, outline=True, width=LINE_OUTER) -> None:
         path = QPainterPath()
         path.addEllipse(QRectF(cx - w / 2, cy - h / 2, w, h))
         self.shape(path, fill, outline, width)
+
+    def stroke(self, path: QPainterPath, color: QColor, width: float) -> None:
+        self.p.setPen(QPen(color, width, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        self.p.setBrush(Qt.NoBrush)
+        self.p.drawPath(path)
 
 
 def _c(x) -> QColor:
     return x if isinstance(x, QColor) else QColor(x)
 
 
-# ─────────────────────────────── 몸 부분 ───────────────────────────────
+def _soft(color: QColor, center: QPointF, radius: float, light: int = 115, dark: int = 108) -> QRadialGradient:
+    """왼쪽 위에서 빛이 드는 부드러운 음영."""
+    g = QRadialGradient(center, radius)
+    g.setColorAt(0, color.lighter(light))
+    g.setColorAt(1, color.darker(dark))
+    return g
+
+
+def _mochi(cx: float, top: float, w: float, h: float) -> QPainterPath:
+    """찹쌀떡 머리: 위는 둥글고, 볼 쪽이 살짝 부풀고, 턱은 넓고 부드럽게."""
+    l, r, b = cx - w / 2, cx + w / 2, top + h
+    path = QPainterPath()
+    path.moveTo(cx, top)
+    path.cubicTo(cx + w * 0.34, top, r, top + h * 0.22, r, top + h * 0.54)
+    path.cubicTo(r, top + h * 0.84, cx + w * 0.30, b, cx, b)
+    path.cubicTo(cx - w * 0.30, b, l, top + h * 0.84, l, top + h * 0.54)
+    path.cubicTo(l, top + h * 0.22, cx - w * 0.34, top, cx, top)
+    path.closeSubpath()
+    return path
+
+
+# ─────────────────────────────── 몸 ───────────────────────────────
 def _feet(pp: Painter, ch: Character, pose: Pose) -> None:
+    shoe = _c(ch.shoes)
+    if pose.kind == "sit":  # 다리를 앞으로 쭉
+        pp.ellipse(33, 114, 18, 11, _soft(shoe, QPointF(30, 111), 12))
+        pp.ellipse(67, 114, 18, 11, _soft(shoe, QPointF(64, 111), 12))
+        return
     lift_l = lift_r = 0.0
     if pose.kind == "walk":
         phase = pose.t * 9.0
         lift_l = max(0.0, math.sin(phase)) * 5
         lift_r = max(0.0, -math.sin(phase)) * 5
     elif pose.kind in ("held", "fall"):
-        swing = math.sin(pose.t * 7.0) * 3
+        swing = math.sin(pose.t * 10.0) * 3
         lift_l, lift_r = 2 + swing, 2 - swing
-    if pose.kind == "sit":
-        pp.ellipse(36, 114, 16, 9, _c(ch.shoes))
-        pp.ellipse(64, 114, 16, 9, _c(ch.shoes))
-        return
-    pp.ellipse(41, 113 - lift_l, 14, 9, _c(ch.shoes))
-    pp.ellipse(59, 113 - lift_r, 14, 9, _c(ch.shoes))
+    pp.ellipse(40, 113.5 - lift_l, 16, 10, _soft(shoe, QPointF(37, 110 - lift_l), 11))
+    pp.ellipse(60, 113.5 - lift_r, 16, 10, _soft(shoe, QPointF(57, 110 - lift_r), 11))
 
 
 def _body(pp: Painter, ch: Character, pose: Pose) -> None:
-    # 치마(A라인)
-    top, bottom = 72.0, 112.0
-    if pose.kind == "sit":
-        top, bottom = 76.0, 114.0
+    """콩 모양 몸통 + 레이스 끝단."""
+    bottom = 111.0 if pose.kind != "sit" else 112.0
     path = QPainterPath()
-    path.moveTo(37, top)
-    path.cubicTo(33, 90, 24, 104, 22, bottom - 2)
-    path.quadTo(50, bottom + 5, 78, bottom - 2)
-    path.cubicTo(76, 104, 67, 90, 63, top)
+    path.moveTo(32, 76)
+    path.cubicTo(27, 88, 21, 101, 24, bottom - 1)
+    path.cubicTo(34, bottom + 5, 66, bottom + 5, 76, bottom - 1)
+    path.cubicTo(79, 101, 73, 88, 68, 76)
     path.closeSubpath()
-    grad = QRadialGradient(QPointF(42, 84), 40)
-    grad.setColorAt(0, _c(ch.dress).lighter(112))
-    grad.setColorAt(1, _c(ch.dress_dark))
-    pp.shape(path, QBrush(grad))
-    # 치마 끝단 장식
-    hem = QPainterPath()
-    hem.moveTo(23, bottom - 4)
-    hem.quadTo(50, bottom + 3, 77, bottom - 4)
-    pp.p.setPen(QPen(_c(ch.trim), 3.2, Qt.SolidLine, Qt.RoundCap))
-    pp.p.setBrush(Qt.NoBrush)
-    pp.p.drawPath(hem)
+    dress = _c(ch.dress)
+    pp.shape(path, _soft(dress, QPointF(40, 84), 42, 118, 112))
+    # 레이스 끝단: 작은 반원들
+    trim = _c(ch.trim)
+    for i in range(6):
+        x = 27.5 + i * 9.0
+        y = bottom + 1.2 - abs(i - 2.5) * 0.9
+        pp.ellipse(x, y, 10.5, 7.0, trim, width=LINE_INNER)
+    # 옷 주름 한 줄 (딱딱함 덜기)
+    fold = QPainterPath()
+    fold.moveTo(50, 86)
+    fold.quadTo(48, 96, 51, 104)
+    pp.stroke(fold, QColor(0, 0, 0, 40), 1.2)
+
+
+def _limb(pp: Painter, cx: float, cy: float, angle: float, sleeve: QColor) -> None:
+    """어깨(cx, cy)에 달린 짧고 통통한 팔 + 동그란 손."""
+    p = pp.p
+    p.save()
+    p.translate(cx, cy)
+    p.rotate(angle)
+    arm = QPainterPath()
+    arm.addRoundedRect(QRectF(-7, -2, 14, 19), 7, 7)
+    pp.shape(arm, _soft(sleeve, QPointF(-3, 2), 16))
+    pp.ellipse(0, 17.5, 9, 8, SKIN)
+    p.restore()
 
 
 def _arms(pp: Painter, ch: Character, pose: Pose) -> None:
     sleeve = _c(ch.sleeves or ch.dress)
-    if pose.kind == "held":      # 잡혀서 팔을 위로 버둥
-        wave = math.sin(pose.t * 10) * 6
-        pp.ellipse(24, 70 + wave, 15, 20, sleeve)
-        pp.ellipse(76, 70 - wave, 15, 20, sleeve)
-        pp.ellipse(22, 61 + wave, 8, 8, SKIN)
-        pp.ellipse(78, 61 - wave, 8, 8, SKIN)
-        return
-    swing = math.sin(pose.t * 9.0) * 4 if pose.kind == "walk" else 0.0
-    if pose.kind == "happy":
-        swing = math.sin(pose.t * 14) * 3
-    pp.ellipse(27, 86 + swing, 15, 21, sleeve)
-    pp.ellipse(73, 86 - swing, 15, 21, sleeve)
-    pp.ellipse(27, 97 + swing, 8, 8, SKIN)
-    pp.ellipse(73, 97 - swing, 8, 8, SKIN)
+    if pose.kind == "held":        # 잡혀서 팔을 위로 버둥버둥
+        wave = math.sin(pose.t * 10) * 14
+        _limb(pp, 30, 80, 150 + wave, sleeve)
+        _limb(pp, 70, 80, -150 + wave, sleeve)
+    elif pose.kind == "fall":
+        _limb(pp, 30, 80, 120, sleeve)
+        _limb(pp, 70, 80, -120, sleeve)
+    elif pose.kind == "happy":     # 만세
+        wave = math.sin(pose.t * 14) * 10
+        _limb(pp, 30, 80, 135 + wave, sleeve)
+        _limb(pp, 70, 80, -135 - wave, sleeve)
+    else:
+        swing = math.sin(pose.t * 9.0) * 16 if pose.kind == "walk" else 0.0
+        rest = 22 if pose.kind != "sit" else 30
+        _limb(pp, 31, 80, rest + swing, sleeve)
+        _limb(pp, 69, 80, -rest + swing, sleeve)
 
 
+# ─────────────────────────────── 머리 ───────────────────────────────
 def _hair_back(pp: Painter, ch: Character, pose: Pose) -> None:
     hair = _c(ch.hair_dark)
     # 머리 윗부분과 옆만 감싸고 턱 아래로는 내려오지 않게 (후드처럼 보이지 않도록)
-    cap = QPainterPath()
-    cap.addEllipse(QRectF(14, 10, 72, 66))
+    cap = _mochi(50, 7, 88, 74)
     clip = QPainterPath()
-    clip.addRect(QRectF(0, 0, 100, 58))
+    clip.addRect(QRectF(0, -10, 100, 72))
     path = cap.intersected(clip)
-    if ch.side_locks:
+    if ch.side_locks:  # 끝이 가늘어지며 바깥으로 살짝 휘는 옆머리
         sway = math.sin(pose.t * 3) * 1.5
-        for x in (14, 72):
+        for sx in (-1, 1):
+            base = 50 + sx * 36
             lock = QPainterPath()
-            lock.addRoundedRect(QRectF(x + sway, 34, 14, 46), 7, 7)
+            lock.moveTo(base, 40)
+            lock.cubicTo(base + sx * 6, 60, base + sx * 5 + sway, 78, base + sx * 1 + sway, 90)
+            lock.cubicTo(base - sx * 6 + sway, 82, base - sx * 12, 66, base - sx * 12, 48)
+            lock.closeSubpath()
             path = path.united(lock)
-    pp.shape(path.simplified(), hair)
+    pp.shape(path.simplified(), _soft(hair, QPointF(40, 20), 70, 108, 104))
 
 
 def _head(pp: Painter, ch: Character, pose: Pose) -> None:
-    grad = QRadialGradient(QPointF(40, 36), 44)
-    grad.setColorAt(0, SKIN.lighter(103))
-    grad.setColorAt(1, SKIN_SHADE)
-    face = QPainterPath()
-    face.addEllipse(QRectF(19, 18, 62, 58))
-    pp.shape(face, QBrush(grad))
+    face = _mochi(50, 14, 78, 68)
+    pp.shape(face, _soft(SKIN, QPointF(40, 40), 50, 102, 104))
 
 
 def _bangs(pp: Painter, ch: Character, pose: Pose) -> None:
+    """큼직하고 부드러운 앞머리 다발 몇 개 + 바보털."""
     hair = _c(ch.hair)
     path = QPainterPath()
-    path.moveTo(16, 48)
-    path.cubicTo(14, 10, 86, 10, 84, 48)
-    # 앞머리 끝: 둥글게 뭉친 머리카락 다발 (끝만 살짝 뾰족)
-    tips = [(76, 42), (66, 44), (56, 41), (45, 44), (34, 42), (24, 46)]
-    prev_x = 84.0
-    for x, y in tips:
-        mid = (prev_x + x) / 2
-        path.quadTo(mid, 28, x, y)
-        prev_x = x
-    path.quadTo(18, 34, 16, 48)
+    path.moveTo(10, 56)
+    path.cubicTo(8, 24, 28, 7, 50, 7)
+    path.cubicTo(72, 7, 92, 24, 90, 56)
+    # 오른쪽 옆 → 왼쪽 옆으로 다발 끝 (x, 끝 y, 사이 골 y)
+    clumps = [(80, 47, 34), (65, 45, 30), (50, 49, 31), (35, 45, 30), (20, 47, 34)]
+    prev = (90.0, 56.0)
+    for x, tip_y, valley in clumps:
+        px, py = prev
+        path.cubicTo(px - 3, valley + 4, x + 5, valley, x, tip_y)
+        prev = (x, tip_y)
+    path.cubicTo(prev[0] - 4, 40, 12, 44, 10, 56)
     path.closeSubpath()
-    grad = QRadialGradient(QPointF(38, 16), 60)
-    grad.setColorAt(0, hair.lighter(135))
-    grad.setColorAt(1, hair)
-    pp.shape(path, QBrush(grad))
-    # 머리 윤기
-    pp.p.setPen(QPen(QColor(255, 255, 255, 90), 2.2, Qt.SolidLine, Qt.RoundCap))
-    pp.p.setBrush(Qt.NoBrush)
+    pp.shape(path, _soft(hair, QPointF(36, 14), 64, 130, 100))
+    # 윤기 (반달 하이라이트)
     shine = QPainterPath()
-    shine.moveTo(30, 22)
-    shine.quadTo(38, 16, 48, 17)
-    pp.p.drawPath(shine)
+    shine.moveTo(27, 22)
+    shine.cubicTo(33, 15, 44, 13, 52, 14)
+    pp.stroke(shine, QColor(255, 255, 255, 110), 2.4)
+    # 바보털
+    sway = math.sin(pose.t * 3.2) * 2
+    ahoge = QPainterPath()
+    ahoge.moveTo(50, 9)
+    ahoge.cubicTo(49, 0, 58 + sway, -6, 62 + sway, -1)
+    pp.stroke(ahoge, OUTLINE, 3.6)
+    pp.stroke(ahoge, hair, 2.0)
+
+
+def _eye(pp: Painter, ch: Character, cx: float, cy: float, surprised: bool) -> None:
+    iris = _c(ch.eyes)
+    w, h = 14.0, 17.5
+    # 흰자 없이 홍채 그라데이션 (위는 진하게, 아래는 밝게)
+    g = QLinearGradient(0, cy - h / 2, 0, cy + h / 2)
+    g.setColorAt(0, iris.darker(170))
+    g.setColorAt(0.55, iris)
+    g.setColorAt(1, iris.lighter(150))
+    pp.ellipse(cx, cy, w, h, g, width=LINE_INNER)
+    pupil = 4.5 if surprised else 6.5
+    pp.ellipse(cx, cy + 1.5, pupil, pupil * 1.2, iris.darker(220), outline=False)
+    # 반짝임 두 개
+    pp.ellipse(cx - 2.6, cy - 3.4, 5.0, 5.0, QColor("#FFFFFF"), outline=False)
+    pp.ellipse(cx + 3.0, cy + 3.8, 2.3, 2.3, QColor(255, 255, 255, 220), outline=False)
+    # 굵은 윗눈꺼풀: 눈 윗가장자리를 따라감 (눈 안쪽으로 파고들면 졸려 보임)
+    lid = QPainterPath()
+    lid.moveTo(cx - 7.6, cy - 1.0)
+    lid.cubicTo(cx - 7.2, cy - 10.6, cx + 7.2, cy - 10.6, cx + 7.6, cy - 1.0)
+    pp.stroke(lid, OUTLINE, 2.6)
+    # 바깥쪽 속눈썹 하나 (얼굴 바깥 방향으로 살짝 올라감)
+    out = -1 if cx < 50 else 1
+    lash = QPainterPath()
+    lash.moveTo(cx + out * 6.4, cy - 4.5)
+    lash.quadTo(cx + out * 9.0, cy - 6.0, cx + out * 10.2, cy - 8.4)
+    pp.stroke(lash, OUTLINE, 1.8)
 
 
 def _face(pp: Painter, ch: Character, pose: Pose) -> None:
-    p = pp.p
-    ex_l, ex_r, ey = 39.0, 61.0, 55.0
+    ex_l, ex_r, ey = 35.0, 65.0, 58.0
     blink = pose.blink if pose.blink is not None else (pose.t % 4.0) > 3.85
     blink = blink and pose.kind not in ("happy", "sleep", "held", "fall")
     if pose.kind in ("happy", "sleep") or blink:
-        # ^ ^ (행복) 또는 감은 눈
-        p.setPen(QPen(OUTLINE, 2.2, Qt.SolidLine, Qt.RoundCap))
-        p.setBrush(Qt.NoBrush)
         for ex in (ex_l, ex_r):
             eye = QPainterPath()
-            if pose.kind == "happy":
-                eye.moveTo(ex - 5, ey + 2)
-                eye.quadTo(ex, ey - 5, ex + 5, ey + 2)
-            else:
-                eye.moveTo(ex - 5, ey)
-                eye.quadTo(ex, ey + 4, ex + 5, ey)
-            p.drawPath(eye)
+            if pose.kind == "happy":          # ^ ^
+                eye.moveTo(ex - 6, ey + 3)
+                eye.quadTo(ex, ey - 6, ex + 6, ey + 3)
+            else:                             # 감은 눈 ‿
+                eye.moveTo(ex - 6, ey)
+                eye.quadTo(ex, ey + 5, ex + 6, ey)
+            pp.stroke(eye, OUTLINE, 2.6)
     else:
-        big = pose.kind in ("held", "fall")
-        w, h = (10, 13) if big else (9, 12)
+        surprised = pose.kind in ("held", "fall")
         for ex in (ex_l, ex_r):
-            pp.ellipse(ex, ey, w, h, _c(ch.eyes), outline=True, width=1.2)
-            pp.ellipse(ex, ey + 2.5, w * 0.55, h * 0.45, _c(ch.eyes).darker(160), outline=False)
-            pp.ellipse(ex - 2, ey - 3, 3.4, 3.4, QColor("#FFFFFF"), outline=False)
-    # 볼터치
-    pp.ellipse(32, 64, 9, 5, BLUSH, outline=False)
-    pp.ellipse(68, 64, 9, 5, BLUSH, outline=False)
+            _eye(pp, ch, ex, ey, surprised)
+    # 볼터치: 부드러운 분홍 + 작은 빗금
+    for bx in (23.5, 76.5):
+        g = QRadialGradient(QPointF(bx, 69), 9)
+        g.setColorAt(0, QColor(255, 125, 150, 150))
+        g.setColorAt(1, QColor(255, 125, 150, 0))
+        pp.ellipse(bx, 69, 18, 10, g, outline=False)
+        for i in range(3):
+            x = bx - 3.5 + i * 3.5
+            line = QPainterPath()
+            line.moveTo(x + 1.2, 67)
+            line.lineTo(x - 1.2, 71)
+            pp.stroke(line, QColor(230, 95, 120, 150), 1.0)
     # 입
-    p.setPen(QPen(OUTLINE, 1.6, Qt.SolidLine, Qt.RoundCap))
-    p.setBrush(Qt.NoBrush)
     mouth = QPainterPath()
-    if pose.kind in ("held", "fall"):
-        p.setBrush(QColor("#C0485A"))
-        mouth.addEllipse(QRectF(47.5, 62, 5, 5.5))
-    elif pose.kind == "happy":
-        p.setBrush(QColor("#C0485A"))
-        mouth.moveTo(45, 62)
-        mouth.quadTo(50, 69, 55, 62)
+    if pose.kind in ("held", "fall"):         # 놀란 o
+        pp.ellipse(50, 73, 5, 5.5, QColor("#B8404F"), width=LINE_INNER)
+        return
+    if pose.kind == "happy":                  # 활짝
+        mouth.moveTo(45, 70.5)
+        mouth.cubicTo(46, 78, 54, 78, 55, 70.5)
+        mouth.quadTo(50, 72, 45, 70.5)
         mouth.closeSubpath()
-    else:
-        mouth.moveTo(47, 64)
-        mouth.quadTo(50, 66.5, 53, 64)
-    p.drawPath(mouth)
+        pp.shape(mouth, QColor("#B8404F"), width=LINE_INNER)
+        tongue = QPainterPath()
+        tongue.addEllipse(QRectF(47.5, 73.6, 5, 2.8))
+        pp.shape(tongue, QColor("#FF8FA0"), outline=False)
+        return
+    # 평소: 고양이 입 ω
+    mouth.moveTo(45.5, 71)
+    mouth.quadTo(47.8, 73.8, 50, 71.2)
+    mouth.quadTo(52.2, 73.8, 54.5, 71)
+    pp.stroke(mouth, OUTLINE, 1.5)
 
 
 # ─────────────────────────────── 캐릭터별 장식 ───────────────────────────────
@@ -248,7 +332,7 @@ def _bow(pp: Painter, pose: Pose, cx: float, cy: float, span: float, color: QCol
                      cx + sx * span * 0.40, cy + span * 0.40,
                      cx, cy)
         if frill is not None:  # 흰 레이스 테두리 → 안쪽 색
-            pp.shape(wing, frill, width=1.4)
+            pp.shape(wing, frill)
             t = QPainterPath()
             t.moveTo(cx, cy)
             t.cubicTo(cx + sx * span * 0.35, cy - span * 0.42 - flap,
@@ -257,119 +341,123 @@ def _bow(pp: Painter, pose: Pose, cx: float, cy: float, span: float, color: QCol
             t.cubicTo(cx + sx * span * 0.90, cy + span * 0.32 + flap,
                       cx + sx * span * 0.38, cy + span * 0.28,
                       cx, cy)
-            pp.shape(t, color, outline=False)
+            pp.shape(t, _soft(color, QPointF(cx + sx * span * 0.4, cy - span * 0.3), span, 118, 106),
+                     outline=False)
         else:
-            pp.shape(wing, color, width=1.4)
+            pp.shape(wing, _soft(color, QPointF(cx + sx * span * 0.4, cy - span * 0.3), span, 118, 106))
         # 주름
-        pp.p.setPen(QPen(color.darker(135), 1.2, Qt.SolidLine, Qt.RoundCap))
-        pp.p.drawLine(QPointF(cx + sx * 4, cy), QPointF(cx + sx * span * 0.62, cy - span * 0.18))
-    pp.ellipse(cx + knot_dx, cy, span * 0.28, span * 0.26, color)
+        fold = QPainterPath()
+        fold.moveTo(cx + sx * 4, cy)
+        fold.quadTo(cx + sx * span * 0.4, cy - span * 0.05, cx + sx * span * 0.62, cy - span * 0.22)
+        pp.stroke(fold, color.darker(140), 1.2)
+    pp.ellipse(cx + knot_dx, cy, span * 0.30, span * 0.28, _soft(color, QPointF(cx - 2, cy - 2), 6))
 
 
 def _reimu_bow(pp: Painter, ch: Character, pose: Pose) -> None:
-    _bow(pp, pose, 50, 14, 34, QColor("#D8263A"), frill=QColor("#FFFFFF"))
-
-
-def _reimu_tubes(pp: Painter, ch: Character, pose: Pose) -> None:
-    for x in (20, 80):
-        pp.p.save()
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(x - 6, 68, 12, 13), 3, 3)
-        pp.shape(path, QColor("#FFFFFF"), width=1.2)
-        pp.p.setPen(QPen(QColor("#D8263A"), 2))
-        pp.p.drawLine(QPointF(x - 5, 72), QPointF(x + 5, 72))
-        pp.p.drawLine(QPointF(x - 5, 77), QPointF(x + 5, 77))
-        pp.p.restore()
+    _bow(pp, pose, 50, 9, 38, QColor("#E0314B"), frill=QColor("#FFFFFF"))
 
 
 def _reimu_front(pp: Painter, ch: Character, pose: Pose) -> None:
-    _reimu_tubes(pp, ch, pose)
-    pp.ellipse(50, 76, 12, 7, QColor("#F2C230"), width=1.2)  # 노란 스카프
+    # 옆머리 장식 (빨간 줄무늬 흰 통)
+    for x in (16.5, 83.5):
+        tube = QPainterPath()
+        tube.addRoundedRect(QRectF(x - 6, 68, 12, 13), 4, 4)
+        pp.shape(tube, QColor("#FFFFFF"), width=LINE_INNER)
+        for y in (72, 77):
+            stripe = QPainterPath()
+            stripe.moveTo(x - 5, y)
+            stripe.lineTo(x + 5, y)
+            pp.stroke(stripe, QColor("#E0314B"), 2.0)
+    # 노란 스카프
+    pp.ellipse(50, 83, 13, 7.5, _soft(QColor("#F7C933"), QPointF(47, 81), 8), width=LINE_INNER)
 
 
 def _marisa_hat(pp: Painter, ch: Character, pose: Pose) -> None:
-    black, band = QColor("#2B2630"), QColor("#FFFFFF")
+    black, band = QColor("#2E2934"), QColor("#FFFFFF")
     brim = QPainterPath()
-    brim.addEllipse(QRectF(4, 18, 92, 20))
-    pp.shape(brim, black)
+    brim.addEllipse(QRectF(0, 14, 100, 22))
+    pp.shape(brim, _soft(black, QPointF(35, 18), 50, 150, 100))
     cone = QPainterPath()
     tip = 8 + math.sin(pose.t * 2.5) * 2
-    cone.moveTo(26, 28)
-    cone.cubicTo(34, 10, 52, -8, 78 + tip, -6)
-    cone.cubicTo(64, 4, 70, 14, 74, 28)
+    cone.moveTo(24, 26)
+    cone.cubicTo(32, 6, 52, -12, 80 + tip, -9)
+    cone.cubicTo(66, 1, 72, 12, 76, 26)
+    cone.quadTo(50, 30, 24, 26)
     cone.closeSubpath()
-    pp.shape(cone, black)
-    pp.p.setPen(QPen(band, 4))
-    pp.p.drawLine(QPointF(29, 24), QPointF(72, 24))
-    pp.ellipse(72, 22, 10, 8, band, width=1.2)  # 리본
+    pp.shape(cone, _soft(black, QPointF(40, 8), 40, 160, 100))
+    band_path = QPainterPath()
+    band_path.moveTo(27, 22)
+    band_path.quadTo(50, 26, 74, 22)
+    pp.stroke(band_path, band, 4.2)
+    _bow(pp, pose, 70, 21, 8, band)
 
 
 def _marisa_front(pp: Painter, ch: Character, pose: Pose) -> None:
     # 한쪽 땋은 머리 + 앞치마
     braid = QPainterPath()
-    braid.addRoundedRect(QRectF(14, 58, 10, 26), 5, 5)
-    pp.shape(braid, _c(ch.hair))
-    pp.ellipse(19, 86, 8, 6, QColor("#FFFFFF"), width=1.1)
+    braid.addRoundedRect(QRectF(9, 58, 11, 28), 5.5, 5.5)
+    pp.shape(braid, _soft(_c(ch.hair), QPointF(12, 62), 16), width=LINE_INNER)
+    _bow(pp, pose, 14.5, 88, 6, QColor("#FFFFFF"))
     apron = QPainterPath()
-    apron.addRoundedRect(QRectF(40, 84, 20, 26), 6, 6)
-    pp.shape(apron, QColor("#FFFFFF"), width=1.2)
+    apron.addRoundedRect(QRectF(40, 86, 20, 22), 7, 7)
+    pp.shape(apron, QColor("#FFFFFF"), width=LINE_INNER)
 
 
 def _sakuya_front(pp: Painter, ch: Character, pose: Pose) -> None:
-    # 메이드 머리띠 + 땋은 머리 두 가닥 + 초록 리본
+    # 메이드 머리띠 (프릴) + 땋은 머리 두 가닥 + 초록 리본 + 앞치마
     band = QPainterPath()
-    band.moveTo(24, 22)
+    band.moveTo(24, 20)
     for i, x in enumerate(range(24, 78, 6)):
-        band.lineTo(x + 3, 14 if i % 2 == 0 else 19)
-    band.lineTo(76, 22)
-    band.quadTo(50, 12, 24, 22)
-    pp.shape(band, QColor("#FFFFFF"), width=1.2)
-    for x in (18, 82):
-        pp.ellipse(x, 74, 8, 12, _c(ch.hair), width=1.2)
-        pp.ellipse(x, 82, 7, 5, QColor("#3E8E5A"), width=1.0)
+        band.quadTo(x + 1.5, 10 if i % 2 == 0 else 14, x + 3, 12 if i % 2 == 0 else 16)
+    band.lineTo(76, 20)
+    band.quadTo(50, 10, 24, 20)
+    pp.shape(band, QColor("#FFFFFF"), width=LINE_INNER)
+    for x in (15, 85):
+        pp.ellipse(x, 76, 9, 13, _soft(_c(ch.hair), QPointF(x - 2, 72), 8), width=LINE_INNER)
+        _bow(pp, pose, x, 84, 6, QColor("#3E9A5E"))
     apron = QPainterPath()
-    apron.addRoundedRect(QRectF(39, 82, 22, 28), 6, 6)
-    pp.shape(apron, QColor("#FFFFFF"), width=1.2)
+    apron.addRoundedRect(QRectF(39, 85, 22, 23), 7, 7)
+    pp.shape(apron, QColor("#FFFFFF"), width=LINE_INNER)
 
 
 def _cirno_bow(pp: Painter, ch: Character, pose: Pose) -> None:
-    _bow(pp, pose, 50, 12, 26, QColor("#2F6FD6"))
+    _bow(pp, pose, 50, 7, 28, QColor("#3478E0"))
 
 
 def _cirno_wings(pp: Painter, ch: Character, pose: Pose) -> None:
-    ice = QColor(190, 235, 255, 210)
+    ice = QColor(200, 240, 255, 215)
     shimmer = math.sin(pose.t * 3) * 2
     for sx in (-1, 1):
-        for dy, ln in ((74, 22), (86, 26), (98, 20)):
+        for dy, ln in ((78, 22), (90, 26), (102, 20)):
             wing = QPainterPath()
             base = 50 + sx * 16
             wing.moveTo(base, dy)
             wing.lineTo(base + sx * ln, dy - 8 + shimmer)
             wing.lineTo(base + sx * (ln - 6), dy + 4)
             wing.closeSubpath()
-            pp.shape(wing, ice, width=1.1)
+            pp.shape(wing, ice, width=LINE_INNER)
 
 
 CHARACTERS: dict[str, Character] = {
     "reimu": Character(
         key="reimu", name="하쿠레이 레이무",
-        hair="#4A2E2A", hair_dark="#3A2220", eyes="#9C2B2B",
-        dress="#D8263A", dress_dark="#A8182B", sleeves="#FFFFFF", shoes="#5A3A30",
+        hair="#553430", hair_dark="#3E2522", eyes="#B0343A",
+        dress="#E0314B", dress_dark="#B21E36", sleeves="#FFFFFF", shoes="#6A4436",
         accessory_back=_reimu_bow, accessory_front=_reimu_front),
     "marisa": Character(
         key="marisa", name="키리사메 마리사",
-        hair="#F4D35E", hair_dark="#D9B23C", eyes="#C9962B",
-        dress="#2B2630", dress_dark="#17141B", sleeves="#FFFFFF", shoes="#3A2E26",
-        side_locks=True, accessory_front=_marisa_front, tags={"hat": _marisa_hat}),
+        hair="#F7D862", hair_dark="#DDB73F", eyes="#D39A2A",
+        dress="#35303C", dress_dark="#1F1B24", sleeves="#FFFFFF", shoes="#46382E",
+        accessory_front=_marisa_front, tags={"hat": _marisa_hat}),
     "sakuya": Character(
         key="sakuya", name="이자요이 사쿠야",
-        hair="#D9DEE8", hair_dark="#B7BECC", eyes="#4666B8",
-        dress="#3E5BA8", dress_dark="#2A407E", sleeves="#3E5BA8", shoes="#2A2A36",
+        hair="#E3E7F0", hair_dark="#BCC3D2", eyes="#4F70C8",
+        dress="#4764B4", dress_dark="#2F4788", sleeves="#4764B4", shoes="#2E2E3C",
         accessory_front=_sakuya_front),
     "cirno": Character(
         key="cirno", name="치르노",
-        hair="#6EC6F2", hair_dark="#4FA8DC", eyes="#2F6FD6",
-        dress="#3C7FE0", dress_dark="#2A5DB0", sleeves="#FFFFFF", shoes="#3A4A6A",
+        hair="#78CCF4", hair_dark="#56AEE0", eyes="#3478E0",
+        dress="#4188EA", dress_dark="#2C63B8", sleeves="#FFFFFF", shoes="#3C4C70",
         side_locks=False, accessory_back=_cirno_bow, extra_body=_cirno_wings),
 }
 
@@ -396,7 +484,7 @@ def draw_character(p: QPainter, ch: Character, pose: Pose, rect: QRectF) -> None
 
     pp = Painter(p)
     if pose.kind not in ("held", "fall"):
-        pp.ellipse(50, 118, 52, 7, QColor(0, 0, 0, 45), outline=False)  # 그림자
+        pp.ellipse(50, 118, 56, 8, QColor(0, 0, 0, 40), outline=False)  # 그림자
     if ch.extra_body:
         ch.extra_body(pp, ch, pose)
     _hair_back(pp, ch, pose)
