@@ -86,12 +86,49 @@
     "held_1": [
       81,
       219
+    ],
+    "sleep_0": [
+      77,
+      194
+    ],
+    "sleep_1": [
+      77,
+      188
+    ],
+    "wave_0": [
+      77,
+      204
+    ],
+    "wave_1": [
+      77,
+      204
+    ],
+    "skill_0": [
+      81,
+      204
+    ],
+    "skill_1": [
+      82,
+      205
+    ],
+    "run_0": [
+      82,
+      202
+    ],
+    "run_1": [
+      82,
+      202
+    ],
+    "caught": [
+      77,
+      205
     ]
   },
   "sources": [
     "Gemini_Generated_Image_w9b67cw9b67cw9b6.png",
     "sakuya1.png",
     "sakuya2.png",
-    "sakuya1.png"
+    "sakuya1.png",
+    "sakuya3.png"
   ]
 }

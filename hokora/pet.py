@@ -42,9 +42,16 @@ FRAMES = {
     "held": (12, 0.628),   # sin(10t) — 버둥 한 번
     "fall": (12, 0.628),
     "jump": (1, 1.0),      # 점프는 만세 자세 한 장
-    "startled": (12, 0.628),
-    "sleep": (8, 4.0),     # 낮잠: 두 장이면 2초마다 숨쉬기  # 깜짝 놀람 (오미쿠지 흉 등) — 붙잡힌 그림 또는 잡혔을 때 그림
+    "startled": (12, 0.628),  # 깜짝 놀람 (오미쿠지 흉, 얼음 맞음 등)
+    "sleep": (8, 4.0),     # 낮잠: 두 장이면 2초마다 숨쉬기
+    "wave": (12, 0.8),     # 손 흔들기 (마주쳤을 때 인사)
+    "skill": (12, 1.2),    # 캐릭터 특기 두 장: 레이무 빗자루질 반복, 치르노·사쿠야는 한 번
+    "run": (12, 0.4),      # 뛰기 (마리사 도망 등)
+    "caught": (12, 0.628), # 붙잡힘
 }
+RUN_SPEED = 150.0
+# 이 상태들은 정해진 시간이 지나면 알아서 다음 행동으로 (각본 중이 아닐 때)
+TIMED = {"idle", "walk", "sit", "happy", "startled", "wave", "skill", "run", "caught"}
 
 
 ONE_SHOT = {"happy"}
@@ -76,7 +83,8 @@ class SpriteCache:
                 pm.setDevicePixelRatio(self.dpr)
                 pm.fill(Qt.transparent)
                 p = QPainter(pm)
-                code_kind = {"jump": "happy", "startled": "held"}.get(kind, kind)
+                code_kind = {"jump": "happy", "startled": "held", "wave": "happy", "skill": "idle",
+                             "run": "walk", "caught": "held"}.get(kind, kind)
                 draw_character(p, ch, Pose(kind=code_kind, t=t, facing=facing, blink=blink),
                                QRectF(0, 0, CHAR_W, CHAR_H))
                 p.end()
@@ -106,6 +114,7 @@ class World(Protocol):
     platforms: list    # 지금 올라설 수 있는 창 윗변들 (winutil.Platform)
 
     def on_pat(self, pet: "PetWindow") -> None: ...
+    def try_skill(self, pet: "PetWindow") -> bool: ...        # 특기를 쓰게 했으면 True
     def on_context_menu(self, global_pos) -> None: ...
     def find_landing(self, x: float, y0: float, y1: float) -> tuple[float, int | None] | None: ...
     def platform(self, hwnd: int, x: float, win_left: float): ...  # 그 창 윗변 중 올라선 구간 (없으면 None)
@@ -148,16 +157,34 @@ class PetWindow(QWidget):
         self.on: int | None = ground.hwnd  # 올라서 있는 발판 (창 hwnd, 작업표시줄 바닥은 음수, 공중은 None)
         self._on_left = ground.win_left    # 그 창의 왼쪽 끝 — 창이 옮겨지면 같이 따라감
         self._edge_choice: bool | None = None   # 창 끝에 왔을 때 떨어질지(True) 돌아설지(False)
+        self.scripted = False            # 이벤트(새전 도둑 등)가 움직이는 중 — 스스로 행동을 고르지 않음
+        self.frozen_until = 0.0          # 사쿠야의 시간 정지
         self._place()
 
     @property
     def busy(self) -> bool:
         """부드럽게 움직여야 하는 중(던져짐·잡힘) — 이때만 프레임을 올린다."""
-        return self.state in ("fall", "held", "jump")
+        return self.state in ("fall", "held", "jump", "run")
+
+    @property
+    def grounded(self) -> bool:
+        """발판 위에서 다른 걸 할 수 있는 상태 (공중·잡힘·낮잠·각본 중이 아님)."""
+        return (self.on is not None and not self.scripted and self.state not in ("fall", "jump", "held", "sleep")
+                and time.monotonic() >= self.frozen_until)
+
+    def act(self, state: str, seconds: float, vx: float = 0.0) -> None:
+        """정해진 동작을 몇 초 동안 (처음 장면부터)."""
+        self.state, self.vx = state, vx
+        if vx:
+            self.facing = 1 if vx > 0 else -1
+        self._anim_kind, self._anim_start = state, self.t
+        self.state_until = time.monotonic() + seconds
 
     # ── 상태 ──
     def _choose_next(self) -> None:
         now = time.monotonic()
+        if random.random() < 0.12 and self.world.try_skill(self):
+            return
         if self.world.climbing and random.random() < JUMP_CHANCE:
             target = self.world.jump_target(self)
             if target and self._jump_to(*target):
@@ -245,9 +272,18 @@ class PetWindow(QWidget):
             plats = [p for p in self.world.platforms if p.hwnd == hwnd]
             self._on_left = plats[0].win_left if plats else 0.0
 
+    def freeze(self, seconds: float) -> None:
+        self.frozen_until = time.monotonic() + seconds
+        self.update()
+
     def step(self, dt: float) -> None:
-        self.t += dt
         now = time.monotonic()
+        if now < self.frozen_until:                           # 시간 정지: 그대로 멈춤 (공중에서도)
+            return
+        if self.frozen_until:
+            self.frozen_until = 0.0
+            self.update()
+        self.t += dt
         w = self.world
         self.squash = self.squash * max(0.0, 1 - dt * 8) if self.squash > 0.01 else 0.0
         if self.hearts:
@@ -297,10 +333,14 @@ class PetWindow(QWidget):
                     self.pos_x += plat.win_left - self._on_left
                     self._on_left = plat.win_left
                 self.pos_y = plat.y
-            if self.state == "walk" and plat is not None:
+            if self.state in ("walk", "run") and plat is not None and self.vx:
                 self.pos_x += self.vx * dt
                 d = 1 if self.vx > 0 else -1
-                if (d > 0 and self.pos_x > plat.x2 - EDGE) or (d < 0 and self.pos_x < plat.x1 + EDGE):
+                at_edge = (d > 0 and self.pos_x > plat.x2 - EDGE) or (d < 0 and self.pos_x < plat.x1 + EDGE)
+                if at_edge and self.scripted:                 # 각본 중엔 끝에서 멈추기만 (이벤트가 알아서)
+                    self.pos_x = min(max(self.pos_x, plat.x1 + EDGE), plat.x2 - EDGE)
+                    self.vx = 0.0
+                elif at_edge:
                     through = w.portal(self.pos_x, d) if plat.hwnd < 0 else None
                     if through is not None:                   # 배율이 다른 옆 모니터로 건너가기
                         self._through_portal(through)
@@ -314,7 +354,7 @@ class PetWindow(QWidget):
                             self.facing = -d
                             self._edge_choice = None
             self.tilt = self.tilt * max(0.0, 1 - dt * 10) if abs(self.tilt) > 0.5 else 0.0
-            if self.state in ("idle", "walk", "sit", "happy", "startled") and now >= self.state_until:
+            if not self.scripted and self.state in TIMED and now >= self.state_until:
                 self._choose_next()
         self._place()
         # 그림이 바뀔 때만 다시 그림 (낮잠 중엔 z 가 떠오르므로 계속)
@@ -327,10 +367,11 @@ class PetWindow(QWidget):
         if kind != self._anim_kind:          # 새 동작은 첫 장면부터
             self._anim_kind, self._anim_start = kind, self.t
         n, loop = FRAMES[kind]
+        elapsed = self.t - self._anim_start
         if kind in ONE_SHOT:                 # 한 번만 재생하고 마지막 장면에서 멈춤
-            frame = min(n - 1, int((self.t - self._anim_start) / loop * n))
-        else:
-            frame = int((self.t % loop) / loop * n)
+            frame = min(n - 1, int(elapsed / loop * n))
+        else:                                # 동작을 시작한 순간부터 첫 장면 (특기 두 장이 순서대로 보이게)
+            frame = int((elapsed % loop) / loop * n)
         now = time.monotonic()
         blink = self.blink_at <= now < self.blink_at + 0.14
         if now >= self.blink_at + 0.14:
@@ -377,6 +418,10 @@ class PetWindow(QWidget):
             p.scale(1 + sq * 0.6, 1 - sq)
         p.drawPixmap(-anchor, pm)
         p.resetTransform()
+        if time.monotonic() < self.frozen_until:   # 시간 정지: 푸르스름하게
+            p.setCompositionMode(QPainter.CompositionMode_SourceAtop)
+            p.fillRect(self.rect(), QColor(90, 120, 200, 110))
+            p.setCompositionMode(QPainter.CompositionMode_SourceOver)
         if self.state == "sleep":
             _zzz(p, WIN_W / 2 + 14, WIN_H - FOOT_MARGIN - CHAR_H + 6, self.t)
         if self.hearts:

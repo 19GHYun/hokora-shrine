@@ -94,6 +94,42 @@
     "held_2": [
       83,
       216
+    ],
+    "sleep_0": [
+      74,
+      187
+    ],
+    "sleep_1": [
+      85,
+      193
+    ],
+    "wave_0": [
+      72,
+      198
+    ],
+    "wave_1": [
+      75,
+      200
+    ],
+    "skill_0": [
+      72,
+      205
+    ],
+    "skill_1": [
+      75,
+      206
+    ],
+    "run_0": [
+      78,
+      197
+    ],
+    "run_1": [
+      80,
+      198
+    ],
+    "caught": [
+      72,
+      199
     ]
   },
   "sources": [
@@ -101,6 +137,7 @@
     "Gemini_Generated_Image_b50spdb50spdb50s.png",
     "Gemini_Generated_Image_8xy8cg8xy8cg8xy8.png",
     "Gemini_Generated_Image_b50spdb50spdb50s.png",
-    "Gemini_Generated_Image_8xy8cg8xy8cg8xy8.png"
+    "Gemini_Generated_Image_8xy8cg8xy8cg8xy8.png",
+    "reimu3.png"
   ]
 }

@@ -23,6 +23,18 @@ SHRINE_STAGES = {  # 단계 → (이름, 분당 새전, 이 단계로 올리는 
     3: ("대신사", 12, 1500),
 }
 MAX_STAGE = max(SHRINE_STAGES)
+# 신사 장식: 키 → (이름, 가격, 분당 새전 보너스, 화면에서의 높이 px)
+DECOR = {
+    "furin": ("풍경", 150, 1, 78),
+    "lantern": ("돌등롱", 200, 1, 72),
+    "omikuji_rack": ("오미쿠지 걸이", 300, 1, 62),
+    "ema_rack": ("에마 걸이", 300, 1, 62),
+    "fox": ("여우 석상", 400, 1, 60),
+    "umbrella": ("빨간 양산", 500, 1, 76),
+    "temizuya": ("손 씻는 물", 600, 2, 48),
+    "sakura": ("벚꽃나무", 800, 2, 112),
+    "saisen_box": ("큰 새전함", 1000, 3, 46),
+}
 PAT_REWARD = 1           # 쓰다듬기 한 번에 새전
 PAT_COOLDOWN = 1.5       # 같은 캐릭터를 연타해도 보상은 이 간격(초)마다
 
@@ -41,6 +53,9 @@ class GameState:
     climb: bool = True               # 캐릭터가 열려 있는 창 위에도 올라감
     omikuji_date: str = ""           # 마지막으로 오미쿠지를 뽑은 날 (YYYY-MM-DD)
     omikuji_count: int = 0
+    decor_owned: list[str] = field(default_factory=list)       # 산 장식
+    decor_pos: dict[str, float] = field(default_factory=dict)  # 놓아 둔 장식 → x 위치
+    thief_caught: int = 0
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
     @property
@@ -48,8 +63,19 @@ class GameState:
         return SHRINE_STAGES[self.shrine_level][0]
 
     @property
+    def decor_bonus(self) -> int:
+        return sum(DECOR[k][2] for k in self.decor_pos if k in DECOR)
+
+    @property
     def income_per_min(self) -> int:
-        return SHRINE_STAGES[self.shrine_level][1]
+        return SHRINE_STAGES[self.shrine_level][1] + self.decor_bonus
+
+    def buy_decor(self, key: str) -> bool:
+        if key not in DECOR or key in self.decor_owned or self.saisen < DECOR[key][1]:
+            return False
+        self.saisen -= DECOR[key][1]
+        self.decor_owned.append(key)
+        return True
 
     @property
     def next_stage_cost(self) -> int | None:

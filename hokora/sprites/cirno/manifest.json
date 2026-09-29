@@ -94,12 +94,49 @@
     "held_2": [
       83,
       230
+    ],
+    "sleep_0": [
+      66,
+      171
+    ],
+    "sleep_1": [
+      71,
+      173
+    ],
+    "wave_0": [
+      68,
+      184
+    ],
+    "wave_1": [
+      68,
+      193
+    ],
+    "skill_0": [
+      68,
+      193
+    ],
+    "skill_1": [
+      93,
+      194
+    ],
+    "run_0": [
+      71,
+      206
+    ],
+    "run_1": [
+      72,
+      206
+    ],
+    "caught": [
+      71,
+      205
     ]
   },
   "sources": [
     "Gemini_Generated_Image_yizj9yizj9yizj9y.png",
     "cirno1.png",
     "cirno2.png",
-    "cirno1.png"
+    "cirno1.png",
+    "chirno3.png"
   ]
 }

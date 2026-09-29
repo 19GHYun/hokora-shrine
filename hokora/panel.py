@@ -7,13 +7,14 @@ from typing import Callable
 from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton,
-                               QVBoxLayout, QWidget)
+                               QTabWidget, QVBoxLayout, QWidget)
 
+from .decor import decor_image
 from .omikuji import can_draw
 from .progress import UNLOCKS
 from .render import CHARACTERS, Pose, draw_character
 from .sprites import image_sprites
-from .state import SHRINE_STAGES, GameState
+from .state import DECOR, SHRINE_STAGES, GameState
 
 PORTRAIT = 76
 
@@ -35,6 +36,19 @@ QPushButton#upgrade { background: #C8102E; color: #FFFFFF; border: none; border-
                       padding: 7px 14px; font-family: 'Malgun Gothic'; font-size: 12px; font-weight: 700; }
 QPushButton#upgrade:hover { background: #A90D26; }
 QPushButton#upgrade:disabled { background: rgba(200,16,46,90); }
+QPushButton#small { background: #C8102E; color: #FFFFFF; border: none; border-radius: 6px;
+                    padding: 4px 8px; font-family: 'Malgun Gothic'; font-size: 11px; font-weight: 700; }
+QPushButton#small:hover { background: #A90D26; }
+QPushButton#small:disabled { background: rgba(200,16,46,70); }
+QPushButton#ghost { background: #FFFFFF; color: #9E1027; border: 1px solid rgba(200,16,46,110); border-radius: 6px;
+                    padding: 4px 8px; font-family: 'Malgun Gothic'; font-size: 11px; font-weight: 700; }
+QPushButton#ghost:hover { background: #FBE3E7; }
+QTabWidget::pane { border: none; }
+QTabBar::tab { background: transparent; color: #8C7479; padding: 6px 16px; margin-right: 4px;
+               font-family: 'Malgun Gothic'; font-size: 12px; font-weight: 700;
+               border-bottom: 2px solid transparent; }
+QTabBar::tab:selected { color: #B3122C; border-bottom: 2px solid #C8102E; }
+QTabBar::tab:hover { color: #9E1027; }
 """
 
 
@@ -61,8 +75,23 @@ def portrait(key: str, size: int, silhouette: bool) -> QPixmap:
     return pm
 
 
+def _decor_icon(key: str, size: int) -> QPixmap:
+    img = decor_image(key)
+    pm = QPixmap(size * 2, size * 2)
+    pm.setDevicePixelRatio(2)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.SmoothPixmapTransform)
+    sc = size / max(img.width(), img.height(), 1)
+    w, h = img.width() * sc, img.height() * sc
+    p.drawImage(QRectF((size - w) / 2, size - h, w, h), img)
+    p.end()
+    return pm
+
+
 class ShrinePanel(QWidget):
-    def __init__(self, state: GameState, on_upgrade: Callable[[], None], on_omikuji: Callable[[], None]):
+    def __init__(self, state: GameState, on_upgrade: Callable[[], None], on_omikuji: Callable[[], None],
+                 on_decor: Callable[[str, str], None], tab: int = 0):
         super().__init__(None, Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_DeleteOnClose, True)
@@ -71,6 +100,7 @@ class ShrinePanel(QWidget):
         self.state = state
         self.on_upgrade = on_upgrade
         self.on_omikuji = on_omikuji
+        self.on_decor = on_decor
         self.setFixedWidth(490)
 
         v = QVBoxLayout(self)
@@ -82,6 +112,16 @@ class ShrinePanel(QWidget):
         self.sub = QLabel(objectName="sub")
         v.addWidget(self.title)
         v.addWidget(self.sub)
+        self.tabs = QTabWidget()
+        v.addWidget(self.tabs)
+        page1, page2, page3 = QWidget(), QWidget(), QWidget()
+        p1, p3 = QVBoxLayout(page1), QVBoxLayout(page3)
+        for lay in (p1, p3):
+            lay.setContentsMargins(0, 10, 0, 0)
+            lay.setSpacing(10)
+        self.tabs.addTab(page1, "신사")
+        self.tabs.addTab(page2, "도감")
+        self.tabs.addTab(page3, "꾸미기")
         up = QHBoxLayout()
         self.up_bar = QProgressBar()
         self.up_bar.setTextVisible(False)
@@ -95,7 +135,7 @@ class ShrinePanel(QWidget):
         self.up_btn.clicked.connect(self._upgrade)
         up.addLayout(col, 1)
         up.addWidget(self.up_btn)
-        v.addLayout(up)
+        p1.addLayout(up)
 
         # ── 오미쿠지 ──
         omi = QHBoxLayout()
@@ -105,11 +145,15 @@ class ShrinePanel(QWidget):
         self.omi_btn.clicked.connect(self._omikuji)
         omi.addWidget(self.omi_label, 1)
         omi.addWidget(self.omi_btn)
-        v.addLayout(omi)
+        p1.addLayout(omi)
+        self.stats = QLabel(objectName="sub")
+        self.stats.setWordWrap(True)
+        p1.addWidget(self.stats)
+        p1.addStretch(1)
 
         # ── 도감 ──
-        v.addWidget(QLabel("도감", objectName="section"))
-        grid = QGridLayout()
+        grid = QGridLayout(page2)
+        grid.setContentsMargins(0, 10, 0, 0)
         grid.setSpacing(8)
         self.cards: dict[str, tuple] = {}
         for i, key in enumerate(UNLOCKS):
@@ -138,10 +182,42 @@ class ShrinePanel(QWidget):
             h.addLayout(info, 1)
             grid.addWidget(card, i // 2, i % 2)
             self.cards[key] = (pic, name, goals)
-        v.addLayout(grid)
 
-        self.stats = QLabel(objectName="sub")
-        v.addWidget(self.stats)
+        # ── 꾸미기 ──
+        tip = QLabel("장식을 사서 신사 옆에 놓으면 분당 새전이 늘어요. 놓은 장식은 좌우로 끌어서 옮길 수 있어요.",
+                     objectName="goal")
+        tip.setWordWrap(True)
+        p3.addWidget(tip)
+        dgrid = QGridLayout()
+        dgrid.setSpacing(6)
+        self.decor_rows: dict[str, tuple] = {}
+        for i, key in enumerate(DECOR):
+            name, price, bonus, _ = DECOR[key]
+            card = QWidget(objectName="card")
+            card.setAttribute(Qt.WA_StyledBackground, True)
+            cv = QVBoxLayout(card)
+            cv.setContentsMargins(6, 6, 6, 6)
+            cv.setSpacing(2)
+            pic = QLabel()
+            pic.setAlignment(Qt.AlignCenter)
+            pic.setPixmap(_decor_icon(key, 52))
+            title = QLabel(name, objectName="name")
+            title.setAlignment(Qt.AlignCenter)
+            info = QLabel(f"분당 +{bonus}", objectName="goal")
+            info.setAlignment(Qt.AlignCenter)
+            btn = QPushButton()
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda _=False, k=key: self._decor_clicked(k))
+            for w in (pic, title, info, btn):
+                cv.addWidget(w)
+            dgrid.addWidget(card, i // 3, i % 3)
+            self.decor_rows[key] = (btn, price)
+        p3.addLayout(dgrid)
+        p3.addStretch(1)
+        self._anchor = None
+        self.tabs.currentChanged.connect(self._fit_tab)
+        self.tabs.setCurrentIndex(tab)
+        self._fit_tab(self.tabs.currentIndex())
         self.refresh()
         self._timer = QTimer(self, timeout=self.refresh, interval=1000)   # 열려 있는 동안 새전 등 갱신
         self._timer.start()
@@ -190,6 +266,8 @@ class ShrinePanel(QWidget):
                 label, bar = goals[0]
                 label.setText("신사의 주인")
                 label.setObjectName("done")
+                label.style().unpolish(label)
+                label.style().polish(label)
                 bar.hide()
             for (label, bar), goal in zip(goals, unlock.goals):
                 if met:
@@ -206,20 +284,60 @@ class ShrinePanel(QWidget):
                     label.hide()
                     bar.hide()
         hours = s.runtime_sec / 3600
-        self.stats.setText(f"모은 새전 {s.saisen_total:,}   ·   쓰다듬기 {s.pats:,}번   ·   함께한 시간 {hours:.1f}시간")
+        self.stats.setText(f"모은 새전 {s.saisen_total:,}   ·   쓰다듬기 {s.pats:,}번   ·   함께한 시간 {hours:.1f}시간"
+                           f"   ·   붙잡은 새전 도둑 {s.thief_caught}번"
+                           + (f"\n장식 보너스 분당 +{s.decor_bonus}" if s.decor_bonus else ""))
+
+        for key, (btn, price) in self.decor_rows.items():
+            if key not in s.decor_owned:
+                btn.setText(f"구입  {price:,}")
+                btn.setObjectName("small")
+                btn.setEnabled(s.saisen >= price)
+            elif key in s.decor_pos:
+                btn.setText("치우기")
+                btn.setObjectName("ghost")
+                btn.setEnabled(True)
+            else:
+                btn.setText("놓기")
+                btn.setObjectName("small")
+                btn.setEnabled(True)
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
 
     def _omikuji(self) -> None:
         self.close()             # 오미쿠지 종이를 띄우려고 창은 닫음
         self.on_omikuji()
 
+    def _decor_clicked(self, key: str) -> None:
+        s = self.state
+        action = "buy" if key not in s.decor_owned else ("remove" if key in s.decor_pos else "place")
+        self.on_decor(key, action)
+        self.refresh()
+
     def _upgrade(self) -> None:
         self.on_upgrade()
         self.refresh()
 
-    def show_above(self, cx: float, bottom: float, screen_left: float, screen_right: float) -> None:
-        self.adjustSize()
+    def _fit_tab(self, index: int) -> None:
+        """창 높이를 지금 탭 내용에 맞춤 (QTabWidget 은 늘 가장 긴 탭 높이를 쓰므로 직접 계산).
+        아래쪽은 신사 위에 고정."""
+        page = self.tabs.widget(index)
+        lay = page.layout()
+        width = self.width() - 36
+        ph = lay.heightForWidth(width) if lay.hasHeightForWidth() else page.sizeHint().height()
+        ph = max(ph, page.minimumSizeHint().height())
+        chrome = self.sizeHint().height() - self.tabs.sizeHint().height()
+        self.setFixedHeight(chrome + self.tabs.tabBar().sizeHint().height() + ph + 8)
+        if self._anchor is not None:
+            self._place(*self._anchor)
+
+    def _place(self, cx: float, bottom: float, screen_left: float, screen_right: float) -> None:
         x = min(max(cx - self.width() / 2, screen_left + 8), screen_right - self.width() - 8)
         self.move(QPoint(round(x), round(bottom - self.height() - 6)))
+
+    def show_above(self, cx: float, bottom: float, screen_left: float, screen_right: float) -> None:
+        self._anchor = (cx, bottom, screen_left, screen_right)
+        self._fit_tab(self.tabs.currentIndex())
         self.show()
 
     def paintEvent(self, _e) -> None:

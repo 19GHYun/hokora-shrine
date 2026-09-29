@@ -17,6 +17,8 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import __version__, winutil
 from .bubble import say
+from .decor import DecorWindow
+from .events import Events
 from .omikuji import FortuneSlip, can_draw
 from .omikuji import draw as draw_omikuji
 from .panel import ShrinePanel
@@ -24,7 +26,7 @@ from .pet import PetWindow
 from .progress import UNLOCKS, newly_unlocked
 from .render import CHARACTERS, Pose, draw_character
 from .shrine import ShrineWindow
-from .state import APP_NAME, LOG_DIR, PAT_REWARD, SaveStore
+from .state import APP_NAME, DECOR, LOG_DIR, PAT_REWARD, SaveStore
 
 log = logging.getLogger("Hokora")
 ENTRY_SCRIPT = Path(sys.argv[0]).resolve()
@@ -95,6 +97,10 @@ class Game(QObject):
         self.shrine = ShrineWindow(self, prim.x() + self.state.shrine_x * prim.width(),
                                    self.state.shrine_level)
         self.shrine.set_saisen(self.state.saisen)
+        self.decors: dict[str, DecorWindow] = {
+            k: DecorWindow(self, k, x) for k, x in self.state.decor_pos.items() if k in DECOR}
+        self.events = Events(self)
+        self._panel_tab = 0
         keys = list(CHARACTERS) if os.environ.get("HOKORA_ALL") == "1" else self.state.unlocked
         for key in keys:
             self._spawn(key)
@@ -169,6 +175,9 @@ class Game(QObject):
     def _on_screen_changed(self, *_):
         self._update_bounds()
         self.shrine.set_level(self.shrine.level)     # 신사를 새 바닥 위로
+        for d in getattr(self, "decors", {}).values():
+            d.pos_x = d._clamp(d.pos_x)
+            d._place()
         log.info("화면 구성 변경")
 
     def ground_under(self, x: float) -> winutil.Platform:
@@ -189,7 +198,14 @@ class Game(QObject):
         return pet
 
     def windows(self):
-        return [self.shrine, *self.pets]
+        """뒤 → 앞 순서 (맨 위로 다시 올릴 때 이 순서대로라 캐릭터가 가장 앞)."""
+        return [*self.decors.values(), self.shrine, *self.pets]
+
+    def later(self, seconds: float, fn) -> None:
+        QTimer.singleShot(int(seconds * 1000), fn)
+
+    def try_skill(self, pet: PetWindow) -> bool:
+        return self.events.try_skill(pet)
 
     def start(self) -> None:
         for w in self.windows():
@@ -213,6 +229,7 @@ class Game(QObject):
         for pet in self.pets:
             pet.step(dt)
         self.shrine.step(dt)
+        self.events.tick()
         fps = FPS_BUSY if any(p.busy for p in self.pets) else FPS_CALM
         if self.tick_timer.interval() != 1000 // fps:
             self.tick_timer.setInterval(1000 // fps)
@@ -305,6 +322,9 @@ class Game(QObject):
 
     # ── 상호작용 (PetWindow / ShrineWindow 가 부름) ──
     def on_pat(self, pet: PetWindow) -> None:
+        if self.events.is_fleeing(pet):          # 새전 들고 도망가는 마리사를 붙잡음
+            self.events.catch()
+            return
         if pet.pat():
             self.state.pats += 1
             self.state.add_saisen(PAT_REWARD)
@@ -323,7 +343,8 @@ class Game(QObject):
     def open_panel(self) -> None:
         if self.panel is not None:
             self.panel.close()
-        self.panel = ShrinePanel(self.state, self.upgrade, self.omikuji)
+        self.panel = ShrinePanel(self.state, self.upgrade, self.omikuji, self.on_decor, self._panel_tab)
+        self.panel.tabs.currentChanged.connect(lambda i: setattr(self, "_panel_tab", i))
         self.panel.destroyed.connect(lambda *_: setattr(self, "panel", None))
         top = self.shrine.y() + 20
         self.panel.show_above(self.shrine.pos_x, top, self.left, self.right)
@@ -336,6 +357,7 @@ class Game(QObject):
         idle = winutil.idle_seconds()
         if not self.napping and idle >= NAP_AFTER:
             self.napping = True
+            self.events.cancel_thief()
             log.info("자리 비움 %.0f초 → 낮잠", idle)
         elif self.napping and idle < 3:
             self.napping = False
@@ -350,6 +372,47 @@ class Game(QObject):
         if self.napping:                     # 늦게 착지한 캐릭터도 잠들게
             for pet in self.pets:
                 pet.nap()
+
+    # ── 신사 꾸미기 ──
+    def on_decor(self, key: str, action: str) -> None:
+        s = self.state
+        if action == "buy":
+            if not s.buy_decor(key):
+                return
+            self.shrine.pop(f"-{DECOR[key][1]}")
+            log.info("장식 구입: %s", key)
+            action = "place"
+        if action == "place" and key in s.decor_owned and key not in self.decors:
+            win = DecorWindow(self, key, self._decor_spot(key))
+            self.decors[key] = win
+            s.decor_pos[key] = win.pos_x
+            if not self.hidden_for_fullscreen:
+                win.show()
+            name = DECOR[key][0]
+            self._say_at_shrine(f"{name}{_eul(name)} 놓았다!  분당 새전 +{DECOR[key][2]}")
+        elif action == "remove" and key in self.decors:
+            self.decors.pop(key).close()
+            s.decor_pos.pop(key, None)
+        self.shrine.set_saisen(s.saisen)
+        self.save()
+
+    def _decor_spot(self, key: str) -> float:
+        """신사 양옆으로 번갈아 가며, 신사·다른 장식과 겹치지 않는 가장 가까운 빈자리."""
+        w = DecorWindow.width_for(key)
+        g = self.ground_under(self.shrine.pos_x)
+        taken = [(self.shrine.pos_x - self.shrine.width() / 2, self.shrine.pos_x + self.shrine.width() / 2)]
+        taken += [(d.pos_x - d.width() / 2, d.pos_x + d.width() / 2) for d in self.decors.values()]
+        gap = 8
+        for step in range(0, 3000, 10):
+            for side in (1, -1):
+                x = self.shrine.pos_x + side * (self.shrine.width() / 2 + gap + w / 2 + step)
+                lo, hi = x - w / 2 - gap, x + w / 2 + gap
+                if g.x1 <= lo and hi <= g.x2 and all(hi <= a or lo >= b for a, b in taken):
+                    return x
+        return self.shrine.pos_x
+
+    def on_decor_moved(self, key: str, x: float) -> None:
+        self.state.decor_pos[key] = x
 
     def omikuji(self) -> None:
         """하루 한 번 운세. 새전을 받고, 캐릭터들이 기뻐하거나 깜짝 놀란다."""
@@ -424,6 +487,7 @@ class Game(QObject):
 
     def gather(self) -> None:
         """화면 밖이나 구석에 간 캐릭터를 신사 옆으로."""
+        self.events.cancel_thief()
         g = self.ground_under(self.shrine.pos_x)
         for pet in self.pets:
             pet.pos_x = min(max(self.shrine.pos_x + random.uniform(-120, 120), g.x1 + 40), g.x2 - 40)
@@ -454,6 +518,12 @@ class Game(QObject):
     def quit(self) -> None:
         self.save()
         self.app.quit()
+
+
+def _eul(word: str) -> str:
+    """받침이 있으면 "을", 없으면 "를"."""
+    code = ord(word[-1]) - 0xAC00
+    return "을" if 0 <= code < 11172 and code % 28 else "를"
 
 
 def _notify_running_instance() -> bool:

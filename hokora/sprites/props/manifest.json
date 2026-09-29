@@ -1,0 +1,46 @@
+{
+  "version": 2,
+  "standing_height": 200,
+  "facing": 1,
+  "frames": {
+    "sakura": [
+      100,
+      200
+    ],
+    "lantern": [
+      61,
+      205
+    ],
+    "fox": [
+      59,
+      203
+    ],
+    "omikuji_rack": [
+      89,
+      181
+    ],
+    "ema_rack": [
+      88,
+      184
+    ],
+    "umbrella": [
+      87,
+      194
+    ],
+    "temizuya": [
+      102,
+      169
+    ],
+    "furin": [
+      50,
+      176
+    ],
+    "saisen_box": [
+      85,
+      154
+    ]
+  },
+  "sources": [
+    "item1.png"
+  ]
+}

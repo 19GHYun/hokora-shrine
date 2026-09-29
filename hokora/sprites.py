@@ -117,8 +117,10 @@ class ImageSprites:
             dy = -abs(math.sin(t * 12.0)) * 3.0
         elif kind == "held":
             angle = math.sin(t * 10.0) * (2.5 if animated else 6.0)
-        elif kind == "sleep":
+        elif kind == "sleep" and not animated:
             dy = math.sin(t * 1.2) * 0.6
+        elif kind == "run":
+            dy = -abs(math.sin(t * 15.7)) * 2.0
         p.translate(ax, ay + dy)
         if angle:  # 머리 쪽을 잡고 있으니 머리 근처를 축으로 흔들기
             pivot = -DISPLAY_H * 0.75

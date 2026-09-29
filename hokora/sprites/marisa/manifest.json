@@ -94,12 +94,49 @@
     "held_2": [
       74,
       193
+    ],
+    "sleep_0": [
+      75,
+      195
+    ],
+    "sleep_1": [
+      74,
+      195
+    ],
+    "wave_0": [
+      75,
+      199
+    ],
+    "wave_1": [
+      77,
+      205
+    ],
+    "skill_0": [
+      75,
+      205
+    ],
+    "skill_1": [
+      75,
+      205
+    ],
+    "run_0": [
+      77,
+      190
+    ],
+    "run_1": [
+      77,
+      190
+    ],
+    "caught": [
+      67,
+      190
     ]
   },
   "sources": [
     "Gemini_Generated_Image_u1flfzu1flfzu1fl.png",
     "marisa1.png",
     "marisa2.png",
-    "marisa1.png"
+    "marisa1.png",
+    "marisa3.png"
   ]
 }
