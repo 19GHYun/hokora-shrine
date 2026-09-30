@@ -15,7 +15,7 @@ from .prayer import WISHES, blocked, fmt_left, income_multiplier, left
 from .progress import UNLOCKS
 from .render import CHARACTERS, Pose, draw_character
 from .sprites import image_sprites
-from .state import DECOR, SHRINE_STAGES, GameState
+from .state import DECOR, SAISEN_BOX, SHRINE_STAGES, GameState
 
 PORTRAIT = 76
 
@@ -93,7 +93,8 @@ def _decor_icon(key: str, size: int) -> QPixmap:
 
 class ShrinePanel(QWidget):
     def __init__(self, state: GameState, on_upgrade: Callable[[], None], on_omikuji: Callable[[], None],
-                 on_decor: Callable[[str, str], None], on_pray: Callable[[str], None], tab: int = 0):
+                 on_decor: Callable[[str, str], None], on_pray: Callable[[str], None],
+                 on_box: Callable[[], None], tab: int = 0):
         super().__init__(None, Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_DeleteOnClose, True)
@@ -104,6 +105,7 @@ class ShrinePanel(QWidget):
         self.on_omikuji = on_omikuji
         self.on_decor = on_decor
         self.on_pray = on_pray
+        self.on_box = on_box
         self.setFixedWidth(490)
 
         v = QVBoxLayout(self)
@@ -143,6 +145,17 @@ class ShrinePanel(QWidget):
         up.addLayout(col, 1)
         up.addWidget(self.up_btn)
         p1.addLayout(up)
+
+        # ── 새전함 (꺼져 있는 동안의 수입) ──
+        box = QHBoxLayout()
+        self.box_label = QLabel(objectName="goal")
+        self.box_label.setWordWrap(True)
+        self.box_btn = QPushButton(objectName="upgrade")
+        self.box_btn.setCursor(Qt.PointingHandCursor)
+        self.box_btn.clicked.connect(self._box)
+        box.addWidget(self.box_label, 1)
+        box.addWidget(self.box_btn)
+        p1.addLayout(box)
 
         # ── 오미쿠지 ──
         omi = QHBoxLayout()
@@ -304,6 +317,16 @@ class ShrinePanel(QWidget):
             self.up_btn.setText(f"{nxt_name}로 올리기")   # 신사·대신사 모두 받침 없음 → "로"
             self.up_btn.setEnabled(s.saisen >= cost)
 
+        cap_h, rate, _ = SAISEN_BOX[s.box_level]
+        nxt = s.next_box_cost
+        self.box_label.setText(f"새전함 Lv.{s.box_level} — 꺼져 있는 동안에도 최대 {cap_h}시간, 수입의 {int(rate * 100)}%를 모아요")
+        if nxt is None:
+            self.box_btn.setText("최고 단계")
+            self.box_btn.setEnabled(False)
+        else:
+            self.box_btn.setText(f"새전함 올리기  {nxt:,}")
+            self.box_btn.setEnabled(s.saisen >= nxt)
+
         if can_draw(s):
             self.omi_label.setText("오늘의 오미쿠지를 뽑아 보세요. 좋은 운세일수록 새전을 많이 받아요.")
             self.omi_btn.setText("오미쿠지 뽑기")
@@ -374,6 +397,10 @@ class ShrinePanel(QWidget):
         s = self.state
         action = "buy" if key not in s.decor_owned else ("remove" if key in s.decor_pos else "place")
         self.on_decor(key, action)
+        self.refresh()
+
+    def _box(self) -> None:
+        self.on_box()
         self.refresh()
 
     def _upgrade(self) -> None:

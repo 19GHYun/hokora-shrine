@@ -22,6 +22,16 @@ SHRINE_STAGES = {  # 단계 → (이름, 분당 새전, 이 단계로 올리는 
     1: ("호코라", 2, 0),
     2: ("신사", 5, 300),
     3: ("대신사", 12, 1500),
+    4: ("명소 신사", 25, 5000),
+    5: ("환상향 제일 신사", 50, 15000),
+}
+# 새전함: 단계 → (꺼져 있는 동안 최대 몇 시간, 그동안 수입의 몇 %, 이 단계로 올리는 비용)
+SAISEN_BOX = {
+    0: (1, 0.25, 0),
+    1: (2, 0.5, 300),
+    2: (4, 0.5, 1000),
+    3: (8, 0.75, 3000),
+    4: (12, 1.0, 8000),
 }
 MAX_STAGE = max(SHRINE_STAGES)
 # 신사 장식: 키 → (이름, 가격, 분당 새전 보너스, 화면에서의 높이 px)
@@ -59,6 +69,8 @@ class GameState:
     decor_pos: dict[str, float] = field(default_factory=dict)  # 놓아 둔 장식 → x 위치
     show_decor: bool = True          # 장식을 화면에 보일지 (꺼도 놓아 둔 장식의 효과는 그대로)
     thief_caught: int = 0
+    box_level: int = 0               # 새전함 단계 (꺼져 있는 동안의 수입)
+    last_seen: float = 0.0           # 마지막으로 저장한 실제 시각 (time.time) — 꺼져 있던 시간 계산용
     night_sec: float = 0.0           # 밤(20시~5시)에 함께한 시간 — 레밀리아
     fate_boost: bool = False
     # 참배(prayer.py): 효과가 끝나는 시각(time.time 기준)
@@ -97,6 +109,19 @@ class GameState:
     def add_saisen(self, amount: int) -> None:
         self.saisen += amount
         self.saisen_total += amount
+
+    @property
+    def next_box_cost(self) -> int | None:
+        nxt = SAISEN_BOX.get(self.box_level + 1)
+        return nxt[2] if nxt else None
+
+    def upgrade_box(self) -> bool:
+        cost = self.next_box_cost
+        if cost is None or self.saisen < cost:
+            return False
+        self.saisen -= cost
+        self.box_level += 1
+        return True
 
     def upgrade_shrine(self) -> bool:
         cost = self.next_stage_cost

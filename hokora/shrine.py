@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QWidget
 
 GROUND_MARGIN = 2
 LABEL_SPACE = 32          # 건물 위 말풍선(새전 수·+N) 자리
-STAGE_SIZE = {1: (100, 100), 2: (150, 120), 3: (200, 140)}   # 단계별 건물 그림 크기 (바닥 = 아래)
+STAGE_SIZE = {1: (100, 100), 2: (150, 120), 3: (200, 140), 4: (244, 160), 5: (304, 196)}   # 단계별 건물 그림 크기 (바닥 = 아래)
 OUTLINE = QColor(50, 34, 30, 210)
 
 
@@ -382,4 +382,89 @@ def draw_taisha(p: QPainter) -> None:
     _hall(p, 84, 140, 112, 132, grand=True)
 
 
-DRAW_STAGE = {1: draw_hokora, 2: draw_jinja, 3: draw_taisha}
+def _pagoda(p: QPainter, cx: float, ground: float, w: float, h: float, tiers: int = 5) -> None:
+    """오층탑: 층마다 좁아지는 몸체와 휘어 올라간 지붕, 꼭대기에 금색 상륜."""
+    pen = QPen(OUTLINE, 1.3, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+    base_h = h * 0.06
+    p.setPen(pen)
+    p.setBrush(QColor("#A9A39C"))
+    p.drawRoundedRect(QRectF(cx - w * 0.5, ground - base_h, w, base_h), 2, 2)
+    spire_h = h * 0.16
+    tier_h = (h - base_h - spire_h) / tiers
+    top = ground - base_h
+    for i in range(tiers):
+        k = 1 - i * 0.11                            # 위로 갈수록 좁게
+        bw, rw = w * 0.52 * k, w * 1.0 * k
+        body_top = top - tier_h * 0.55
+        p.setPen(pen)
+        p.setBrush(QColor("#F4EDE2"))
+        p.drawRect(QRectF(cx - bw / 2, body_top, bw, top - body_top))
+        p.setBrush(VERMILION)
+        for fx in (-0.5, 0.5 - 0.14):
+            p.drawRect(QRectF(cx + bw * fx, body_top, bw * 0.14, top - body_top))
+        roof = QPainterPath()                       # 휘어 올라간 처마
+        ry = body_top
+        roof.moveTo(cx - rw / 2, ry + 2)
+        roof.quadTo(cx - rw * 0.3, ry - tier_h * 0.05, cx - bw * 0.35, ry - tier_h * 0.42)
+        roof.lineTo(cx + bw * 0.35, ry - tier_h * 0.42)
+        roof.quadTo(cx + rw * 0.3, ry - tier_h * 0.05, cx + rw / 2, ry + 2)
+        roof.quadTo(cx, ry - tier_h * 0.12, cx - rw / 2, ry + 2)
+        roof.closeSubpath()
+        g = QLinearGradient(0, ry - tier_h * 0.42, 0, ry)
+        g.setColorAt(0, QColor("#5B4A4E"))
+        g.setColorAt(1, QColor("#3A2E32"))
+        p.setBrush(g)
+        p.drawPath(roof)
+        top = ry - tier_h * 0.42
+    p.setPen(QPen(QColor("#B8912E"), 2.2, Qt.SolidLine, Qt.RoundCap))   # 상륜 (금색 기둥 + 고리)
+    p.drawLine(QPointF(cx, top), QPointF(cx, top - spire_h))
+    p.setPen(QPen(OUTLINE, 0.9))
+    p.setBrush(QColor("#E8C048"))
+    for i in range(5):
+        ry = top - spire_h * (0.2 + i * 0.15)
+        p.drawEllipse(QRectF(cx - 4.5 + i * 0.5, ry - 1.5, 9 - i, 3))
+    p.drawEllipse(QRectF(cx - 3.5, top - spire_h - 5, 7, 7))
+
+
+def _fence(p: QPainter, x: float, ground: float, w: float, h: float) -> None:
+    """낮은 주홍 울타리 (다마가키)."""
+    p.setPen(QPen(OUTLINE, 1.0))
+    p.setBrush(VERMILION)
+    n = max(3, int(w // 9))
+    for i in range(n + 1):
+        px = x + i * w / n
+        p.drawRect(QRectF(px - 1.6, ground - h, 3.2, h))
+    for ry in (0.25, 0.65):
+        p.drawRect(QRectF(x - 2, ground - h * (1 - ry) - 1.5, w + 4, 3))
+
+
+def draw_meisho(p: QPainter) -> None:
+    """4단계 명소 신사: 겹 도리이 + 돌등롱 + 2층 본전 앞 주홍 울타리 + 곁에 작은 호코라. 244×160, 바닥 y=160."""
+    _shadow(p, 4, 236, 160)
+    _torii(p, 20, 160, 46, 84)            # 뒤쪽 작은 도리이
+    _torii(p, 2, 160, 60, 110)            # 앞쪽 큰 도리이
+    _lantern(p, 76, 160, 48)
+    _hall(p, 88, 160, 116, 144, grand=True)
+    _fence(p, 92, 160, 34, 16)
+    _fence(p, 166, 160, 34, 16)
+    p.save()
+    p.translate(206, 160 - 36)
+    p.scale(0.36, 0.36)
+    draw_hokora(p)
+    p.restore()
+
+
+def draw_gensokyo(p: QPainter) -> None:
+    """5단계 환상향 제일 신사: 오층탑 + 큰 도리이 + 돌등롱 둘 + 2층 본전. 304×196, 바닥 y=196."""
+    _shadow(p, 4, 296, 196)
+    _pagoda(p, 36, 196, 62, 192)
+    _torii(p, 90, 196, 50, 96)            # 뒤쪽 작은 도리이
+    _torii(p, 72, 196, 68, 128)
+    _lantern(p, 150, 196, 50)
+    _hall(p, 162, 196, 116, 160, grand=True)
+    _fence(p, 166, 196, 36, 18)
+    _fence(p, 238, 196, 36, 18)
+    _lantern(p, 290, 196, 44)
+
+
+DRAW_STAGE = {1: draw_hokora, 2: draw_jinja, 3: draw_taisha, 4: draw_meisho, 5: draw_gensokyo}

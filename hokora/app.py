@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 from . import __version__, winutil
 from .bubble import say
 from .decor import DecorWindow
+from .diary import MIN_AWAY, PetalBurst, away_card, offline_income
 from .events import Events
 from .omikuji import FortuneSlip, can_draw
 from .omikuji import draw as draw_omikuji
@@ -29,7 +30,7 @@ from .prayer import buy as buy_wish
 from .progress import UNLOCKS, newly_unlocked
 from .render import CHARACTERS, Pose, draw_character
 from .shrine import ShrineWindow
-from .state import APP_NAME, DECOR, LOG_DIR, PAT_REWARD, SaveStore
+from .state import APP_NAME, DECOR, LOG_DIR, PAT_REWARD, SAISEN_BOX, SaveStore
 
 log = logging.getLogger("Hokora")
 ENTRY_SCRIPT = Path(sys.argv[0]).resolve()
@@ -93,6 +94,16 @@ class Game(QObject):
         self.app = app
         self.store = SaveStore()
         self.state = self.store.load()
+        # 꺼져 있던 동안: 새전함에 쌓인 새전 (일기는 시작한 뒤에 보여줌)
+        now = time.time()
+        self._away = (now - self.state.last_seen) if self.state.last_seen else 0.0
+        self._away_earned = offline_income(self.state, self._away) if self._away > 60 else 0
+        if self._away_earned:
+            self.state.add_saisen(self._away_earned)
+            log.info("꺼져 있던 %.0f분 동안 새전 +%d", self._away / 60, self._away_earned)
+        self._nap_start = 0.0
+        self._nap_total = 0
+        self._cards: list = []
         self._update_bounds()
         self.pets: list[PetWindow] = []
         self.hidden_for_fullscreen = False
@@ -226,6 +237,9 @@ class Game(QObject):
         self.watch_timer.start()
         self.platform_timer.start()
         self._refresh_platforms()
+        if self._away >= MIN_AWAY:
+            QTimer.singleShot(2500, lambda: self._show_diary(self._away, time.time() - self._away,
+                                                             self._away_earned, offline=True))
         log.info("시작 — 캐릭터 %d, 신사 %s", len(self.pets), self.state.stage_name)
 
     # ── 시간 ──
@@ -385,7 +399,8 @@ class Game(QObject):
     def open_panel(self) -> None:
         if self.panel is not None:
             self.panel.close()
-        self.panel = ShrinePanel(self.state, self.upgrade, self.omikuji, self.on_decor, self.pray, self._panel_tab)
+        self.panel = ShrinePanel(self.state, self.upgrade, self.omikuji, self.on_decor, self.pray, self.upgrade_box,
+                                 self._panel_tab)
         self.panel.tabs.currentChanged.connect(lambda i: setattr(self, "_panel_tab", i))
         self.panel.destroyed.connect(lambda *_: setattr(self, "panel", None))
         top = self.shrine.y() + 20
@@ -399,11 +414,17 @@ class Game(QObject):
         idle = winutil.idle_seconds()
         if not self.napping and idle >= NAP_AFTER:
             self.napping = True
+            self._nap_start = time.time() - idle          # 실제로 자리를 비운 시각
+            self._nap_total = self.state.saisen_total
             self.events.cancel_thief()
             log.info("자리 비움 %.0f초 → 낮잠", idle)
         elif self.napping and idle < 3:
             self.napping = False
             log.info("돌아옴 → 깨어남")
+            away = time.time() - self._nap_start
+            if away >= MIN_AWAY:
+                QTimer.singleShot(1800, lambda: self._show_diary(
+                    away, self._nap_start, self.state.saisen_total - self._nap_total, offline=False))
             for pet in self.pets:
                 pet.wake()
             awake = [p for p in self.pets if p.isVisible()]
@@ -414,6 +435,15 @@ class Game(QObject):
         if self.napping:                     # 늦게 착지한 캐릭터도 잠들게
             for pet in self.pets:
                 pet.nap()
+
+    def _show_diary(self, seconds: float, start: float, earned: int, offline: bool) -> None:
+        if self.hidden_for_fullscreen:
+            return
+        self.shrine.set_saisen(self.state.saisen)
+        card = away_card(self.state, seconds, start, earned, offline)
+        self._cards.append(card)
+        card.destroyed.connect(lambda *_: self._cards.remove(card) if card in self._cards else None)
+        card.show_above(self.shrine.pos_x, self.shrine.y() + 20)
 
     # ── 참배 ──
     def pray(self, key: str) -> None:
@@ -509,8 +539,24 @@ class Game(QObject):
         self.on_shrine_moved(self.shrine.pos_x)
         log.info("신사 업그레이드 → %s", s.stage_name)
         self._say_at_shrine(f"{s.stage_name}로 커졌다!  분당 새전 {s.income_per_min}")
+        if not self.hidden_for_fullscreen:                    # 벚꽃잎 흩날림
+            burst = PetalBurst(self.shrine.pos_x, self.shrine.y() + self.shrine.height())
+            self._cards.append(burst)
+            burst.destroyed.connect(lambda *_: self._cards.remove(burst) if burst in self._cards else None)
+            burst.show()
+        for pet in self.pets:
+            pet.react(True)
         self.save()
         self.check_unlocks()
+
+    def upgrade_box(self) -> None:
+        if not self.state.upgrade_box():
+            return
+        cap_h, rate, _ = SAISEN_BOX[self.state.box_level]
+        log.info("새전함 → Lv.%d", self.state.box_level)
+        self.shrine.set_saisen(self.state.saisen)
+        self._say_at_shrine(f"새전함 Lv.{self.state.box_level}!  꺼져 있어도 최대 {cap_h}시간·{int(rate * 100)}% 모아요")
+        self.save()
 
     def check_unlocks(self) -> None:
         """조건을 채운 캐릭터가 있으면 하늘에서 신사 옆으로 떨어뜨리며 등장."""
@@ -592,6 +638,7 @@ class Game(QObject):
 
     # ── 저장 / 종료 ──
     def save(self) -> None:
+        self.state.last_seen = time.time()
         if self.store.save(self.state):
             log.debug("저장: 새전 %d", self.state.saisen)
 
