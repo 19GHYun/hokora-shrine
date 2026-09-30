@@ -17,6 +17,7 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import __version__, winutil
+from . import affection as aff
 from .bubble import say
 from .decor import DecorWindow
 from .diary import MIN_AWAY, PetalBurst, away_card, offline_income
@@ -381,7 +382,11 @@ class Game(QObject):
             self.events.catch()
             return
         if pet.pat():
-            reward = PAT_REWARD * pat_multiplier(self.state)
+            reward = PAT_REWARD * pat_multiplier(self.state) * aff.pat_bonus(self.state, pet.ch.key)
+            now = time.monotonic()
+            if now - getattr(pet, "_aff_at", 0.0) >= aff.PAT_GAIN_EVERY:   # 쓰다듬으면 조금씩 친해짐
+                pet._aff_at = now
+                self._add_affection(pet, 1)
             self.state.pats += 1
             self.state.add_saisen(reward)
             self.shrine.set_saisen(self.state.saisen)
@@ -414,6 +419,7 @@ class Game(QObject):
         idle = winutil.idle_seconds()
         if not self.napping and idle >= NAP_AFTER:
             self.napping = True
+            self.events.cancel_play()
             self._nap_start = time.time() - idle          # 실제로 자리를 비운 시각
             self._nap_total = self.state.saisen_total
             self.events.cancel_thief()
@@ -444,6 +450,56 @@ class Game(QObject):
         self._cards.append(card)
         card.destroyed.connect(lambda *_: self._cards.remove(card) if card in self._cards else None)
         card.show_above(self.shrine.pos_x, self.shrine.y() + 20)
+
+    # ── 친해지기: 말 걸기·선물 ──
+    def on_pet_menu(self, pet: PetWindow, global_pos: QPoint) -> None:
+        s, key = self.state, pet.ch.key
+        menu = QMenu()
+        menu.setStyleSheet(MENU_STYLE)
+        head = menu.addAction(f"{pet.ch.name}   {aff.hearts(s, key)}")
+        head.setEnabled(False)
+        menu.addAction("💬 말 걸기", lambda: self.talk_to(pet))
+        gifts = menu.addMenu("🎁 선물하기")
+        gifts.setStyleSheet(MENU_STYLE)
+        known = aff.level(s, key) >= 2                      # 친해지면 좋아하는 선물을 알게 됨
+        for gk, (name, icon, price) in aff.GIFTS.items():
+            fav = "  ♥ 좋아함" if known and gk in aff.FAVORITES.get(key, ()) else ""
+            a = gifts.addAction(f"{icon} {name}  (새전 {price}){fav}", lambda gk=gk: self.give_gift(pet, gk))
+            a.setEnabled(s.saisen >= price)
+        menu.addSeparator()
+        self._fill_menu(menu)
+        menu.exec(global_pos)
+
+    def _add_affection(self, pet: PetWindow, amount: int) -> None:
+        if aff.add(self.state, pet.ch.key, amount):
+            lv = aff.level(self.state, pet.ch.key)
+            say(f"♥ {aff.josa(pet.ch.name, '과', '와')} 더 친해졌다!  {aff.hearts(self.state, pet.ch.key)}",
+                pet.pos_x, pet.pos_y - 76, 3.5)
+            pet.hearts.extend([[0.0, pet.width() / 2 + dx, 40] for dx in (-12, 0, 12)])
+            log.info("호감도: %s Lv.%d", pet.ch.key, lv)
+
+    def talk_to(self, pet: PetWindow) -> None:
+        line, gained = aff.talk(self.state, pet.ch.key)
+        pet.facing = 1 if self.cursor.x() > pet.pos_x else -1
+        if pet.grounded:
+            pet.act("wave", 1.6)
+        say(line, pet.pos_x, pet.pos_y - 76, 3.5)
+        if gained:
+            self.later(1.2, lambda: self._add_affection(pet, gained))
+        self.save()
+
+    def give_gift(self, pet: PetWindow, gift_key: str) -> None:
+        ok, gained, fav = aff.gift(self.state, pet.ch.key, gift_key)
+        if not ok:
+            return
+        name, icon, _ = aff.GIFTS[gift_key]
+        self.shrine.set_saisen(self.state.saisen)
+        pet.react(True)
+        line = random.choice([f"{icon} {name}! 제일 좋아해!", f"{icon} 와아, {aff.josa(name, '이다', '다')}!"]) if fav else \
+            random.choice([f"{icon} 고마워!", f"{icon} 잘 먹을게~"])
+        say(line, pet.pos_x, pet.pos_y - 76, 3.0)
+        self._add_affection(pet, gained)
+        self.save()
 
     # ── 참배 ──
     def pray(self, key: str) -> None:
@@ -614,6 +670,7 @@ class Game(QObject):
     def gather(self) -> None:
         """화면 밖이나 구석에 간 캐릭터를 신사 옆으로."""
         self.events.cancel_thief()
+        self.events.cancel_play()
         g = self.ground_under(self.shrine.pos_x)
         for pet in self.pets:
             pet.pos_x = min(max(self.shrine.pos_x + random.uniform(-120, 120), g.x1 + 40), g.x2 - 40)

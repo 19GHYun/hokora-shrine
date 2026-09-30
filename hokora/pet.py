@@ -144,6 +144,7 @@ class World(Protocol):
     def has_surface_below(self, x: float, y: float) -> bool: ...
     def portal(self, x: float, direction: int) -> float | None: ...   # 모니터 사이 틈 건너편
     def cursor_taken(self, pet: "PetWindow") -> bool: ...    # 다른 캐릭터가 이미 커서에 타고 있음
+    def on_pet_menu(self, pet: "PetWindow", global_pos) -> None: ...
 
 
 class PetWindow(QWidget):
@@ -624,7 +625,7 @@ class PetWindow(QWidget):
             self._trail.clear()
             self._trail.append((time.monotonic(), e.globalPosition()))
         elif e.button() == Qt.RightButton:
-            self.world.on_context_menu(e.globalPosition().toPoint())
+            self.world.on_pet_menu(self, e.globalPosition().toPoint())
 
     def mouseMoveEvent(self, e) -> None:
         if self._press_pos is None:

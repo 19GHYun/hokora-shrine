@@ -18,6 +18,7 @@ from .bubble import say
 from .omikuji import can_draw
 from .prayer import charm_active
 from .pet import RUN_SPEED as RUN
+from .play import Duel, Tag, combo_for
 
 if TYPE_CHECKING:
     from .app import Game
@@ -37,6 +38,8 @@ THIEF_COOLDOWN = 600.0
 THIEF_MIN_SAISEN = 30
 FLEE_TIME = 7.0
 BUBBLE_UP = 76           # 캐릭터 발에서 말풍선 꼬리까지
+PLAY_CHECK = 60.0        # 이 간격으로 놀이(술래잡기·탄막)를 할지 주사위
+PLAY_CHANCE = 0.12       # → 평균 8분쯤에 한 번
 
 
 class Events:
@@ -50,17 +53,59 @@ class Events:
         self.thief_phase = ""
         self.thief_until = 0.0
         self.stolen = 0
+        self.tag: Tag | None = None
+        self.duel: Duel | None = None
+        self._play_next = time.monotonic() + PLAY_CHECK * 2
 
     # ── 공통 ──
-    def _say(self, pet: "PetWindow", text: str) -> None:
+    def _say(self, pet: "PetWindow", text: str, seconds: float = 2.5) -> None:
         if not self.game.hidden_for_fullscreen:
-            say(text, pet.pos_x, pet.pos_y - BUBBLE_UP, 2.5)
+            say(text, pet.pos_x, pet.pos_y - BUBBLE_UP, seconds)
 
     def tick(self) -> None:
         if self.game.hidden_for_fullscreen or self.game.napping:
             return
         self._meetings()
         self._thief_tick()
+        self._play_tick()
+
+    # ── 놀이: 술래잡기·탄막놀이 ──
+    def _play_tick(self) -> None:
+        now = time.monotonic()
+        if self.tag is not None and not self.tag.tick():
+            self.tag = None
+        if self.tag or self.duel or self.thief or now < self._play_next:
+            return
+        self._play_next = now + PLAY_CHECK
+        if random.random() < PLAY_CHANCE:
+            self.start_play(random.choice(("tag", "duel")))
+
+    def start_play(self, kind: str) -> bool:
+        """같은 바닥에 있는 친구들로 놀이를 시작 (사람이 모자라면 False)."""
+        free = [p for p in self.game.pets if p.grounded and p.on is not None and p.on < 0]
+        by_ground: dict[int, list] = {}
+        for p in free:
+            by_ground.setdefault(p.on, []).append(p)
+        group = max(by_ground.values(), key=len, default=[])
+        if kind == "tag" and len(group) >= 3:
+            self.tag = Tag(self, random.sample(group, min(4, len(group))))
+            return True
+        if kind == "duel" and len(group) >= 2:
+            a = random.choice(group)
+            near = [p for p in group if p is not a and 60 < abs(p.pos_x - a.pos_x) < 420]
+            if near:
+                self.duel = Duel(self, a, random.choice(near))
+                self.duel.destroyed.connect(lambda *_: setattr(self, "duel", None))
+                self.duel.show()
+                return True
+        return False
+
+    def cancel_play(self) -> None:
+        if self.tag is not None:
+            self.tag.end()
+            self.tag = None
+        if self.duel is not None:
+            self.duel.finish()
 
     # ── 마주치면 인사 ──
     def _meetings(self) -> None:
@@ -74,7 +119,16 @@ class Events:
                 if now - self._met.get(pair, -1e9) < MEET_COOLDOWN:
                     continue
                 self._met[pair] = now
-                if random.random() < 0.6:
+                combo = combo_for(a, b)
+                if combo:                                   # 콤비는 특별한 행동
+                    x, y, (sx, sy, lx, ly, secs) = combo
+                    for me, other, st in ((x, y, sx), (y, x, sy)):
+                        me.act(st, secs)
+                        me.facing = 1 if other.pos_x > me.pos_x else -1
+                    self._say(x, lx, 2.8)
+                    self.game.later(1.4, lambda: self._say(y, ly, 2.8))
+                    x.hearts.append([0.0, x.width() / 2, 40])
+                elif random.random() < 0.6:
                     for me, other in ((a, b), (b, a)):
                         me.act("wave", 1.8)
                         me.facing = 1 if other.pos_x > me.pos_x else -1

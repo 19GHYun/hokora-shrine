@@ -9,6 +9,7 @@ from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen,
 from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton,
                                QTabBar, QVBoxLayout, QWidget)
 
+from . import affection as aff
 from .decor import decor_image
 from .omikuji import can_draw
 from .prayer import WISHES, blocked, fmt_left, income_multiplier, left
@@ -89,6 +90,11 @@ def _decor_icon(key: str, size: int) -> QPixmap:
     p.drawImage(QRectF((size - w) / 2, size - h, w, h), img)
     p.end()
     return pm
+
+
+def _hearts(s: GameState, key: str) -> str:
+    """도감 카드의 하트 (분홍색)."""
+    return f"<span style='color:#E0457B'>{aff.hearts(s, key)}</span>"
 
 
 class ShrinePanel(QWidget):
@@ -347,12 +353,12 @@ class ShrinePanel(QWidget):
             unlock = UNLOCKS[key]
             if not unlock.goals:
                 label, bar = goals[0]
-                label.setText("신사의 주인")
+                label.setText(f"신사의 주인<br>{_hearts(s, key)}")
                 self._role(label, "done")
                 bar.hide()
             for (label, bar), goal in zip(goals, unlock.goals):
                 if met:
-                    label.setText("함께 지내는 중")
+                    label.setText(f"함께 지내는 중<br>{_hearts(s, key)}")
                     self._role(label, "done")
                     bar.hide()
                 else:

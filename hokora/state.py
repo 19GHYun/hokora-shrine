@@ -70,6 +70,9 @@ class GameState:
     show_decor: bool = True          # 장식을 화면에 보일지 (꺼도 놓아 둔 장식의 효과는 그대로)
     thief_caught: int = 0
     box_level: int = 0               # 새전함 단계 (꺼져 있는 동안의 수입)
+    affection: dict[str, int] = field(default_factory=dict)   # 캐릭터 → 호감도 (affection.py)
+    talk_date: dict[str, str] = field(default_factory=dict)   # 캐릭터 → 마지막으로 말 건 날
+    gifts_given: int = 0
     last_seen: float = 0.0           # 마지막으로 저장한 실제 시각 (time.time) — 꺼져 있던 시간 계산용
     night_sec: float = 0.0           # 밤(20시~5시)에 함께한 시간 — 레밀리아
     fate_boost: bool = False
