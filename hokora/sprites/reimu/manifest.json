@@ -4,87 +4,87 @@
   "facing": 1,
   "frames": {
     "idle": [
-      83,
-      209
+      72,
+      206
     ],
     "blink": [
-      74,
+      72,
       206
     ],
     "walk_0": [
-      74,
-      203
+      71,
+      201
     ],
     "walk_1": [
-      73,
-      203
+      71,
+      201
     ],
     "sit": [
-      83,
-      209
+      76,
+      203
     ],
     "happy": [
-      83,
-      209
+      74,
+      205
     ],
     "held": [
-      83,
+      86,
       209
     ],
     "sit_1": [
-      83,
-      209
+      70,
+      198
     ],
     "idle_1": [
-      75,
-      206
-    ],
-    "fall": [
-      83,
-      209
-    ],
-    "sleep": [
-      83,
-      209
-    ],
-    "walk_2": [
       73,
       206
     ],
+    "fall": [
+      71,
+      195
+    ],
+    "sleep": [
+      77,
+      195
+    ],
+    "walk_2": [
+      71,
+      203
+    ],
     "walk_3": [
-      72,
-      204
+      70,
+      202
     ],
     "walk_4": [
-      72,
-      205
+      70,
+      203
     ],
     "walk_5": [
-      72,
-      205
+      70,
+      203
     ],
     "idle_0": [
-      74,
+      72,
       206
     ],
     "happy_0": [
-      72,
+      69,
       200
     ],
     "happy_1": [
-      72,
+      70,
       210
     ],
     "happy_2": [
-      80,
+      78,
       232
     ],
     "happy_3": [
-      70,
+      68,
       193
     ],
     "held_0": [
-      77,
+      75,
       214
     ],
     "held_1": [
@@ -92,23 +92,23 @@
       215
     ],
     "held_2": [
-      83,
+      86,
       216
     ],
     "sleep_0": [
-      74,
+      71,
       187
     ],
     "sleep_1": [
-      85,
+      78,
       193
     ],
     "wave_0": [
-      72,
+      73,
       198
     ],
     "wave_1": [
-      75,
+      76,
       200
     ],
     "skill_0": [
@@ -116,26 +116,24 @@
       205
     ],
     "skill_1": [
-      75,
+      80,
       206
     ],
     "run_0": [
-      78,
+      80,
       197
     ],
     "run_1": [
-      80,
+      82,
       198
     ],
     "caught": [
-      72,
+      68,
       199
     ]
   },
   "sources": [
     "Gemini_Generated_Image_ftv5b5ftv5b5ftv5.png",
-    "Gemini_Generated_Image_b50spdb50spdb50s.png",
-    "Gemini_Generated_Image_8xy8cg8xy8cg8xy8.png",
     "Gemini_Generated_Image_b50spdb50spdb50s.png",
     "Gemini_Generated_Image_8xy8cg8xy8cg8xy8.png",
     "reimu3.png"

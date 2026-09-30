@@ -28,6 +28,7 @@ FOOT_MARGIN = 18                # 창 아래쪽과 발 사이 (돌 때 발이 �
 SPIN_PIVOT = CHAR_H * 0.5       # 던져져 돌 때의 회전 중심: 발에서 몸 가운데까지
 GRAVITY = 2200.0                # px/s²
 WALK_SPEED = (22.0, 34.0)       # px/s
+WALK_STRIDE = 26.0              # 걷기 한 바퀴(두 발짝)에 나아가는 거리 px — 발이 바닥에서 미끄러지지 않게
 MAX_THROW = 2600.0
 JUMP_CHANCE = 0.18              # 다음 행동을 고를 때 창으로 점프할 확률 (창 위 걷기를 켰을 때)
 JUMP_CLEAR = 40.0               # 목표보다 이만큼 더 높이 뛰어오름
@@ -36,7 +37,7 @@ EDGE = 10.0                     # 창 끝에서 이만큼 앞에서 돌아서거
 # 프레임 수는 그림 장수(2·3·4·6장)로 나누어떨어지게 12.
 FRAMES = {
     "idle": (12, 2.856),   # sin(2.2t) — 숨쉬기 한 번
-    "walk": (12, 0.698),   # sin(9t) — 두 발짝(왼발+오른발)
+    "walk": (24, 0.698),   # 두 발짝(왼발+오른발). 그림 2·3·4·6·8장 어느 것이든 고르게 나뉘게 24. 실제 재생은 걸은 거리로
     "sit": (8, 8.0),       # 그림 캐릭터는 4초마다 앉은 자세를 바꿔 두리번거림
     "happy": (12, 1.0),    # 쓰다듬은 순간부터 1초 동안 한 번 (움츠림 → 점프 → 착지)
     "held": (12, 0.628),   # sin(10t) — 버둥 한 번
@@ -154,6 +155,7 @@ class PetWindow(QWidget):
         self._drawn_key = None
         self._placed = None
         self._anim_kind, self._anim_start = self.state, self.t
+        self.walk_phase = 0.0            # 걷기 동작이 얼마나 진행됐는지 (걸은 거리 / WALK_STRIDE)
         self.on: int | None = ground.hwnd  # 올라서 있는 발판 (창 hwnd, 작업표시줄 바닥은 음수, 공중은 None)
         self._on_left = ground.win_left    # 그 창의 왼쪽 끝 — 창이 옮겨지면 같이 따라감
         self._edge_choice: bool | None = None   # 창 끝에 왔을 때 떨어질지(True) 돌아설지(False)
@@ -164,7 +166,7 @@ class PetWindow(QWidget):
     @property
     def busy(self) -> bool:
         """부드럽게 움직여야 하는 중(던져짐·잡힘) — 이때만 프레임을 올린다."""
-        return self.state in ("fall", "held", "jump", "run")
+        return self.state in ("fall", "held", "jump", "run", "walk")
 
     @property
     def grounded(self) -> bool:
@@ -335,6 +337,7 @@ class PetWindow(QWidget):
                 self.pos_y = plat.y
             if self.state in ("walk", "run") and plat is not None and self.vx:
                 self.pos_x += self.vx * dt
+                self.walk_phase += abs(self.vx) * dt / WALK_STRIDE
                 d = 1 if self.vx > 0 else -1
                 at_edge = (d > 0 and self.pos_x > plat.x2 - EDGE) or (d < 0 and self.pos_x < plat.x1 + EDGE)
                 if at_edge and self.scripted:                 # 각본 중엔 끝에서 멈추기만 (이벤트가 알아서)
@@ -368,7 +371,9 @@ class PetWindow(QWidget):
             self._anim_kind, self._anim_start = kind, self.t
         n, loop = FRAMES[kind]
         elapsed = self.t - self._anim_start
-        if kind in ONE_SHOT:                 # 한 번만 재생하고 마지막 장면에서 멈춤
+        if kind == "walk":                   # 걸은 거리만큼 발을 내딛음 (속도가 달라도 발이 미끄러지지 않음)
+            frame = int((self.walk_phase % 1.0) * n)
+        elif kind in ONE_SHOT:               # 한 번만 재생하고 마지막 장면에서 멈춤
             frame = min(n - 1, int(elapsed / loop * n))
         else:                                # 동작을 시작한 순간부터 첫 장면 (특기 두 장이 순서대로 보이게)
             frame = int((elapsed % loop) / loop * n)

@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Callable
 
 from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton,
-                               QTabWidget, QVBoxLayout, QWidget)
+                               QTabBar, QVBoxLayout, QWidget)
 
 from .decor import decor_image
 from .omikuji import can_draw
@@ -46,7 +46,6 @@ QPushButton#ghost { background: #FFFFFF; color: #9E1027; border: 1px solid rgba(
 QPushButton#ghost:hover { background: #FBE3E7; }
 QCheckBox { color: #2B1D21; font-family: 'Malgun Gothic'; font-size: 12px; font-weight: 700; }
 QCheckBox::indicator { width: 15px; height: 15px; }
-QTabWidget::pane { border: none; }
 QTabBar::tab { background: transparent; color: #8C7479; padding: 6px 16px; margin-right: 4px;
                font-family: 'Malgun Gothic'; font-size: 12px; font-weight: 700;
                border-bottom: 2px solid transparent; }
@@ -116,17 +115,20 @@ class ShrinePanel(QWidget):
         self.sub = QLabel(objectName="sub")
         v.addWidget(self.title)
         v.addWidget(self.sub)
-        self.tabs = QTabWidget()
+        self.tabs = QTabBar()
+        self.tabs.setDrawBase(False)
+        self.tabs.setExpanding(False)
         v.addWidget(self.tabs)
         page1, page2, page3, page4 = QWidget(), QWidget(), QWidget(), QWidget()
         p1, p3, p4 = QVBoxLayout(page1), QVBoxLayout(page3), QVBoxLayout(page4)
         for lay in (p1, p3, p4):
-            lay.setContentsMargins(0, 10, 0, 0)
+            lay.setContentsMargins(0, 4, 0, 0)
             lay.setSpacing(10)
-        self.tabs.addTab(page1, "신사")
-        self.tabs.addTab(page4, "참배")
-        self.tabs.addTab(page2, "도감")
-        self.tabs.addTab(page3, "꾸미기")
+        self.pages = [page1, page4, page2, page3]
+        for name, page in zip(("신사", "참배", "도감", "꾸미기"), self.pages):
+            self.tabs.addTab(name)
+            page.hide()
+            v.addWidget(page)
         up = QHBoxLayout()
         self.up_bar = QProgressBar()
         self.up_bar.setTextVisible(False)
@@ -154,11 +156,10 @@ class ShrinePanel(QWidget):
         self.stats = QLabel(objectName="sub")
         self.stats.setWordWrap(True)
         p1.addWidget(self.stats)
-        p1.addStretch(1)
 
         # ── 도감 ──
         grid = QGridLayout(page2)
-        grid.setContentsMargins(0, 10, 0, 0)
+        grid.setContentsMargins(0, 4, 0, 0)
         grid.setSpacing(8)
         self.cards: dict[str, tuple] = {}
         for i, key in enumerate(UNLOCKS):
@@ -218,7 +219,6 @@ class ShrinePanel(QWidget):
             h.addWidget(btn)
             p4.addWidget(card)
             self.wish_rows[key] = (btn, status)
-        p4.addStretch(1)
 
         # ── 꾸미기 ──
         tip = QLabel("장식을 사서 신사 옆에 놓으면 분당 새전이 늘어요. 놓은 장식은 좌우로 끌어서 옮길 수 있어요.",
@@ -255,14 +255,23 @@ class ShrinePanel(QWidget):
             dgrid.addWidget(card, i // 3, i % 3)
             self.decor_rows[key] = (btn, price)
         p3.addLayout(dgrid)
-        p3.addStretch(1)
         self._anchor = None
-        self.tabs.currentChanged.connect(self._fit_tab)
+        self._top: float | None = None
+        self._roles: dict[int, str] = {}
         self.tabs.setCurrentIndex(tab)
-        self._fit_tab(self.tabs.currentIndex())
+        self.tabs.currentChanged.connect(self._fit_tab)
         self.refresh()
+        self._fit_tab(self.tabs.currentIndex())
         self._timer = QTimer(self, timeout=self.refresh, interval=1000)   # 열려 있는 동안 새전 등 갱신
         self._timer.start()
+
+    def _role(self, w: QWidget, name: str) -> None:
+        """스타일시트 이름을 바꾸고 다시 입힘 — 바뀔 때만."""
+        if self._roles.get(id(w)) != name:
+            self._roles[id(w)] = name
+            w.setObjectName(name)
+            w.style().unpolish(w)
+            w.style().polish(w)
 
     # ── 내용 ──
     def refresh(self) -> None:
@@ -311,27 +320,22 @@ class ShrinePanel(QWidget):
                 pic.setPixmap(portrait(key, PORTRAIT, silhouette=not met))
                 pic.setProperty("met", met)
             name.setText(CHARACTERS[key].name if met else "???")
-            name.setObjectName("name" if met else "locked")
-            name.style().unpolish(name)
-            name.style().polish(name)
+            self._role(name, "name" if met else "locked")
             unlock = UNLOCKS[key]
             if not unlock.goals:
                 label, bar = goals[0]
                 label.setText("신사의 주인")
-                label.setObjectName("done")
-                label.style().unpolish(label)
-                label.style().polish(label)
+                self._role(label, "done")
                 bar.hide()
             for (label, bar), goal in zip(goals, unlock.goals):
                 if met:
                     label.setText("함께 지내는 중")
-                    label.setObjectName("done")
+                    self._role(label, "done")
                     bar.hide()
                 else:
                     label.setText(goal.label(s))
+                    self._role(label, "goal")
                     bar.setValue(int(goal.ratio(s) * 1000))
-                label.style().unpolish(label)
-                label.style().polish(label)
             if met:                                   # 조건이 여러 개여도 "함께 지내는 중" 한 줄만
                 for label, bar in goals[1:]:
                     label.hide()
@@ -344,18 +348,16 @@ class ShrinePanel(QWidget):
         for key, (btn, price) in self.decor_rows.items():
             if key not in s.decor_owned:
                 btn.setText(f"구입  {price:,}")
-                btn.setObjectName("small")
+                self._role(btn, "small")
                 btn.setEnabled(s.saisen >= price)
             elif key in s.decor_pos:
                 btn.setText("치우기")
-                btn.setObjectName("ghost")
+                self._role(btn, "ghost")
                 btn.setEnabled(True)
             else:
                 btn.setText("놓기")
-                btn.setObjectName("small")
+                self._role(btn, "small")
                 btn.setEnabled(True)
-            btn.style().unpolish(btn)
-            btn.style().polish(btn)
 
     def _omikuji(self) -> None:
         self.close()             # 오미쿠지 종이를 띄우려고 창은 닫음
@@ -379,24 +381,40 @@ class ShrinePanel(QWidget):
         self.refresh()
 
     def _fit_tab(self, index: int) -> None:
-        """창 높이를 지금 탭 내용에 맞춤 (QTabWidget 은 늘 가장 긴 탭 높이를 쓰므로 직접 계산).
-        아래쪽은 신사 위에 고정."""
-        page = self.tabs.widget(index)
-        lay = page.layout()
-        width = self.width() - 36
-        ph = lay.heightForWidth(width) if lay.hasHeightForWidth() else page.sizeHint().height()
-        ph = max(ph, page.minimumSizeHint().height()) + 14   # 줄바꿈된 글자가 잘리지 않게 여유
-        chrome = self.sizeHint().height() - self.tabs.sizeHint().height()
-        self.setFixedHeight(chrome + self.tabs.tabBar().sizeHint().height() + ph + 8)
-        if self._anchor is not None:
-            self._place(*self._anchor)
+        """지금 탭의 페이지만 보이게 하고 창 높이를 내용에 맞춤.
 
-    def _place(self, cx: float, bottom: float, screen_left: float, screen_right: float) -> None:
-        x = min(max(cx - self.width() / 2, screen_left + 8), screen_right - self.width() - 8)
-        self.move(QPoint(round(x), round(bottom - self.height() - 6)))
+        처음 열 때는 창 아래쪽을 신사 바로 위에 두고, 탭을 바꿀 때는 창 위쪽(탭 막대)을 제자리에 둔다.
+        그래야 누른 탭이 마우스 밑에서 도망가지 않는다. 크기와 위치는 한 번에 바꾼다(두 번에 나누면 깜빡임).
+        """
+        for i, page in enumerate(self.pages):
+            page.setVisible(i == index)
+        lay = self.layout()
+        lay.activate()
+        w = self.width()
+        h = lay.totalHeightForWidth(w) if lay.hasHeightForWidth() else lay.totalSizeHint().height()
+        h = max(h, lay.totalMinimumSize().height())
+        if self._anchor is None:
+            self.resize(w, h)
+            return
+        cx, bottom, screen_left, screen_right = self._anchor
+        x = min(max(cx - w / 2, screen_left + 8), screen_right - w - 8)
+        area = self._area()
+        if self._top is None:                           # 처음: 신사 바로 위
+            y = bottom - h - 6
+        else:                                           # 탭 바꿈: 위쪽 고정, 화면 아래로 넘치면 그만큼만 올림
+            y = min(self._top, area.bottom() - h - 4)
+        y = max(y, area.top() + 4)
+        self._top = y
+        self.setGeometry(round(x), round(y), w, h)
+
+    def _area(self):
+        cx, bottom = self._anchor[0], self._anchor[1]
+        sc = QGuiApplication.screenAt(QPoint(round(cx), round(bottom) - 10)) or QGuiApplication.primaryScreen()
+        return sc.availableGeometry()
 
     def show_above(self, cx: float, bottom: float, screen_left: float, screen_right: float) -> None:
         self._anchor = (cx, bottom, screen_left, screen_right)
+        self._top = None
         self._fit_tab(self.tabs.currentIndex())
         self.show()
 

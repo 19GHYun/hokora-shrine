@@ -34,8 +34,8 @@ from .state import APP_NAME, DECOR, LOG_DIR, PAT_REWARD, SaveStore
 log = logging.getLogger("Hokora")
 ENTRY_SCRIPT = Path(sys.argv[0]).resolve()
 INSTANCE_SERVER = f"{APP_NAME}-{getpass.getuser()}"
-FPS_BUSY = 30            # 던지거나 잡고 있을 때
-FPS_CALM = 15            # 평소 (걷기·가만히) — CPU 를 아끼려고
+FPS_BUSY = 30            # 걷기·뛰기·던지기·잡기 — 부드럽게
+FPS_CALM = 15            # 모두 가만히 있거나 앉아 있을 때 — CPU 를 아끼려고
 PLATFORM_SLOW = 400      # 창 발판을 다시 읽는 간격(ms)
 PLATFORM_FAST = 100      # 캐릭터가 창 위에 있을 때 (창을 끌면 바로 따라가게)
 JUMP_UP_MAX = 700        # 이보다 높은 창으로는 점프하지 않음 (px) — 작업표시줄에서 화면 중간쯤 창까지

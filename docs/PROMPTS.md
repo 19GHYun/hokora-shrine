@@ -127,3 +127,43 @@ Background: solid flat pure [BG]. No shadow, no text, no other objects.
 - 플랑드르: `Flandre Scarlet from Touhou Project: short blonde hair with a small side ponytail on her left, a white mob cap with a red ribbon, red eyes, a small fang, a red vest and red skirt with white frills, a white blouse with short puffy sleeves, a small yellow ascot, red shoes. Wings: two thin black branch-like wings with hanging crystal gems colored red, orange, yellow, cyan, blue and purple (NO green crystals). The wings must stay close to her body.`
 - 레밀리아: `Remilia Scarlet from Touhou Project: short light lavender-blue hair, a pale pink mob cap with a red ribbon, red eyes, a small fang, a pale pink dress with short puffy sleeves, red ribbons and white frills, pink shoes, small dark purple bat wings on her back close to her body.`
 - 요우무: `Konpaku Youmu from Touhou Project: short silver-white bob hair, a black hairband with a black ribbon bow, blue-gray eyes, a green vest over a white short-sleeved blouse, a green skirt, a small black bow tie, brown shoes, two katanas on her back (one long, one short). Her white ghost half (a round white wispy spirit with a short tail) floats right behind her shoulder, overlapping her body so it touches her.`
+
+## 걷기만 다시 뽑기 (8장)
+
+지금 캐릭터의 서 있는 그림(`hokora/sprites/<캐릭터>/idle_0.png`)을 첨부합니다.
+초록 캐릭터(사나에·요우무)는 `#00FF00` / `green` 을 `#FF00FF` / `magenta` 로 바꿉니다.
+
+```
+Using the attached image as the exact character and style reference, draw a smooth 8-frame
+WALK CYCLE of this same character as ONE sprite sheet.
+
+VERY IMPORTANT - keep these identical in all 8 frames:
+- The character always faces the SAME direction as the reference: body and face turned toward
+  the viewer's RIGHT at the same 3/4 angle. Never turn the head or body toward the viewer or to the left.
+- Same face, same expression, same outfit, same colors, same thick outline, same size and scale.
+- The head stays in the same place; only a tiny up-and-down bob is allowed.
+- Only the legs and arms move. Walking in place (like on a treadmill), no forward travel.
+
+Layout: 2 rows x 4 columns, 8 frames, read left to right, top to bottom. Every frame full body,
+standing on the same bottom line, with clear green space between frames so that no two frames touch.
+
+1. Contact: right foot forward touching the ground with the heel, left foot behind, left arm forward.
+2. Down: right foot flat, body slightly lower, left foot starting to lift.
+3. Passing: left foot passing under the body, body at its highest, arms at the sides.
+4. Up: left foot swinging forward, right heel lifting.
+5. Contact: left foot forward touching the ground with the heel, right foot behind, right arm forward.
+6. Down: left foot flat, body slightly lower, right foot starting to lift.
+7. Passing: right foot passing under the body, body at its highest, arms at the sides.
+8. Up: right foot swinging forward, left heel lifting.
+
+Background: solid flat pure green (#00FF00) everywhere, no grid lines, no borders,
+no numbers, no text, no shadows.
+```
+
+넣을 때는 옛 걷기 그림을 지우고 새 8장으로 바꿉니다.
+
+```
+python tools/import_sheet.py 걷기.png reimu --preset walk
+```
+
+8장이 아니면 `--names walk_0,walk_1,…` 로 장수에 맞게 적습니다 (`--preset walk` 없이 쓰면 옛 걷기 그림이 남으니 `--names` 앞에 옛 파일을 지우거나, 같은 장수로 뽑으세요).

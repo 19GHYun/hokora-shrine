@@ -42,7 +42,9 @@ PRESETS = {
     "move": ["idle_0", "idle_1", "blink", "walk_0", "walk_1", "walk_2", "walk_3", "walk_4", "walk_5"],
     "react": ["sit_0", "sit_1", "fall", "happy_0", "happy_1", "happy_2", "happy_3", "held_0", "held_1", "held_2"],
     "life": ["sleep_0", "sleep_1", "wave_0", "wave_1", "skill_0", "skill_1", "run_0", "run_1", "caught"],
+    "walk": [f"walk_{i}" for i in range(8)],
 }
+REPLACE_PREFIX = {"walk": "walk_"}     # 이 프리셋은 같은 동작의 옛 그림을 먼저 지움
 
 
 def key_color(img: QImage) -> str:
@@ -245,7 +247,7 @@ def _split_touching(main: list, labels: list, gw: int, expected: int, next_label
 
 def tight(img: QImage, blob, labels, gw) -> tuple[QImage, float, int]:
     """상자 안에서 이 캐릭터 픽셀만 남겨(옆 캐릭터 조각은 지움) 딱 맞게 자르고,
-    몸 무게중심 x(잘린 그림 기준)를 돌려준다."""
+    머리 무게중심 x(잘린 그림 기준)를 돌려준다."""
     (x0, y0, x1, y1), lab = blob
     crop = img.copy(x0, y0, x1 - x0, y1 - y0).convertToFormat(QImage.Format_ARGB32)
     w, h = crop.width(), crop.height()
@@ -283,6 +285,15 @@ def tight(img: QImage, blob, labels, gw) -> tuple[QImage, float, int]:
                 continue
             if a > 60:
                 minx, maxx, miny, maxy = min(minx, x), max(maxx, x), min(miny, y), max(maxy, y)
+    # 기준 x = 머리(윗부분) 무게중심. 몸 전체로 잡으면 다리를 내밀 때마다 중심이 앞으로 가서
+    # 걸을 때 몸이 앞뒤로 흔들려 보인다. 머리는 걸어도 거의 제자리라 이쪽이 자연스럽다.
+    band0, band1 = miny + int((maxy - miny) * 0.12), miny + int((maxy - miny) * 0.55)
+    sx = sa = 0
+    for y in range(band0, band1 + 1):
+        row = y * stride
+        for x in range(minx, maxx + 1):
+            a = data[row + x * 4 + 3]
+            if a > 60:
                 sx += x * a
                 sa += a
     clean = QImage(bytes(data), w, h, stride, QImage.Format_ARGB32).copy()
@@ -296,7 +307,7 @@ def main() -> int:
     ap.add_argument("character", help="캐릭터 키 (reimu, marisa, ...)")
     ap.add_argument("--names", help="찾은 순서대로 붙일 프레임 이름, 쉼표로 구분")
     ap.add_argument("--preset", choices=sorted(PRESETS),
-                    help="표준 세트 시트의 이름을 자동으로 (move / react / life). --append 도 자동으로 켜짐")
+                    help="표준 세트 시트의 이름을 자동으로 (move / react / life / walk). --append 도 자동으로 켜짐")
     ap.add_argument("--append", action="store_true",
                     help="기존 그림을 지우지 않고 추가 (같은 이름은 덮어씀) — 시트 여러 장을 합칠 때")
     args = ap.parse_args()
@@ -356,6 +367,11 @@ def main() -> int:
     sources: list[str] = []
     if args.append and manifest_path.exists():
         anchors, sources = _load_anchors(manifest_path)
+        prefix = REPLACE_PREFIX.get(args.preset or "")
+        if prefix:
+            for old in [n for n in anchors if n.startswith(prefix)]:
+                anchors.pop(old)
+                (out_dir / f"{old}.png").unlink(missing_ok=True)
     else:
         for old in out_dir.glob("*.png"):
             old.unlink()
