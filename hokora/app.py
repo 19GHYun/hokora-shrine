@@ -22,6 +22,7 @@ from .bubble import say
 from .decor import DecorWindow
 from .diary import MIN_AWAY, PetalBurst, away_card, offline_income
 from .events import Events
+from .guests import Visits
 from .omikuji import FortuneSlip, can_draw
 from .omikuji import draw as draw_omikuji
 from .panel import ShrinePanel
@@ -107,6 +108,7 @@ class Game(QObject):
         self._cards: list = []
         self._update_bounds()
         self.pets: list[PetWindow] = []
+        self.guests: list[PetWindow] = []        # 지금 와 있는 손님 (guests.py 가 넣고 뺌)
         self.hidden_for_fullscreen = False
         prim = self.app.primaryScreen().availableGeometry()
         self.shrine = ShrineWindow(self, prim.x() + self.state.shrine_x * prim.width(),
@@ -115,6 +117,7 @@ class Game(QObject):
         self.decors: dict[str, DecorWindow] = {
             k: DecorWindow(self, k, x) for k, x in self.state.decor_pos.items() if k in DECOR}
         self.events = Events(self)
+        self.visits = Visits(self)
         self._panel_tab = 0
         keys = list(CHARACTERS) if os.environ.get("HOKORA_ALL") == "1" else self.state.unlocked
         for key in keys:
@@ -218,8 +221,14 @@ class Game(QObject):
 
     def windows(self):
         """뒤 → 앞 순서 (맨 위로 다시 올릴 때 이 순서대로라 캐릭터가 가장 앞)."""
-        decors = list(self.decors.values()) if self.state.show_decor else []   # 숨긴 장식은 다시 띄우지 않음
-        return [*decors, self.shrine, *self.pets]
+        hidden = self.visits.hidden_decor                 # 서니가 숨긴 장식도
+        decors = [w for k, w in self.decors.items() if k != hidden] if self.state.show_decor else []
+        return [*decors, self.shrine, *self.pets, *self.guests]
+
+    def keep(self, w) -> None:
+        """잠깐 떠 있는 창(일기·신문·효과)을 닫힐 때까지 붙잡아 둠."""
+        self._cards.append(w)
+        w.destroyed.connect(lambda *_: self._cards.remove(w) if w in self._cards else None)
 
     def later(self, seconds: float, fn) -> None:
         QTimer.singleShot(int(seconds * 1000), fn)
@@ -252,11 +261,13 @@ class Game(QObject):
         self.state.runtime_sec += dt
         if not 5 <= time.localtime().tm_hour < 20:
             self.state.night_sec += dt
-        for pet in self.pets:
+        everyone = [*self.pets, *self.guests]
+        for pet in everyone:
             pet.step(dt)
         self.shrine.step(dt)
         self.events.tick()
-        fps = FPS_BUSY if any(p.busy for p in self.pets) else FPS_CALM
+        self.visits.tick()
+        fps = FPS_BUSY if any(p.busy for p in everyone) else FPS_CALM
         if self.tick_timer.interval() != 1000 // fps:
             self.tick_timer.setInterval(1000 // fps)
 
@@ -323,7 +334,7 @@ class Game(QObject):
             self.window_platforms = []
         else:
             self.window_platforms = winutil.window_platforms(self.areas)
-        fast = any(p.on is not None and p.on > 0 for p in self.pets)
+        fast = any(p.on is not None and p.on > 0 for p in [*self.pets, *self.guests])
         self.platform_timer.setInterval(PLATFORM_FAST if fast else PLATFORM_SLOW)
 
     def has_surface_below(self, x: float, y: float) -> bool:
@@ -378,6 +389,9 @@ class Game(QObject):
 
     # ── 상호작용 (PetWindow / ShrineWindow 가 부름) ──
     def on_pat(self, pet: PetWindow) -> None:
+        if pet in self.guests:                     # 손님은 손님마다 반응이 다름 (요정은 붙잡힘)
+            self.visits.on_click(pet)
+            return
         if self.events.is_fleeing(pet):          # 새전 들고 도망가는 마리사를 붙잡음
             self.events.catch()
             return
@@ -420,6 +434,7 @@ class Game(QObject):
         if not self.napping and idle >= NAP_AFTER:
             self.napping = True
             self.events.cancel_play()
+            self.visits.cancel()
             self._nap_start = time.time() - idle          # 실제로 자리를 비운 시각
             self._nap_total = self.state.saisen_total
             self.events.cancel_thief()
@@ -447,8 +462,7 @@ class Game(QObject):
             return
         self.shrine.set_saisen(self.state.saisen)
         card = away_card(self.state, seconds, start, earned, offline)
-        self._cards.append(card)
-        card.destroyed.connect(lambda *_: self._cards.remove(card) if card in self._cards else None)
+        self.keep(card)
         card.show_above(self.shrine.pos_x, self.shrine.y() + 20)
 
     # ── 친해지기: 말 걸기·선물 ──
@@ -456,6 +470,14 @@ class Game(QObject):
         s, key = self.state, pet.ch.key
         menu = QMenu()
         menu.setStyleSheet(MENU_STYLE)
+        if pet in self.guests:                     # 손님: 말 걸기 (+ 스이카는 술 대접)
+            head = menu.addAction(f"{pet.ch.name}   (손님)")
+            head.setEnabled(False)
+            self.visits.fill_menu(pet, menu)
+            menu.addSeparator()
+            self._fill_menu(menu)
+            menu.exec(global_pos)
+            return
         head = menu.addAction(f"{pet.ch.name}   {aff.hearts(s, key)}")
         head.setEnabled(False)
         menu.addAction("💬 말 걸기", lambda: self.talk_to(pet))
@@ -522,8 +544,8 @@ class Game(QObject):
     def set_show_decor(self, on: bool) -> None:
         """장식을 보이거나 숨김. 숨겨도 놓아 둔 장식의 새전 보너스는 그대로."""
         self.state.show_decor = on
-        for win in self.decors.values():
-            win.setVisible(on and not self.hidden_for_fullscreen)
+        for k, win in self.decors.items():
+            win.setVisible(on and not self.hidden_for_fullscreen and k != self.visits.hidden_decor)
         log.info("장식 %s", "보임" if on else "숨김")
         self.save()
 
@@ -597,8 +619,7 @@ class Game(QObject):
         self._say_at_shrine(f"{s.stage_name}로 커졌다!  분당 새전 {s.income_per_min}")
         if not self.hidden_for_fullscreen:                    # 벚꽃잎 흩날림
             burst = PetalBurst(self.shrine.pos_x, self.shrine.y() + self.shrine.height())
-            self._cards.append(burst)
-            burst.destroyed.connect(lambda *_: self._cards.remove(burst) if burst in self._cards else None)
+            self.keep(burst)
             burst.show()
         for pet in self.pets:
             pet.react(True)

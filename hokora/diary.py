@@ -58,6 +58,15 @@ def diary_lines(s: GameState, seconds: float, start: float, rng: random.Random |
     if "remilia" in s.unlocked and _night_overlap(start, start + seconds):
         pool["remilia"].append("레밀리아가 밤새 신사 지붕 위에서 달을 봤다.")
     lines = [rng.choice(pool[k]) for k in s.unlocked if k in pool]
+    guests = []                                     # 다녀간 적 있는 손님 이야기도 가끔
+    if s.guest_visits.get("sunny"):
+        guests.append("세 요정이 신사 근처에서 킥킥대는 소리가 들렸다.")
+    if s.guest_visits.get("aya"):
+        guests.append("아야가 신사 사진을 몇 장 찍어 갔다.")
+    if s.guest_visits.get("suika"):
+        guests.append("스이카가 신사 뒤에서 술판을 벌이다 잠들었다.")
+    if guests and rng.random() < 0.5:
+        lines.append(rng.choice(guests))
     rng.shuffle(lines)
     if hours >= 3 and "reimu" in s.unlocked:
         lines.append("모두 해가 질 때까지 푹 잤다.")

@@ -2,6 +2,7 @@
 """신사를 누르면 뜨는 창: 신사 키우기 + 도감. 바깥을 누르면 닫힌다."""
 from __future__ import annotations
 
+import time
 from typing import Callable
 
 from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
@@ -11,14 +12,16 @@ from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QPro
 
 from . import affection as aff
 from .decor import decor_image
+from .guests import GUEST_ABOUT, VISITS, guest_stage
 from .omikuji import can_draw
-from .prayer import WISHES, blocked, fmt_left, income_multiplier, left
+from .prayer import NEWS_BOOST, WISHES, blocked, fmt_left, income_multiplier, left, news_active
 from .progress import UNLOCKS
-from .render import CHARACTERS, Pose, draw_character
+from .render import CHARACTERS, GUESTS, Pose, draw_character
 from .sprites import image_sprites
 from .state import DECOR, SAISEN_BOX, SHRINE_STAGES, GameState
 
 PORTRAIT = 76
+GUEST_KEYS = [k for keys, _ in VISITS.values() for k in keys]
 
 STYLE = """
 QWidget#panel { background: transparent; }
@@ -70,7 +73,7 @@ def portrait(key: str, size: int, silhouette: bool) -> QPixmap:
         p.drawImage(QRectF((size - img.width() * s) / 2, size - img.height() * s, img.width() * s,
                            img.height() * s), img)
     else:
-        draw_character(p, CHARACTERS[key], Pose(kind="idle", t=0.3), QRectF(0, 0, size, size))
+        draw_character(p, CHARACTERS.get(key) or GUESTS[key], Pose(kind="idle", t=0.3), QRectF(0, 0, size, size))
     if silhouette:
         p.setCompositionMode(QPainter.CompositionMode_SourceIn)
         p.fillRect(QRectF(0, 0, size, size), QColor(70, 50, 58, 230))
@@ -127,13 +130,13 @@ class ShrinePanel(QWidget):
         self.tabs.setDrawBase(False)
         self.tabs.setExpanding(False)
         v.addWidget(self.tabs)
-        page1, page2, page3, page4 = QWidget(), QWidget(), QWidget(), QWidget()
-        p1, p3, p4 = QVBoxLayout(page1), QVBoxLayout(page3), QVBoxLayout(page4)
-        for lay in (p1, p3, p4):
+        page1, page2, page3, page4, page5 = QWidget(), QWidget(), QWidget(), QWidget(), QWidget()
+        p1, p3, p4, p5 = QVBoxLayout(page1), QVBoxLayout(page3), QVBoxLayout(page4), QVBoxLayout(page5)
+        for lay in (p1, p3, p4, p5):
             lay.setContentsMargins(0, 4, 0, 0)
             lay.setSpacing(10)
-        self.pages = [page1, page4, page2, page3]
-        for name, page in zip(("신사", "참배", "도감", "꾸미기"), self.pages):
+        self.pages = [page1, page4, page2, page5, page3]
+        for name, page in zip(("신사", "참배", "도감", "손님", "꾸미기"), self.pages):
             self.tabs.addTab(name)
             page.hide()
             v.addWidget(page)
@@ -207,6 +210,41 @@ class ShrinePanel(QWidget):
             h.addLayout(info, 1)
             grid.addWidget(card, i // 2, i % 2)
             self.cards[key] = (pic, name, goals)
+
+        # ── 손님 ──
+        tip = QLabel("가끔 신사에 손님이 찾아와요. 신사가 커질수록 찾아오는 손님이 늘어요.", objectName="goal")
+        tip.setWordWrap(True)
+        p5.addWidget(tip)
+        ggrid = QGridLayout()
+        ggrid.setSpacing(8)
+        self.guest_cards: dict[str, tuple] = {}
+        for i, key in enumerate(GUEST_KEYS):
+            card = QWidget(objectName="card")
+            card.setAttribute(Qt.WA_StyledBackground, True)
+            h = QHBoxLayout(card)
+            h.setContentsMargins(8, 8, 10, 8)
+            pic = QLabel()
+            pic.setFixedSize(PORTRAIT, PORTRAIT)
+            info = QVBoxLayout()
+            info.setSpacing(3)
+            name, line1, line2 = QLabel(), QLabel(objectName="goal"), QLabel(objectName="goal")
+            line2.setWordWrap(True)
+            for w in (name, line1, line2):
+                info.addWidget(w)
+            info.addStretch(1)
+            h.addWidget(pic)
+            h.addLayout(info, 1)
+            ggrid.addWidget(card, i // 2, i % 2)
+            self.guest_cards[key] = (pic, name, line1, line2)
+        p5.addLayout(ggrid)
+        p5.addWidget(QLabel("📰 문문신문 스크랩", objectName="section"))
+        self.news_boost = QLabel(objectName="done")
+        p5.addWidget(self.news_boost)
+        self.news_label = QLabel(objectName="goal")
+        self.news_label.setWordWrap(True)
+        p5.addWidget(self.news_label)
+        self.guest_stats = QLabel(objectName="sub")
+        p5.addWidget(self.guest_stats)
 
         # ── 참배 ──
         tip = QLabel("새전을 넣고 소원을 빌어요. 효과는 껐다 켜도 이어져요.", objectName="goal")
@@ -297,8 +335,9 @@ class ShrinePanel(QWidget):
         s = self.state
         self.title.setText(f"⛩  {s.stage_name}  ({s.shrine_level}단계)")
         boost = income_multiplier(s)
-        self.sub.setText(f"새전 {s.saisen:,}   ·   분당 새전 {s.income_per_min * boost}"
-                         + ("  (번영 기원 ×2)" if boost > 1 else ""))
+        tags = (["번영 기원 ×2"] if left(s, "prosper") else []) + ([f"신문 ×{NEWS_BOOST:g}"] if news_active(s) else [])
+        self.sub.setText(f"새전 {s.saisen:,}   ·   분당 새전 {s.income_per_min * boost:g}"
+                         + (f"  ({', '.join(tags)})" if tags else ""))
         drawable = can_draw(s)
         for key, (btn, status) in self.wish_rows.items():
             remain = left(s, key)
@@ -369,6 +408,32 @@ class ShrinePanel(QWidget):
                 for label, bar in goals[1:]:
                     label.hide()
                     bar.hide()
+        for key, (pic, name, line1, line2) in self.guest_cards.items():
+            visits = s.guest_visits.get(key, 0)
+            met = visits > 0
+            if pic.property("met") != met:
+                pic.setPixmap(portrait(key, PORTRAIT, silhouette=not met))
+                pic.setProperty("met", met)
+            name.setText(GUESTS[key].name if met else "???")
+            self._role(name, "name" if met else "locked")
+            hint, about = GUEST_ABOUT[key]
+            stage = guest_stage(key)
+            if met:
+                line1.setText(f"{visits}번 다녀감")
+                self._role(line1, "done")
+            elif s.shrine_level >= stage:
+                line1.setText("언젠가 찾아올 거예요")
+                self._role(line1, "goal")
+            else:
+                line1.setText(f"신사 {stage}단계부터 찾아와요")
+                self._role(line1, "goal")
+            line2.setText(about if met else hint)
+        self.news_boost.setText(f"기사 효과 중: 새전 수입 ×{NEWS_BOOST:g}  ({fmt_left(s.news_until - time.time())})"
+                                if news_active(s) else "")
+        self.news_boost.setVisible(news_active(s))
+        self.news_label.setText("\n".join(f"· {h}" for h in reversed(s.news[-3:]))
+                                or "아직 기사가 없어요. 신사가 2단계가 되면 기자가 취재하러 와요.")
+        self.guest_stats.setText(f"붙잡은 요정 {s.fairies_caught}번   ·   스이카가 두고 간 새전 {s.suika_saisen:,}")
         hours = s.runtime_sec / 3600
         self.stats.setText(f"모은 새전 {s.saisen_total:,}   ·   쓰다듬기 {s.pats:,}번   ·   함께한 시간 {hours:.1f}시간"
                            f"   ·   붙잡은 새전 도둑 {s.thief_caught}번"

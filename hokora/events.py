@@ -60,6 +60,9 @@ class Events:
     # ── 공통 ──
     def _say(self, pet: "PetWindow", text: str, seconds: float = 2.5) -> None:
         if not self.game.hidden_for_fullscreen:
+            visits = getattr(self.game, "visits", None)
+            if visits is not None and visits.silenced:      # 루나가 소리를 지운 동안
+                text = "……"
             say(text, pet.pos_x, pet.pos_y - BUBBLE_UP, seconds)
 
     def tick(self) -> None:

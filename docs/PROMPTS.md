@@ -167,3 +167,29 @@ python tools/import_sheet.py 걷기.png reimu --preset walk
 ```
 
 AI가 8장이 아닌 다른 장수로 그렸으면 다시 뽑는 게 가장 간단합니다.
+
+## 손님 시트 (12장)
+
+손님(세 요정·아야·스이카)은 시트 한 장으로 끝냅니다. 먼저 위의 **새 캐릭터 기준 그림**으로 서 있는 그림을 뽑고,
+그 그림을 첨부해서 공통 프롬프트의 `[시트 내용]` 자리에 아래를 넣습니다.
+
+```
+Layout: 3 rows x 4 columns, 12 frames.
+Row 1: 1. Standing still, arms relaxed. 2. Same, tiny change of expression. 3. Same as 1 with eyes closed (blink). 4. A small polite bow, eyes closed.
+Row 2 (walking to the right): 5. Right foot forward. 6. Feet passing, body highest. 7. Left foot forward. 8. Feet passing, body highest.
+Row 3: 9. [손님 특기] (start). 10. [손님 특기] (end). 11. Caught red-handed: shocked face with a sweat drop, hands up. 12. Very happy, eyes closed in ^^ shape, one hand raised.
+```
+
+| 손님 | `[손님 특기]` |
+| --- | --- |
+| 서니 밀크 | `Sneaky grin with a finger on her lips (about to play a prank)` |
+| 루나 차일드 | `Finger on her lips, "shh" (silencing all sound)` |
+| 스타 사파이어 | `Pointing ahead with a small sparkle (she senses something)` |
+| 아야 | `Holding a camera up to her face and taking a photo, with a small flash` |
+| 스이카 | `Drinking from her purple gourd, cheeks flushed` |
+
+```
+python tools/import_sheet.py 아야.png aya --preset guest
+```
+
+칸끼리 붙어 있으면 `--grid 3x4` 를 더하면 칸 단위로 나눕니다.

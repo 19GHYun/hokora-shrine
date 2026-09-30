@@ -14,6 +14,8 @@ from .state import GameState
 
 INCOME_BOOST = 2        # 번영 기원: 수입 배수
 PAT_BOOST = 5           # 인연 기원: 쓰다듬기 보상 배수
+NEWS_BOOST = 1.5        # 문문신문 기사 효과: 수입 배수 (news.py)
+NEWS_SECONDS = 30 * 60
 
 
 @dataclass(frozen=True)
@@ -49,8 +51,16 @@ def left(s: GameState, key: str, now: float | None = None) -> float:
     return max(0.0, getattr(s, w.field) - (now or time.time()))
 
 
-def income_multiplier(s: GameState) -> int:
-    return INCOME_BOOST if left(s, "prosper") else 1
+def income_multiplier(s: GameState) -> float:
+    """번영 기원 ×2, 문문신문 기사 효과 ×1.5 (겹치면 곱함)."""
+    m = float(INCOME_BOOST if left(s, "prosper") else 1)
+    if news_active(s):
+        m *= NEWS_BOOST
+    return m
+
+
+def news_active(s: GameState) -> bool:
+    return s.news_until > time.time()
 
 
 def pat_multiplier(s: GameState) -> int:

@@ -474,6 +474,21 @@ CHARACTERS: dict[str, Character] = {
 }
 
 
+# 손님 (guests.py). 그림 파일로 그리므로 코드 그림용 색은 만일을 위한 대강
+GUESTS: dict[str, Character] = {
+    "sunny": Character(key="sunny", name="서니 밀크", hair="#F29A3A", hair_dark="#D97A22", eyes="#C0503A",
+                       dress="#D8263A", dress_dark="#A8182B", sleeves="#FFFFFF"),
+    "luna": Character(key="luna", name="루나 차일드", hair="#F4D86A", hair_dark="#D9B84A", eyes="#6E5A4A",
+                      dress="#FFFFFF", dress_dark="#DDDDDD", sleeves="#FFFFFF", shoes="#2E2626"),
+    "star": Character(key="star", name="스타 사파이어", hair="#2E2630", hair_dark="#1C161E", eyes="#5A4A5A",
+                      dress="#3A5CC0", dress_dark="#2A4494", sleeves="#FFFFFF"),
+    "aya": Character(key="aya", name="샤메이마루 아야", hair="#2A2226", hair_dark="#161014", eyes="#B0343A",
+                     dress="#2E2A30", dress_dark="#1A171C", sleeves="#FFFFFF", shoes="#B0343A"),
+    "suika": Character(key="suika", name="이부키 스이카", hair="#E08A3C", hair_dark="#C06E26", eyes="#8A5A2A",
+                       dress="#7A4EB0", dress_dark="#5A368A", sleeves="#FFFFFF", shoes="#6A4436"),
+}
+
+
 def draw_character(p: QPainter, ch: Character, pose: Pose, rect: QRectF) -> None:
     """rect 안에(발이 rect 아래 가운데) 캐릭터를 그린다."""
     p.save()

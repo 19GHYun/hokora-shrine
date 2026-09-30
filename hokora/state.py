@@ -82,6 +82,12 @@ class GameState:
     charm_until: float = 0.0
     omikuji_extra: int = 0           # 오늘 더 뽑을 수 있는 오미쿠지 수
     wishes_made: int = 0         # 레밀리아가 운명을 조작함 → 다음 오미쿠지는 좋은 운세
+    # 손님 (guests.py)
+    guest_visits: dict[str, int] = field(default_factory=dict)   # 손님 → 다녀간 횟수
+    fairies_caught: int = 0
+    suika_saisen: int = 0            # 스이카가 두고 간 새전 합계
+    news: list[str] = field(default_factory=list)   # 문문신문 최근 제목 (최대 5개, 오래된 것부터)
+    news_until: float = 0.0          # 기사 효과가 끝나는 시각 (time.time)
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
     @property

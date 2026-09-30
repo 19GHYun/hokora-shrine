@@ -35,8 +35,8 @@ FALLBACK = {
     "walk": ["idle"],
     "sit": ["idle"],
     "happy": ["idle"],
-    "held": ["fall", "idle"],
-    "fall": ["held", "idle"],
+    "held": ["fall", "caught", "idle"],
+    "fall": ["held", "caught", "idle"],
     "sleep": ["sit", "idle"],
     "startled": ["caught", "held", "fall", "idle"],
     "wave": ["happy", "idle"],
@@ -44,8 +44,9 @@ FALLBACK = {
     "run": ["walk", "idle"],
     "caught": ["held", "fall", "idle"],
     "ride": ["sit", "idle"],          # 커서 위에 앉아 있기
-    "climb": ["held", "fall", "idle"],  # 벽 타기 (두 팔을 든 그림)
-    "hang": ["held", "fall", "idle"],   # 천장·벽에 매달리기
+    "climb": ["held", "fall", "caught", "idle"],  # 벽 타기 (두 팔을 든 그림)
+    "hang": ["held", "fall", "caught", "idle"],   # 천장·벽에 매달리기
+    "bow": ["happy", "idle"],           # 꾸벅 인사 (손님)
 }
 
 

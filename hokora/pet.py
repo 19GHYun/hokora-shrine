@@ -61,10 +61,11 @@ FRAMES = {
     "ride": (8, 8.0),      # 커서 위에 앉기 (앉기 그림)
     "climb": (12, 0.628),  # 벽 타기
     "hang": (12, 1.57),    # 매달려 대롱대롱 (sin 4t 한 바퀴)
+    "bow": (12, 1.0),      # 꾸벅 인사 (손님)
 }
 RUN_SPEED = 150.0
 # 이 상태들은 정해진 시간이 지나면 알아서 다음 행동으로 (각본 중이 아닐 때)
-TIMED = {"idle", "walk", "sit", "happy", "startled", "wave", "skill", "run", "caught", "ride"}
+TIMED = {"idle", "walk", "sit", "happy", "startled", "wave", "skill", "run", "caught", "ride", "bow"}
 
 
 ONE_SHOT = {"happy"}
@@ -101,7 +102,7 @@ class SpriteCache:
             p = QPainter(pm)
             code_kind = {"jump": "happy", "startled": "held", "wave": "happy", "skill": "idle",
                          "run": "walk", "caught": "held", "ride": "sit", "climb": "held",
-                         "hang": "held"}.get(kind, kind)
+                         "hang": "held", "bow": "happy"}.get(kind, kind)
             draw_character(p, ch, Pose(kind=code_kind, t=t, facing=facing, blink=blink),
                            QRectF(0, 0, CHAR_W, CHAR_H))
             p.end()
