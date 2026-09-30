@@ -55,6 +55,8 @@ class Preview(QWidget):
             p.fillRect(QRectF(0, y0 + (CELL_H - 12) * ZOOM, self.width(), 12 * ZOOM), QColor("#1F1F24"))
             for c, kind in enumerate(KINDS):
                 n, loop = FRAMES[kind]
+                if kind == "walk":               # 한 벌에 걸음이 두 바퀴면 두 배 길게
+                    loop *= sprites.walk_cycles
                 if kind in ONE_SHOT:
                     local = t % HAPPY_REPEAT
                     frame = min(n - 1, int(local / loop * n))

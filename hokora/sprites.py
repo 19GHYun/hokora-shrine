@@ -54,6 +54,7 @@ class ImageSprites:
         else:                                           # 예전 형식: 모든 그림이 같은 캔버스
             anchors = {n: m["anchor"] for n in m["frames"]}
         self.facing = int(m.get("facing", 1))
+        self.walk_cycles = max(1, int(m.get("walk_cycles", 1)))   # 걷기 그림 한 벌에 걸음 한 바퀴가 몇 번 들어 있는지
         self.scale = DISPLAY_H / float(m["standing_height"])
         self.images: dict[str, tuple[QImage, QPointF]] = {}
         for name, (ax, ay) in anchors.items():
@@ -79,9 +80,9 @@ class ImageSprites:
             self._seq_cache[kind] = seq or [next(iter(self.images))]
         return self._seq_cache[kind]
 
-    def render(self, kind: str, phase: float, t: float, facing: int, blink: bool,
-               dpr: float) -> tuple[QPixmap, QPointF]:
-        """(그림, 발 위치). phase 는 이 동작 한 바퀴 중 어디쯤인지(0~1), t 는 초 단위 시간."""
+    def pick(self, kind: str, phase: float, t: float, blink: bool) -> tuple[str, float, float, bool]:
+        """이 순간 쓸 (그림 이름, 위아래 흔들림, 기울기, 그림자 여부).
+        phase 는 이 동작 한 바퀴 중 어디쯤인지(0~1), t 는 초 단위 시간."""
         if kind == "jump":                   # 점프: 쓰다듬기 동작 중 가장 높이 뛴 장면 한 장
             seq = self.sequence("happy")
             name = seq[min(len(seq) - 1, int(len(seq) * 0.6))]
@@ -90,23 +91,7 @@ class ImageSprites:
             name = seq[min(len(seq) - 1, int(phase * len(seq)))]
         if blink and kind == "idle" and "blink" in self.images:
             name = "blink"
-        img, anchor = self.images[name]
         animated = len(seq) >= 3            # 그림이 움직임을 직접 담고 있음
-
-        s = self.scale
-        w, h = img.width() * s + PAD * 2, img.height() * s + PAD * 2
-        pm = QPixmap(round(w * dpr), round(h * dpr))
-        pm.setDevicePixelRatio(dpr)
-        pm.fill(Qt.transparent)
-        ax, ay = PAD + anchor.x() * s, PAD + anchor.y() * s
-
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.setRenderHint(QPainter.SmoothPixmapTransform)
-        if kind not in ("held", "fall", "jump"):  # 그림자 (공중에서는 없음)
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor(0, 0, 0, 40))
-            p.drawEllipse(QRectF(ax - 20, ay - 3.5, 40, 7))
         # 코드로 얹는 움직임 (그림이 움직임을 담고 있으면 약하게 / 생략)
         dy, angle = 0.0, 0.0
         if kind == "walk" and not animated:
@@ -121,6 +106,27 @@ class ImageSprites:
             dy = math.sin(t * 1.2) * 0.6
         elif kind == "run":
             dy = -abs(math.sin(t * 15.7)) * 2.0
+        # 반 픽셀·1도 단위로 맞춰서 같은 모습은 한 번만 그리게
+        return name, round(dy * 2) / 2, float(round(angle)), kind not in ("held", "fall", "jump")
+
+    def draw(self, name: str, dy: float, angle: float, shadow: bool, facing: int,
+             dpr: float) -> tuple[QPixmap, QPointF]:
+        """(그림, 발 위치)."""
+        img, anchor = self.images[name]
+        s = self.scale
+        w, h = img.width() * s + PAD * 2, img.height() * s + PAD * 2
+        pm = QPixmap(round(w * dpr), round(h * dpr))
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.transparent)
+        ax, ay = PAD + anchor.x() * s, PAD + anchor.y() * s
+
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        if shadow:                           # 그림자 (공중에서는 없음)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(0, 0, 0, 40))
+            p.drawEllipse(QRectF(ax - 20, ay - 3.5, 40, 7))
         p.translate(ax, ay + dy)
         if angle:  # 머리 쪽을 잡고 있으니 머리 근처를 축으로 흔들기
             pivot = -DISPLAY_H * 0.75
@@ -132,6 +138,11 @@ class ImageSprites:
         p.drawImage(QRectF(-anchor.x() * s, -anchor.y() * s, img.width() * s, img.height() * s), img)
         p.end()
         return pm, QPointF(ax, ay)
+
+    def render(self, kind: str, phase: float, t: float, facing: int, blink: bool,
+               dpr: float) -> tuple[QPixmap, QPointF]:
+        """pick + draw (미리보기 도구용)."""
+        return self.draw(*self.pick(kind, phase, t, blink), facing, dpr)
 
 
 _loaded: dict[str, ImageSprites | None] = {}

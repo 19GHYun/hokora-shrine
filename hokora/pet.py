@@ -37,7 +37,7 @@ EDGE = 10.0                     # 창 끝에서 이만큼 앞에서 돌아서거
 # 프레임 수는 그림 장수(2·3·4·6장)로 나누어떨어지게 12.
 FRAMES = {
     "idle": (12, 2.856),   # sin(2.2t) — 숨쉬기 한 번
-    "walk": (24, 0.698),   # 두 발짝(왼발+오른발). 그림 2·3·4·6·8장 어느 것이든 고르게 나뉘게 24. 실제 재생은 걸은 거리로
+    "walk": (48, 0.698),   # 그림 한 벌. 2·3·4·6·8·12·16장 어느 것이든 고르게 나뉘게 48. 실제 재생은 걸은 거리로
     "sit": (8, 8.0),       # 그림 캐릭터는 4초마다 앉은 자세를 바꿔 두리번거림
     "happy": (12, 1.0),    # 쓰다듬은 순간부터 1초 동안 한 번 (움츠림 → 점프 → 착지)
     "held": (12, 0.628),   # sin(10t) — 버둥 한 번
@@ -70,27 +70,29 @@ class SpriteCache:
         self.dpr = max(1.0, screen.devicePixelRatio() if screen else 1.0)
 
     def get(self, ch: Character, kind: str, frame: int, facing: int, blink: bool) -> tuple[QPixmap, QPointF]:
-        key = (ch.key, kind, frame, facing, blink)
+        n, loop = FRAMES[kind]
+        t = frame * loop / n
+        images = image_sprites(ch.key)
+        if images is not None:                 # 그림 캐릭터: 같은 그림·같은 움직임이면 한 번만 그림
+            look = images.pick(kind, frame / n, t, blink)
+            key = (ch.key, *look, facing)
+            hit = self._cache.get(key)
+            if hit is None:
+                hit = self._cache[key] = images.draw(*look, facing, self.dpr)
+            return hit
+        key = (ch.key, kind, frame, facing, blink)   # 코드 그림 캐릭터
         hit = self._cache.get(key)
         if hit is None:
-            n, loop = FRAMES[kind]
-            t = frame * loop / n
-            phase = frame / n
-            images = image_sprites(ch.key)
-            if images is not None:
-                hit = images.render(kind, phase, t, facing, blink, self.dpr)
-            else:
-                pm = QPixmap(round(CHAR_W * self.dpr), round(CHAR_H * self.dpr))
-                pm.setDevicePixelRatio(self.dpr)
-                pm.fill(Qt.transparent)
-                p = QPainter(pm)
-                code_kind = {"jump": "happy", "startled": "held", "wave": "happy", "skill": "idle",
-                             "run": "walk", "caught": "held"}.get(kind, kind)
-                draw_character(p, ch, Pose(kind=code_kind, t=t, facing=facing, blink=blink),
-                               QRectF(0, 0, CHAR_W, CHAR_H))
-                p.end()
-                hit = (pm, QPointF(CHAR_W / 2, CHAR_H))
-            self._cache[key] = hit
+            pm = QPixmap(round(CHAR_W * self.dpr), round(CHAR_H * self.dpr))
+            pm.setDevicePixelRatio(self.dpr)
+            pm.fill(Qt.transparent)
+            p = QPainter(pm)
+            code_kind = {"jump": "happy", "startled": "held", "wave": "happy", "skill": "idle",
+                         "run": "walk", "caught": "held"}.get(kind, kind)
+            draw_character(p, ch, Pose(kind=code_kind, t=t, facing=facing, blink=blink),
+                           QRectF(0, 0, CHAR_W, CHAR_H))
+            p.end()
+            hit = self._cache[key] = (pm, QPointF(CHAR_W / 2, CHAR_H))
         return hit
 
 
@@ -372,7 +374,9 @@ class PetWindow(QWidget):
         n, loop = FRAMES[kind]
         elapsed = self.t - self._anim_start
         if kind == "walk":                   # 걸은 거리만큼 발을 내딛음 (속도가 달라도 발이 미끄러지지 않음)
-            frame = int((self.walk_phase % 1.0) * n)
+            images = image_sprites(self.ch.key)
+            cycles = images.walk_cycles if images is not None else 1   # 그림 한 벌에 걸음이 두 바퀴면 절반 속도로
+            frame = int((self.walk_phase / cycles % 1.0) * n)
         elif kind in ONE_SHOT:               # 한 번만 재생하고 마지막 장면에서 멈춤
             frame = min(n - 1, int(elapsed / loop * n))
         else:                                # 동작을 시작한 순간부터 첫 장면 (특기 두 장이 순서대로 보이게)

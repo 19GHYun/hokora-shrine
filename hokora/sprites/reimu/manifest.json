@@ -11,14 +11,6 @@
       72,
       206
     ],
-    "walk_0": [
-      71,
-      201
-    ],
-    "walk_1": [
-      71,
-      201
-    ],
     "sit": [
       76,
       203
@@ -46,22 +38,6 @@
     "sleep": [
       77,
       195
-    ],
-    "walk_2": [
-      71,
-      203
-    ],
-    "walk_3": [
-      70,
-      202
-    ],
-    "walk_4": [
-      70,
-      203
-    ],
-    "walk_5": [
-      70,
-      203
     ],
     "idle_0": [
       72,
@@ -130,12 +106,79 @@
     "caught": [
       68,
       199
+    ],
+    "walk_0": [
+      72,
+      204
+    ],
+    "walk_1": [
+      73,
+      199
+    ],
+    "walk_2": [
+      73,
+      203
+    ],
+    "walk_3": [
+      73,
+      203
+    ],
+    "walk_4": [
+      72,
+      203
+    ],
+    "walk_5": [
+      72,
+      199
+    ],
+    "walk_6": [
+      73,
+      198
+    ],
+    "walk_7": [
+      73,
+      203
+    ],
+    "walk_8": [
+      73,
+      202
+    ],
+    "walk_9": [
+      73,
+      199
+    ],
+    "walk_10": [
+      73,
+      200
+    ],
+    "walk_11": [
+      73,
+      203
+    ],
+    "walk_12": [
+      73,
+      203
+    ],
+    "walk_13": [
+      73,
+      202
+    ],
+    "walk_14": [
+      73,
+      203
+    ],
+    "walk_15": [
+      73,
+      205
     ]
   },
   "sources": [
     "Gemini_Generated_Image_ftv5b5ftv5b5ftv5.png",
     "Gemini_Generated_Image_b50spdb50spdb50s.png",
     "Gemini_Generated_Image_8xy8cg8xy8cg8xy8.png",
-    "reimu3.png"
-  ]
+    "reimu3.png",
+    "reimu_run.png",
+    "reimu_run.png"
+  ],
+  "walk_cycles": 2
 }

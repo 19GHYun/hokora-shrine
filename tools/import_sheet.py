@@ -42,7 +42,7 @@ PRESETS = {
     "move": ["idle_0", "idle_1", "blink", "walk_0", "walk_1", "walk_2", "walk_3", "walk_4", "walk_5"],
     "react": ["sit_0", "sit_1", "fall", "happy_0", "happy_1", "happy_2", "happy_3", "held_0", "held_1", "held_2"],
     "life": ["sleep_0", "sleep_1", "wave_0", "wave_1", "skill_0", "skill_1", "run_0", "run_1", "caught"],
-    "walk": [f"walk_{i}" for i in range(8)],
+    "walk": [],            # 장수 자유: 찾은 만큼 walk_0, walk_1 … (8·12·16장 등)
 }
 REPLACE_PREFIX = {"walk": "walk_"}     # 이 프리셋은 같은 동작의 옛 그림을 먼저 지움
 
@@ -245,6 +245,76 @@ def _split_touching(main: list, labels: list, gw: int, expected: int, next_label
         next_label += 1
 
 
+def _valleys(profile: list[int], parts: int) -> list[int]:
+    """profile(줄마다 불투명 칸 수)에서 parts 등분 근처의 가장 빈 줄을 경계로 (양끝 포함)."""
+    n = len(profile)
+    cuts = [0]
+    for i in range(1, parts):
+        guess = n * i // parts
+        lo, hi = max(cuts[-1] + 1, guess - n // (parts * 3)), min(n - 1, guess + n // (parts * 3))
+        cuts.append(min(range(lo, hi + 1), key=lambda k: (profile[k], abs(k - guess))))
+    return cuts + [n]
+
+
+def grid_blobs(img: QImage, rows: int, cols: int):
+    """캐릭터끼리 붙어 있어 덩어리로 못 나눌 때: rows×cols 칸으로 나눈다.
+    칸 경계는 똑같이 나누지 않고 줄·칸 사이에서 가장 빈 곳으로 잡고, 칸마다 가장 큰 덩어리만 남긴다
+    (경계를 넘어온 옆 캐릭터 조각은 '다른 것'으로 표시해서 tight() 가 지운다)."""
+    w, h = img.width(), img.height()
+    gw, gh = (w + GRID - 1) // GRID, (h + GRID - 1) // GRID
+    data = bytes(img.constBits())
+    stride = img.bytesPerLine()
+    solid = bytearray(gw * gh)
+    for gy in range(gh):
+        y = min(h - 1, gy * GRID + GRID // 2)
+        for gx in range(gw):
+            x = min(w - 1, gx * GRID + GRID // 2)
+            solid[gy * gw + gx] = data[y * stride + x * 4 + 3] > 60
+    row_cuts = _valleys([sum(solid[gy * gw:(gy + 1) * gw]) for gy in range(gh)], rows)
+    labels = [0] * (gw * gh)
+    blobs = []
+    lab = 0
+    for r in range(rows):
+        ya, yb = row_cuts[r], row_cuts[r + 1]
+        col_cuts = _valleys([sum(solid[gy * gw + gx] for gy in range(ya, yb)) for gx in range(gw)], cols)
+        for c in range(cols):
+            xa, xb = col_cuts[c], col_cuts[c + 1]
+            lab += 1
+            # 칸 안의 덩어리들 → 가장 큰 것(과 그 10% 이상인 것)만 이 캐릭터
+            comps, seen = [], set()
+            for gy in range(ya, yb):
+                for gx in range(xa, xb):
+                    k = gy * gw + gx
+                    if not solid[k] or k in seen:
+                        continue
+                    comp, q = [], deque([k])
+                    seen.add(k)
+                    while q:
+                        cur = q.popleft()
+                        comp.append(cur)
+                        cy, cx = divmod(cur, gw)
+                        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)):
+                            nx, ny = cx + dx, cy + dy
+                            nk = ny * gw + nx
+                            if xa <= nx < xb and ya <= ny < yb and solid[nk] and nk not in seen:
+                                seen.add(nk)
+                                q.append(nk)
+                    comps.append(comp)
+            if not comps:
+                continue
+            big = max(len(cp) for cp in comps)
+            box = [gw, gh, -1, -1]
+            for comp in comps:
+                mine = len(comp) >= big * 0.1
+                for k in comp:
+                    labels[k] = lab if mine else -1
+                    if mine:
+                        cy, cx = divmod(k, gw)
+                        box = [min(box[0], cx), min(box[1], cy), max(box[2], cx), max(box[3], cy)]
+            blobs.append(((box[0] * GRID, box[1] * GRID, min(w, (box[2] + 1) * GRID), min(h, (box[3] + 1) * GRID)), lab))
+    return blobs, labels, gw
+
+
 def tight(img: QImage, blob, labels, gw) -> tuple[QImage, float, int]:
     """상자 안에서 이 캐릭터 픽셀만 남겨(옆 캐릭터 조각은 지움) 딱 맞게 자르고,
     머리 무게중심 x(잘린 그림 기준)를 돌려준다."""
@@ -308,6 +378,7 @@ def main() -> int:
     ap.add_argument("--names", help="찾은 순서대로 붙일 프레임 이름, 쉼표로 구분")
     ap.add_argument("--preset", choices=sorted(PRESETS),
                     help="표준 세트 시트의 이름을 자동으로 (move / react / life / walk). --append 도 자동으로 켜짐")
+    ap.add_argument("--grid", help="행x열 (예: 3x4). 캐릭터끼리 붙어 있으면 칸으로 똑같이 잘라서 나눔")
     ap.add_argument("--append", action="store_true",
                     help="기존 그림을 지우지 않고 추가 (같은 이름은 덮어씀) — 시트 여러 장을 합칠 때")
     args = ap.parse_args()
@@ -323,8 +394,15 @@ def main() -> int:
         args.names = args.names or ",".join(PRESETS[args.preset])
         args.append = True
     wanted = [n.strip() for n in args.names.split(",")] if args.names else None
-    blobs, labels, gw = find_blobs(keyed, expected=len(wanted) if wanted else None)
+    if args.grid:
+        rows, cols = (int(v) for v in args.grid.lower().split("x"))
+        blobs, labels, gw = grid_blobs(keyed, rows, cols)
+    else:
+        blobs, labels, gw = find_blobs(keyed, expected=len(wanted) if wanted else None)
     print(f"캐릭터 {len(blobs)}개 찾음")
+    if args.preset and not PRESETS[args.preset]:          # 장수 자유 프리셋
+        wanted = [f"{REPLACE_PREFIX[args.preset]}{i}" for i in range(len(blobs))]
+        args.names = ",".join(wanted)
     names = wanted or [f"frame_{i + 1}" for i in range(len(blobs))]
     if len(names) != len(blobs):
         print(f"이름 {len(names)}개와 찾은 캐릭터 {len(blobs)}개의 수가 다릅니다. 미리보기를 보고 다시 지정하세요.")
@@ -391,10 +469,16 @@ def main() -> int:
         p.end()
         canvas.save(str(out_dir / f"{name}.png"))
         anchors[name] = [ax, ay]
+    walk_cycles = _count_walk_cycles(out_dir, anchors) if args.preset == "walk" else None
+    if walk_cycles is None and manifest_path.exists():
+        walk_cycles = json.loads(manifest_path.read_text(encoding="utf-8")).get("walk_cycles")
     if args.names:
         sources.append(args.sheet.name)
         manifest = {"version": 2, "standing_height": STANDING_PX, "facing": 1,
                     "frames": anchors, "sources": sources}
+        if walk_cycles:
+            manifest["walk_cycles"] = walk_cycles
+            print(f"  걷기 한 벌에 걸음 {walk_cycles}바퀴")
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     _save_preview(out_dir, names, anchors)
@@ -422,6 +506,24 @@ def _lifts(frames, names) -> list[float]:
         lift = max(row) - bottoms[i]
         lifts.append(float(lift) if lift >= med_h * 0.04 else 0.0)
     return lifts
+
+
+def _count_walk_cycles(out_dir: Path, anchors: dict) -> int:
+    """걷기 그림들의 발 벌림(발 근처 가로 폭)을 보고, 발을 크게 벌린 장면 묶음 수 = 발짝 수.
+    두 발짝이 걸음 한 바퀴. AI 가 한 벌을 부탁했는데 두 벌을 그려 오는 일이 있어서 센다."""
+    walks = sorted((n for n in anchors if n.startswith("walk_")), key=lambda n: int(n[5:]))
+    spreads = []
+    for n in walks:
+        img = QImage(str(out_dir / f"{n}.png")).convertToFormat(QImage.Format_ARGB32)
+        ay, w = int(anchors[n][1]), img.width()
+        xs = [x for y in range(max(0, ay - 22), ay) for x in range(w) if (img.pixel(x, y) >> 24) > 100]
+        spreads.append(max(xs) - min(xs) if xs else 0)
+    if len(spreads) < 4:
+        return 1
+    mid = (min(spreads) + max(spreads)) / 2
+    wide = [v > mid for v in spreads]
+    steps = sum(1 for i in range(len(wide)) if wide[i] and not wide[i - 1]) or 1   # 벌린 묶음 수 (처음·끝 이어짐)
+    return max(1, round(steps / 2))
 
 
 def _load_anchors(path: Path) -> tuple[dict[str, list[float]], list[str]]:
