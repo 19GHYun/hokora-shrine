@@ -86,7 +86,7 @@ class GameState:
     guest_visits: dict[str, int] = field(default_factory=dict)   # 손님 → 다녀간 횟수
     fairies_caught: int = 0
     suika_saisen: int = 0            # 스이카가 두고 간 새전 합계
-    news: list[str] = field(default_factory=list)   # 문문신문 최근 제목 (최대 5개, 오래된 것부터)
+    news: list[str] = field(default_factory=list)   # 붕붕마루 신문 최근 제목 (최대 5개, 오래된 것부터)
     news_until: float = 0.0          # 기사 효과가 끝나는 시각 (time.time)
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 

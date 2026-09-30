@@ -237,7 +237,7 @@ class ShrinePanel(QWidget):
             ggrid.addWidget(card, i // 2, i % 2)
             self.guest_cards[key] = (pic, name, line1, line2)
         p5.addLayout(ggrid)
-        p5.addWidget(QLabel("📰 문문신문 스크랩", objectName="section"))
+        p5.addWidget(QLabel("📰 붕붕마루 신문 스크랩", objectName="section"))
         self.news_boost = QLabel(objectName="done")
         p5.addWidget(self.news_boost)
         self.news_label = QLabel(objectName="goal")

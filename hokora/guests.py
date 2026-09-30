@@ -4,7 +4,7 @@
 - 세 요정 (처음부터): 셋이 몰래 와서 장난친다. 서니는 빛을 굴절시켜 반투명하게 숨어 새전을 조금 털고
   장식 하나를 숨기고, 루나는 소리를 지워 친구들 말풍선이 "……"가 되고, 스타는 망을 보다가
   커서가 다가오면 제일 먼저 도망간다. 요정을 클릭하거나 붙잡으면 사과하고 새전을 두고 간다.
-- 아야 (신사 2단계부터): 하늘에서 휙 내려와 친구 하나를 취재하고 사진을 찍은 뒤, 문문신문 호외를 낸다.
+- 아야 (신사 2단계부터): 하늘에서 휙 내려와 친구 하나를 취재하고 사진을 찍은 뒤, 붕붕마루 신문 호외를 낸다.
   기사가 나면 참배객이 늘어 30분 동안 새전 수입이 1.5배.
 - 스이카 (신사 3단계부터): 안개로 나타나 신사 앞에서 술을 마시며 비틀비틀. 기분이 좋으면 새전을 크게
   두고 간다. 술을 대접하면 꼭, 두 배로.
@@ -64,7 +64,7 @@ GUEST_TALK = {
     "sunny": ["우린 장난 안 쳤어! …아마도.", "서니 밀크! 빛의 요정이야!", "안 보였지? 헤헤."],
     "luna": ["쉿… 조용히 해 줘.", "루나 차일드예요. 소리를 지울 수 있어요.", "…다음엔 안 들킬 거예요."],
     "star": ["스타 사파이어야. 다 느껴진다구.", "너 방금 이쪽으로 오고 있었지?", "도망가는 건 내가 제일 빨라!"],
-    "aya": ["문문신문, 한 부 어떠세요?", "특종 냄새가 나요!", "이 신사, 기사거리가 많네요."],
+    "aya": ["붕붕마루 신문, 한 부 어떠세요?", "특종 냄새가 나요!", "이 신사, 기사거리가 많네요."],
     "suika": ["한 잔 할래~?", "오니는 거짓말 안 해!", "여기 술맛 좋다~ 딸꾹!"],
 }
 APOLOGY = {
@@ -76,7 +76,7 @@ GUEST_ABOUT = {  # 도감: (아직 못 만났을 때 힌트, 만난 뒤 설명)
     "sunny": ("장난을 좋아하는 빛의 요정", "빛을 굴절시켜 숨어서 새전을 슬쩍"),
     "luna": ("소리를 지우는 달의 요정", "친구들 말소리를 지워 버려요"),
     "star": ("무엇이든 알아채는 별의 요정", "커서가 다가오면 제일 먼저 도망가요"),
-    "aya": ("특종을 찾아다니는 까마귀 텐구", "취재하고 문문신문 호외를 내요"),
+    "aya": ("특종을 찾아다니는 까마귀 텐구", "취재하고 붕붕마루 신문 호외를 내요"),
     "suika": ("술을 좋아하는 작은 오니", "술을 대접하면 새전 두 배"),
 }
 INTERVIEW_Q = ["최근 새전 사정은 어떤가요?", "독자들께 한 말씀 부탁드려요!", "요즘 신사에 무슨 일이 있었나요?"]
@@ -554,7 +554,7 @@ class AyaVisit(Visit):
         if self.phase == "swoop":
             a.face(t.pos_x if t else self.game.shrine.pos_x)
             a.pet.act("bow", 1.4)
-            self.say(a, "안녕하세요, 문문신문의 샤메이마루 아야입니다!", 2.8)
+            self.say(a, "안녕하세요, 붕붕마루 신문의 샤메이마루 아야입니다!", 2.8)
             self.phase, self.until = "greet", now + 1.8
         elif self.phase == "greet" and now >= self.until:
             if t is not None and t.grounded and abs(t.pos_x - a.pet.pos_x) < 700:
@@ -877,13 +877,13 @@ class Visits:
             self.visit.say(gu, random.choice(GUEST_TALK.get(gu.key, ["안녕!"])), 3.0)
 
     def publish(self, key: str | None, answer: str, thrown: bool) -> None:
-        """아야가 떠나고 잠시 뒤 문문신문 호외 (기사 효과: 새전 수입 증가)."""
+        """아야가 떠나고 잠시 뒤 붕붕마루 신문 호외 (기사 효과: 새전 수입 증가)."""
         g = self.game
         article = make_article(g.state, key, answer, thrown)
         g.state.news = (g.state.news + [article.headline])[-5:]
         g.state.news_until = time.time() + article.boost_seconds
         g.save()
-        log.info("문문신문 호외: %s", article.headline)
+        log.info("붕붕마루 신문 호외: %s", article.headline)
 
         def show():
             if g.hidden_for_fullscreen:
