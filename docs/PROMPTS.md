@@ -166,4 +166,4 @@ no numbers, no text, no shadows.
 python tools/import_sheet.py 걷기.png reimu --preset walk
 ```
 
-8장이 아니면 `--names walk_0,walk_1,…` 로 장수에 맞게 적습니다 (`--preset walk` 없이 쓰면 옛 걷기 그림이 남으니 `--names` 앞에 옛 파일을 지우거나, 같은 장수로 뽑으세요).
+AI가 8장이 아닌 다른 장수로 그렸으면 다시 뽑는 게 가장 간단합니다.
