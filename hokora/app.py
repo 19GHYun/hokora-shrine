@@ -18,14 +18,17 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import __version__, winutil
 from . import affection as aff
+from . import daily, photo, season
 from .bubble import say
+from .daily import StampCard
 from .decor import DecorWindow
 from .diary import MIN_AWAY, PetalBurst, away_card, offline_income
 from .events import Events
-from .guests import Visits
+from .guests import Flash, Visits
 from .omikuji import FortuneSlip, can_draw
 from .omikuji import draw as draw_omikuji
 from .panel import ShrinePanel
+from .photo import PhotoCard
 from .pet import CURSOR, PetWindow
 from .prayer import WISHES, income_multiplier, pat_multiplier
 from .prayer import buy as buy_wish
@@ -106,6 +109,9 @@ class Game(QObject):
         self._nap_start = 0.0
         self._nap_total = 0
         self._cards: list = []
+        self._card_queue: list = []              # 일기·출석·신문·사진 카드는 하나씩 차례로
+        self.fx = season.SeasonFx()
+        self._night: bool | None = None
         self._update_bounds()
         self.pets: list[PetWindow] = []
         self.guests: list[PetWindow] = []        # 지금 와 있는 손님 (guests.py 가 넣고 뺌)
@@ -133,6 +139,7 @@ class Game(QObject):
         self.napping = False
         self.nap_timer = QTimer(self, timeout=self._check_nap, interval=3000)
         self.watch_timer = QTimer(self, timeout=self._watch, interval=1500)
+        self.day_timer = QTimer(self, timeout=self._every_half_minute, interval=30_000)   # 날짜·계절·밤, 부탁 진행
         # 창 위 발판: 캐릭터가 창 위에 있으면 자주(창을 끌면 따라가게), 아니면 가끔 새로 읽음
         self.window_platforms: list[winutil.Platform] = []
         self.cursor = QCursor.pos()
@@ -223,7 +230,8 @@ class Game(QObject):
         """뒤 → 앞 순서 (맨 위로 다시 올릴 때 이 순서대로라 캐릭터가 가장 앞)."""
         hidden = self.visits.hidden_decor                 # 서니가 숨긴 장식도
         decors = [w for k, w in self.decors.items() if k != hidden] if self.state.show_decor else []
-        return [*decors, self.shrine, *self.pets, *self.guests]
+        fx = [self.fx] if self.fx.kind and self.state.season_fx else []   # 흩날림은 맨 뒤
+        return [*fx, *decors, self.shrine, *self.pets, *self.guests]
 
     def keep(self, w) -> None:
         """잠깐 떠 있는 창(일기·신문·효과)을 닫힐 때까지 붙잡아 둠."""
@@ -246,7 +254,10 @@ class Game(QObject):
         self.nap_timer.start()
         self.watch_timer.start()
         self.platform_timer.start()
+        self.day_timer.start()
         self._refresh_platforms()
+        self._refresh_season()
+        QTimer.singleShot(3500, self._new_day)
         if self._away >= MIN_AWAY:
             QTimer.singleShot(2500, lambda: self._show_diary(self._away, time.time() - self._away,
                                                              self._away_earned, offline=True))
@@ -265,6 +276,8 @@ class Game(QObject):
         for pet in everyone:
             pet.step(dt)
         self.shrine.step(dt)
+        if self.fx.isVisible():
+            self.fx.follow(self.shrine.pos_x, self.ground_under(self.shrine.pos_x).y)
         self.events.tick()
         self.visits.tick()
         fps = FPS_BUSY if any(p.busy for p in everyone) else FPS_CALM
@@ -405,7 +418,14 @@ class Game(QObject):
             self.state.add_saisen(reward)
             self.shrine.set_saisen(self.state.saisen)
             self.shrine.pop(f"+{reward}")
+            daily.bump(self.state, "pat")
+            self._daily_check()
             self.check_unlocks()
+
+    def on_thrown(self, pet: PetWindow, speed: float) -> None:
+        if speed > 400:                           # 살짝 내려놓은 건 빼고
+            daily.bump(self.state, "throw")
+            self._daily_check()
 
     def on_shrine_moved(self, x: float) -> None:
         prim = self.app.primaryScreen().availableGeometry()   # 주 모니터 기준 비율 (다른 모니터면 0~1 밖)
@@ -426,7 +446,113 @@ class Game(QObject):
         self.panel.show_above(self.shrine.pos_x, top, self.left, self.right)
 
     def _say_at_shrine(self, text: str) -> None:
-        say(text, self.shrine.pos_x, self.shrine.y() + 26)
+        if not self.hidden_for_fullscreen:
+            say(text, self.shrine.pos_x, self.shrine.y() + 26)
+
+    # ── 오늘의 부탁·출석 ──
+    def _every_half_minute(self) -> None:
+        self._new_day()
+        self._refresh_season()
+        self._daily_check()                        # 새전 모으기·함께 지내기는 시간이 지나며 채워짐
+
+    def _new_day(self) -> None:
+        """날짜가 바뀌면(켰을 때 포함) 오늘의 부탁을 새로 받고 출석 도장."""
+        s = self.state
+        fresh = daily.new_day(s)
+        got = daily.stamp(s)
+        if got is not None:
+            day, reward = got
+            self.shrine.set_saisen(s.saisen)
+            self.shrine.pop(f"+{reward}")
+            extra = "🎍 새해 복 많이 받으세요! 사흘 동안 새전 수입 2배" if season.is_new_year() else ""
+            self.show_card(StampCard(s, day, reward, extra))
+            log.info("출석 도장: 연속 %d일째 (+%d)", s.attend_streak, reward)
+        if fresh or got is not None:
+            self.save()
+
+    def _daily_check(self) -> None:
+        done, bonus = daily.check(self.state)
+        if not done:
+            return
+        self.shrine.set_saisen(self.state.saisen)
+        for i, task in enumerate(done):
+            self.later(i * 1.8, lambda t=task: self._say_at_shrine(
+                f"✅ 부탁 완료: {daily.text(t)}   새전 +{t['reward']:,}"))
+            self.shrine.pop(f"+{task['reward']}")
+            log.info("부탁 완료: %s", task["kind"])
+        if bonus:
+            def cheer():
+                self._say_at_shrine(f"🎉 오늘의 부탁을 모두 들어줬다!  보너스 새전 +{bonus:,}")
+                for p in self.pets:
+                    p.react(True)
+            self.later(len(done) * 1.8, cheer)
+        self.save()
+
+    # ── 계절·밤 ──
+    def _refresh_season(self) -> None:
+        night = season.is_night()
+        if night != self._night:
+            self._night = night
+            self.shrine.set_night(night)
+            for d in self.decors.values():
+                d.set_night(night)
+        kind = season.fx_kind() if self.state.season_fx else ""
+        self.fx.set_kind(kind)
+        show = bool(kind) and not self.hidden_for_fullscreen
+        if show != self.fx.isVisible():
+            if show:
+                self.fx.follow(self.shrine.pos_x, self.ground_under(self.shrine.pos_x).y)
+            self.fx.setVisible(show)
+
+    def set_season_fx(self, on: bool) -> None:
+        self.state.season_fx = on
+        self._refresh_season()
+        log.info("계절 연출: %s", "켬" if on else "끔")
+        self.save()
+
+    # ── 사진 찍기 ──
+    def take_photo(self) -> None:
+        """다들 신사 양옆에 줄을 서서 손을 흔들면 찰칵."""
+        if self.hidden_for_fullscreen:
+            return
+        self.events.cancel_thief()
+        self.events.cancel_play()
+        self._say_at_shrine("다들 모여~ 사진 찍자!")
+        g = self.ground_under(self.shrine.pos_x)
+        half = self.shrine.width() / 2 - 6
+        lineup = [p for p in self.pets if not p.scripted and p.state not in ("held", "sleep")]
+        for i, p in enumerate(lineup):                   # 신사 오른쪽·왼쪽 번갈아 한 줄로
+            side = 1 if i % 2 == 0 else -1
+            x = self.shrine.pos_x + side * (half + 30 + (i // 2) * 52)
+            p.pos_x = min(max(x, g.x1 + 30), g.x2 - 30)
+            p.pos_y, p.vx, p.vy, p.state, p.on = g.y - 70, 0.0, 0.0, "fall", None
+            p._to_cursor = p._follow = False
+            p.facing = -side
+            p._place()
+
+        def pose():
+            self._say_at_shrine("자, 찍는다~ 하나, 둘…")
+            for p in lineup:
+                if p.on is not None and p.state not in ("held", "fall", "jump"):
+                    p.act("wave", 2.4)
+        self.later(1.0, pose)
+        self.later(2.2, self._shoot)
+
+    def _shoot(self) -> None:
+        got = photo.take(self)
+        if got is None:
+            return
+        img, path = got
+        photo.to_clipboard(img)
+        self.state.photos += 1
+        flash = Flash(self.shrine.pos_x, self.ground_under(self.shrine.pos_x).y - 70)
+        self.keep(flash)
+        flash.show()
+        self.show_card(PhotoCard(img, path))
+        log.info("사진: %s", path)
+        daily.bump(self.state, "photo")
+        self._daily_check()
+        self.save()
 
     def _check_nap(self) -> None:
         """자리를 비우면 다들 그 자리에서 낮잠, 돌아오면 깨어나 반긴다."""
@@ -462,8 +588,26 @@ class Game(QObject):
             return
         self.shrine.set_saisen(self.state.saisen)
         card = away_card(self.state, seconds, start, earned, offline)
-        self.keep(card)
-        card.show_above(self.shrine.pos_x, self.shrine.y() + 20)
+        self.show_card(card)
+
+    def show_card(self, card) -> None:
+        """카드(일기·출석·신문·사진)는 겹치지 않게 하나가 닫히면 다음 것을."""
+        if self.hidden_for_fullscreen:
+            card.deleteLater()
+            return
+        self._card_queue.append(card)
+        card.destroyed.connect(lambda *_, c=card: self._card_done(c))
+        if len(self._card_queue) == 1:
+            card.show_above(self.shrine.pos_x, self.shrine.y() + 20)
+
+    def _card_done(self, card) -> None:
+        head = self._card_queue and self._card_queue[0] is card
+        if card in self._card_queue:
+            self._card_queue.remove(card)
+        if head and self._card_queue:
+            nxt = self._card_queue[0]
+            QTimer.singleShot(500, lambda: nxt in self._card_queue and nxt.show_above(
+                self.shrine.pos_x, self.shrine.y() + 20))
 
     # ── 친해지기: 말 걸기·선물 ──
     def on_pet_menu(self, pet: PetWindow, global_pos: QPoint) -> None:
@@ -508,6 +652,8 @@ class Game(QObject):
         say(line, pet.pos_x, pet.pos_y - 76, 3.5)
         if gained:
             self.later(1.2, lambda: self._add_affection(pet, gained))
+            daily.bump(self.state, "talk")             # 그날 처음 말 건 친구만
+            self._daily_check()
         self.save()
 
     def give_gift(self, pet: PetWindow, gift_key: str) -> None:
@@ -521,6 +667,8 @@ class Game(QObject):
             random.choice([f"{icon} 고마워!", f"{icon} 잘 먹을게~"])
         say(line, pet.pos_x, pet.pos_y - 76, 3.0)
         self._add_affection(pet, gained)
+        daily.bump(self.state, "gift")
+        self._daily_check()
         self.save()
 
     # ── 참배 ──
@@ -529,6 +677,7 @@ class Game(QObject):
             return
         w = WISHES[key]
         log.info("참배: %s", key)
+        daily.bump(self.state, "pray")
         self.shrine.set_saisen(self.state.saisen)
         if key == "snack":
             self.gather()
@@ -538,6 +687,7 @@ class Game(QObject):
             self._say_at_shrine("소원을 빌었다. 오미쿠지를 한 번 더 뽑을 수 있어요!")
         else:
             self._say_at_shrine(f"{w.icon} {w.name}!  {w.desc}")
+        self._daily_check()
         self.save()
 
     # ── 신사 꾸미기 ──
@@ -562,6 +712,7 @@ class Game(QObject):
             action = "place"
         if action == "place" and key in s.decor_owned and key not in self.decors:
             win = DecorWindow(self, key, self._decor_spot(key))
+            win.set_night(bool(self._night))
             self.decors[key] = win
             s.decor_pos[key] = win.pos_x
             if not self.hidden_for_fullscreen and s.show_decor:
@@ -605,6 +756,8 @@ class Game(QObject):
             pet.react(result.fortune.good)
         slip = FortuneSlip(result)
         slip.show_above(self.shrine.pos_x, self.shrine.y() + 20)
+        daily.bump(self.state, "omikuji")
+        self.later(2.0, self._daily_check)
         self.save()
         self.check_unlocks()
 
@@ -664,6 +817,7 @@ class Game(QObject):
         info.setEnabled(False)
         menu.addSeparator()
         menu.addAction("신사 관리 · 도감", self.open_panel)
+        menu.addAction("📸 사진 찍기", self.take_photo)
         if can_draw(s):
             menu.addAction("오늘의 오미쿠지 뽑기", self.omikuji)
         menu.addAction("모두 불러오기", self.gather)
@@ -676,6 +830,10 @@ class Game(QObject):
         cur.setChecked(s.cursor_play)
         cur.toggled.connect(self.set_cursor_play)
         menu.addAction(cur)
+        fx = QAction("계절 연출  (벚꽃잎·단풍·눈·반딧불)", menu, checkable=True)
+        fx.setChecked(s.season_fx)
+        fx.toggled.connect(self.set_season_fx)
+        menu.addAction(fx)
         climb = QAction("창 위에도 올라가기", menu, checkable=True)
         climb.setChecked(s.climb)
         climb.toggled.connect(self.set_climb)

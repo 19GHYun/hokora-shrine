@@ -143,7 +143,6 @@ class NewsCard(QWidget):
         body_h = sum(fm_b.boundingRect(QRectF(0, 0, self._body_w, 999), Qt.TextWordWrap, ln).height() + 3
                      for ln in article.lines)
         self.setFixedSize(self.W, int(78 + self.head_h + 10 + max(self.PHOTO, body_h) + 44))
-        QTimer.singleShot(40_000, self.close)
 
     @property
     def _body_w(self) -> float:
@@ -152,6 +151,7 @@ class NewsCard(QWidget):
     def show_above(self, cx: float, bottom: float) -> None:
         self.move(round(cx - self.width() / 2), round(bottom - self.height() - 8))
         self.show()
+        QTimer.singleShot(40_000, self.close)
 
     def mousePressEvent(self, _e) -> None:
         self.close()

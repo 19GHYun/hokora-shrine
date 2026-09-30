@@ -146,6 +146,7 @@ class World(Protocol):
     def portal(self, x: float, direction: int) -> float | None: ...   # 모니터 사이 틈 건너편
     def cursor_taken(self, pet: "PetWindow") -> bool: ...    # 다른 캐릭터가 이미 커서에 타고 있음
     def on_pet_menu(self, pet: "PetWindow", global_pos) -> None: ...
+    def on_thrown(self, pet: "PetWindow", speed: float) -> None: ...
 
 
 class PetWindow(QWidget):
@@ -663,6 +664,7 @@ class PetWindow(QWidget):
                 vx, vy = vx * MAX_THROW / speed, vy * MAX_THROW / speed
             self.vx, self.vy = vx, vy
             self.state = "fall"
+            self.world.on_thrown(self, min(speed, MAX_THROW))
         else:
             self.world.on_pat(self)
 

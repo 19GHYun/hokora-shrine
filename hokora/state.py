@@ -88,6 +88,17 @@ class GameState:
     suika_saisen: int = 0            # 스이카가 두고 간 새전 합계
     news: list[str] = field(default_factory=list)   # 붕붕마루 신문 최근 제목 (최대 5개, 오래된 것부터)
     news_until: float = 0.0          # 기사 효과가 끝나는 시각 (time.time)
+    # 오늘의 부탁·출석 도장 (daily.py)
+    daily_date: str = ""
+    daily_tasks: list[dict] = field(default_factory=list)   # [{kind, goal, count, reward, done}]
+    daily_base_total: int = 0        # 그날 시작할 때의 모은 새전·함께한 시간 (새전 모으기·함께 지내기 부탁용)
+    daily_base_runtime: float = 0.0
+    daily_done: int = 0              # 지금까지 들어준 부탁 수
+    attend_last: str = ""            # 마지막으로 출석 도장을 찍은 날
+    attend_streak: int = 0
+    attend_days: int = 0
+    season_fx: bool = True           # 계절 연출 (벚꽃잎·단풍잎·눈·반딧불)
+    photos: int = 0
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
     @property

@@ -8,6 +8,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
+from .season import night_glow
+
 GROUND_MARGIN = 2
 LABEL_SPACE = 32          # 건물 위 말풍선(새전 수·+N) 자리
 STAGE_SIZE = {1: (100, 100), 2: (150, 120), 3: (200, 140), 4: (244, 160), 5: (304, 196)}   # 단계별 건물 그림 크기 (바닥 = 아래)
@@ -39,9 +41,15 @@ class ShrineWindow(QWidget):
         self.saisen = 0
         self.pops: list[list] = []      # [나이, 글자]
         self.hover = False
+        self.night = False
         self._press = None
         self._dragging = False
         self.set_level(level)
+
+    def set_night(self, on: bool) -> None:
+        """밤엔 푸르스름하게, 등불이 켜진 듯이."""
+        self.night = on
+        self.update()
 
     def set_level(self, level: int) -> None:
         """신사 단계가 바뀌면 창 크기도 건물에 맞게."""
@@ -86,6 +94,8 @@ class ShrineWindow(QWidget):
         p.save()
         p.translate((self.width() - bw) / 2, self.height() - GROUND_MARGIN - bh)
         DRAW_STAGE[self.level](p)
+        if self.night:
+            night_glow(p, bw, bh)
         p.restore()
         f = QFont("Malgun Gothic", 9)
         f.setBold(True)

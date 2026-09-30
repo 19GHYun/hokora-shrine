@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QPro
                                QTabBar, QVBoxLayout, QWidget)
 
 from . import affection as aff
+from . import daily, season
 from .decor import decor_image
 from .guests import GUEST_ABOUT, VISITS, guest_stage
 from .omikuji import can_draw
@@ -95,6 +96,21 @@ def _decor_icon(key: str, size: int) -> QPixmap:
     return pm
 
 
+class _Stamps(QWidget):
+    """출석 도장판 7칸."""
+
+    def __init__(self, state: GameState):
+        super().__init__()
+        self.state = state
+        self.setFixedHeight(46)
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        daily.draw_stamps(p, QRectF(self.rect()).adjusted(0, 2, 0, -2), daily.cycle_day(self.state))
+        p.end()
+
+
 def _hearts(s: GameState, key: str) -> str:
     """도감 카드의 하트 (분홍색)."""
     return f"<span style='color:#E0457B'>{aff.hearts(s, key)}</span>"
@@ -130,13 +146,13 @@ class ShrinePanel(QWidget):
         self.tabs.setDrawBase(False)
         self.tabs.setExpanding(False)
         v.addWidget(self.tabs)
-        page1, page2, page3, page4, page5 = QWidget(), QWidget(), QWidget(), QWidget(), QWidget()
-        p1, p3, p4, p5 = QVBoxLayout(page1), QVBoxLayout(page3), QVBoxLayout(page4), QVBoxLayout(page5)
-        for lay in (p1, p3, p4, p5):
+        page1, page2, page3, page4, page5, page6 = (QWidget() for _ in range(6))
+        p1, p3, p4, p5, p6 = (QVBoxLayout(pg) for pg in (page1, page3, page4, page5, page6))
+        for lay in (p1, p3, p4, p5, p6):
             lay.setContentsMargins(0, 4, 0, 0)
             lay.setSpacing(10)
-        self.pages = [page1, page4, page2, page5, page3]
-        for name, page in zip(("신사", "참배", "도감", "손님", "꾸미기"), self.pages):
+        self.pages = [page1, page6, page4, page2, page5, page3]
+        for name, page in zip(("신사", "부탁", "참배", "도감", "손님", "꾸미기"), self.pages):
             self.tabs.addTab(name)
             page.hide()
             v.addWidget(page)
@@ -210,6 +226,39 @@ class ShrinePanel(QWidget):
             h.addLayout(info, 1)
             grid.addWidget(card, i // 2, i % 2)
             self.cards[key] = (pic, name, goals)
+
+        # ── 부탁: 출석 도장 + 오늘의 부탁 ──
+        p6.addWidget(QLabel("💮 출석 도장", objectName="section"))
+        self.stamps = _Stamps(state)
+        p6.addWidget(self.stamps)
+        self.attend_label = QLabel(objectName="goal")
+        self.attend_label.setWordWrap(True)
+        p6.addWidget(self.attend_label)
+        p6.addWidget(QLabel("레이무의 오늘의 부탁", objectName="section"))
+        self.task_rows: list[tuple] = []
+        for _ in range(3):
+            card = QWidget(objectName="card")
+            card.setAttribute(Qt.WA_StyledBackground, True)
+            h = QHBoxLayout(card)
+            h.setContentsMargins(12, 8, 12, 8)
+            icon = QLabel()
+            icon.setStyleSheet("font-size: 20px;")
+            icon.setFixedWidth(32)
+            col = QVBoxLayout()
+            col.setSpacing(3)
+            title = QLabel(objectName="name")
+            bar = QProgressBar()
+            bar.setTextVisible(False)
+            status = QLabel(objectName="goal")
+            for w in (title, bar, status):
+                col.addWidget(w)
+            h.addWidget(icon)
+            h.addLayout(col, 1)
+            p6.addWidget(card)
+            self.task_rows.append((card, icon, title, bar, status))
+        self.daily_foot = QLabel(objectName="sub")
+        self.daily_foot.setWordWrap(True)
+        p6.addWidget(self.daily_foot)
 
         # ── 손님 ──
         tip = QLabel("가끔 신사에 손님이 찾아와요. 신사가 커질수록 찾아오는 손님이 늘어요.", objectName="goal")
@@ -336,6 +385,8 @@ class ShrinePanel(QWidget):
         self.title.setText(f"⛩  {s.stage_name}  ({s.shrine_level}단계)")
         boost = income_multiplier(s)
         tags = (["번영 기원 ×2"] if left(s, "prosper") else []) + ([f"신문 ×{NEWS_BOOST:g}"] if news_active(s) else [])
+        if season.is_new_year():
+            tags.append(f"설날 ×{season.NEW_YEAR_BOOST}")
         self.sub.setText(f"새전 {s.saisen:,}   ·   분당 새전 {s.income_per_min * boost:g}"
                          + (f"  ({', '.join(tags)})" if tags else ""))
         drawable = can_draw(s)
@@ -408,6 +459,35 @@ class ShrinePanel(QWidget):
                 for label, bar in goals[1:]:
                     label.hide()
                     bar.hide()
+        day = daily.cycle_day(s)
+        self.stamps.update()
+        if not s.attend_streak:
+            self.attend_label.setText("하루에 한 번 켜면 도장을 찍어요. 7일째엔 큰 선물!")
+        else:
+            gift = "오늘 큰 선물을 받았어요!" if day == 7 else f"{7 - day}일 더 오면 큰 선물 (새전 + 오미쿠지 한 번 더)"
+            self.attend_label.setText(f"연속 {s.attend_streak}일째 출석 (모두 {s.attend_days}일)   ·   {gift}")
+        for i, (card, icon, title, bar, status) in enumerate(self.task_rows):
+            if i >= len(s.daily_tasks):
+                card.hide()
+                continue
+            task = s.daily_tasks[i]
+            card.show()
+            icon.setText(daily.icon(task))
+            title.setText(daily.text(task))
+            n = min(daily.count(s, task), task["goal"])
+            bar.setRange(0, task["goal"])
+            bar.setValue(task["goal"] if task["done"] else n)
+            if task["done"]:
+                status.setText(f"✓ 들어줬어요   새전 +{task['reward']:,}")
+                self._role(status, "done")
+            else:
+                status.setText(f"{n:,} / {task['goal']:,}   ·   새전 +{task['reward']:,}")
+                self._role(status, "goal")
+        all_done = s.daily_tasks and all(t["done"] for t in s.daily_tasks)
+        self.daily_foot.setText(("🎉 오늘의 부탁을 모두 들어줬어요! 내일 또 새 부탁이 와요."
+                                 if all_done else f"셋 다 들어주면 보너스 새전 +{daily.all_bonus(s):,}")
+                                + f"\n지금까지 들어준 부탁 {s.daily_done}개")
+
         for key, (pic, name, line1, line2) in self.guest_cards.items():
             visits = s.guest_visits.get(key, 0)
             met = visits > 0

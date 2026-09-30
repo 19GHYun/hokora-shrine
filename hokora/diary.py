@@ -96,11 +96,11 @@ class DiaryCard(QWidget):
         body_h = sum(fm.boundingRect(QRectF(0, 0, self.W - 56, 999), Qt.TextWordWrap, "· " + ln).height() + 4
                      for ln in lines)
         self.setFixedSize(self.W, int(66 + body_h + (40 if footer else 12) + (18 if sub else 0)))
-        QTimer.singleShot(30_000, self.close)
 
     def show_above(self, cx: float, bottom: float) -> None:
         self.move(round(cx - self.width() / 2), round(bottom - self.height() - 8))
         self.show()
+        QTimer.singleShot(30_000, self.close)                 # 보인 뒤부터 30초 (카드는 차례로 뜨므로)
 
     def mousePressEvent(self, _e) -> None:
         self.close()

@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
+from . import season
 from .state import GameState
 
 INCOME_BOOST = 2        # 번영 기원: 수입 배수
@@ -52,10 +53,12 @@ def left(s: GameState, key: str, now: float | None = None) -> float:
 
 
 def income_multiplier(s: GameState) -> float:
-    """번영 기원 ×2, 붕붕마루 신문 기사 효과 ×1.5 (겹치면 곱함)."""
+    """번영 기원 ×2, 붕붕마루 신문 기사 효과 ×1.5, 설날 ×2 (겹치면 곱함)."""
     m = float(INCOME_BOOST if left(s, "prosper") else 1)
     if news_active(s):
         m *= NEWS_BOOST
+    if season.is_new_year():
+        m *= season.NEW_YEAR_BOOST
     return m
 
 

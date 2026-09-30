@@ -888,7 +888,5 @@ class Visits:
         def show():
             if g.hidden_for_fullscreen:
                 return
-            card = NewsCard(article)
-            g.keep(card)
-            card.show_above(g.shrine.pos_x, g.shrine.y() + 20)
+            g.show_card(NewsCard(article))
         QTimer.singleShot(int(NEWS_DELAY * 1000), show)

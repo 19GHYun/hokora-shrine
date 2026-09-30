@@ -8,6 +8,8 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtWidgets import QWidget
 
+from .season import lamp_glow
+
 from .sprites import SPRITE_DIR
 from .state import DECOR
 
@@ -44,6 +46,7 @@ class DecorWindow(QWidget):
         self.scale = height / max(1, img.height())
         self.setFixedSize(max(10, round(img.width() * self.scale)), height + GROUND_MARGIN)
         self.pos_x = x
+        self.night = False
         self._press = None
         self._dragging = False
         self.pos_x = self._clamp(x)
@@ -66,8 +69,17 @@ class DecorWindow(QWidget):
     def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
-        p.drawImage(QRectF(0, 0, self.width(), self.height() - GROUND_MARGIN), decor_image(self.key))
+        h = self.height() - GROUND_MARGIN
+        p.drawImage(QRectF(0, 0, self.width(), h), decor_image(self.key))
+        if self.night and self.key == "lantern":           # 밤: 돌등롱에 불
+            p.setRenderHint(QPainter.Antialiasing)
+            lamp_glow(p, self.width() / 2, h * 0.37, min(self.width(), h) * 0.5)
         p.end()
+
+    def set_night(self, on: bool) -> None:
+        if on != self.night:
+            self.night = on
+            self.update()
 
     # ── 마우스: 끌면 옆으로 옮기기, 누르면 신사 관리 창 ──
     def mousePressEvent(self, e) -> None:
