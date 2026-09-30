@@ -43,7 +43,13 @@ FALLBACK = {
     "skill": ["idle"],
     "run": ["walk", "idle"],
     "caught": ["held", "fall", "idle"],
+    "ride": ["sit", "idle"],          # 커서 위에 앉아 있기
+    "climb": ["held", "fall", "idle"],  # 벽 타기 (두 팔을 든 그림)
+    "hang": ["held", "fall", "idle"],   # 천장·벽에 매달리기
 }
+
+
+AIRBORNE = {"held", "fall", "jump", "ride", "climb", "hang"}   # 그림자를 그리지 않는 동작
 
 
 class ImageSprites:
@@ -102,12 +108,16 @@ class ImageSprites:
             dy = -abs(math.sin(t * 12.0)) * 3.0
         elif kind == "held":
             angle = math.sin(t * 10.0) * (2.5 if animated else 6.0)
+        elif kind == "hang":                  # 대롱대롱 천천히
+            angle = math.sin(t * 4.0) * 7.0
+        elif kind == "climb":                 # 영차영차
+            dy = -abs(math.sin(t * 8.0)) * 2.0
         elif kind == "sleep" and not animated:
             dy = math.sin(t * 1.2) * 0.6
         elif kind == "run":
             dy = -abs(math.sin(t * 15.7)) * 2.0
         # 반 픽셀·1도 단위로 맞춰서 같은 모습은 한 번만 그리게
-        return name, round(dy * 2) / 2, float(round(angle)), kind not in ("held", "fall", "jump")
+        return name, round(dy * 2) / 2, float(round(angle)), kind not in AIRBORNE
 
     def draw(self, name: str, dy: float, angle: float, shadow: bool, facing: int,
              dpr: float) -> tuple[QPixmap, QPointF]:

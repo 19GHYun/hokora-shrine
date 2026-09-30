@@ -11,8 +11,8 @@ import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from PySide6.QtCore import QElapsedTimer, QObject, QPoint, QRectF, Qt, QTimer
-from PySide6.QtGui import QAction, QFont, QIcon, QImage, QPainter, QPixmap
+from PySide6.QtCore import QElapsedTimer, QObject, QPoint, QPointF, QRectF, Qt, QTimer
+from PySide6.QtGui import QAction, QCursor, QFont, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
@@ -23,7 +23,7 @@ from .events import Events
 from .omikuji import FortuneSlip, can_draw
 from .omikuji import draw as draw_omikuji
 from .panel import ShrinePanel
-from .pet import PetWindow
+from .pet import CURSOR, PetWindow
 from .prayer import WISHES, income_multiplier, pat_multiplier
 from .prayer import buy as buy_wish
 from .progress import UNLOCKS, newly_unlocked
@@ -120,6 +120,10 @@ class Game(QObject):
         self.watch_timer = QTimer(self, timeout=self._watch, interval=1500)
         # 창 위 발판: 캐릭터가 창 위에 있으면 자주(창을 끌면 따라가게), 아니면 가끔 새로 읽음
         self.window_platforms: list[winutil.Platform] = []
+        self.cursor = QCursor.pos()
+        self.cursor_vel = QPointF()
+        self.cursor_speed = 0.0
+        self.cursor_down = False
         self.platform_timer = QTimer(self, timeout=self._refresh_platforms, interval=PLATFORM_SLOW)
 
         for sc in app.screens():
@@ -229,6 +233,7 @@ class Game(QObject):
         dt = min(self.clock.restart() / 1000.0, 0.1)   # 잠자기·절전에서 깨어나도 순간이동 안 하게
         if self.hidden_for_fullscreen:
             return
+        self._track_cursor(dt)
         self.state.runtime_sec += dt
         if not 5 <= time.localtime().tm_hour < 20:
             self.state.night_sec += dt
@@ -270,6 +275,30 @@ class Game(QObject):
         return self.state.climb
 
     @property
+    def cursor_play(self) -> bool:
+        return self.state.cursor_play
+
+    def _track_cursor(self, dt: float) -> None:
+        """커서 위치·속도 (살짝 부드럽게) — 올라타기·따라가기·흔들어 떨어뜨리기에 씀."""
+        c = QPointF(QCursor.pos())
+        if dt > 0:
+            v = (c - self.cursor) / dt
+            self.cursor_vel = self.cursor_vel * 0.5 + v * 0.5
+            self.cursor_speed = (self.cursor_vel.x() ** 2 + self.cursor_vel.y() ** 2) ** 0.5
+        self.cursor = c
+        self.cursor_down = winutil.left_button_down()
+
+    def cursor_taken(self, pet: PetWindow) -> bool:
+        return any(p is not pet and (p.on == CURSOR or p._to_cursor) for p in self.pets)
+
+    def set_cursor_play(self, on: bool) -> None:
+        self.state.cursor_play = on
+        if not on:
+            for p in self.pets:
+                p._to_cursor = p._follow = False
+        log.info("커서 놀이: %s", "켬" if on else "끔")
+
+    @property
     def platforms(self) -> list[winutil.Platform]:
         """올라설 수 있는 모든 곳: 모니터별 작업표시줄 바닥 + 창 윗변."""
         return self.grounds + self.window_platforms
@@ -301,7 +330,13 @@ class Game(QObject):
         return best
 
     def platform(self, hwnd: int, x: float, win_left: float):
-        """그 창 윗변 중 캐릭터가 서 있는 구간. 창이 옮겨졌으면 옮겨진 만큼 감안해서 찾는다."""
+        """그 창 윗변 중 캐릭터가 서 있는 구간. 창이 옮겨졌으면 옮겨진 만큼 감안해서 찾는다.
+        커서(CURSOR)는 커서 끝의 아주 좁은 발판 — win_left 가 커서 x 라서 커서를 따라 움직인다."""
+        if hwnd == CURSOR:
+            if not self.state.cursor_play:
+                return None
+            c = self.cursor
+            return winutil.Platform(CURSOR, c.x() - 3, c.x() + 3, c.y(), c.x())
         for p in self.platforms:
             if p.hwnd == hwnd:
                 moved_x = x + (p.win_left - win_left)
@@ -514,6 +549,10 @@ class Game(QObject):
             view.setChecked(s.show_decor)
             view.toggled.connect(self.set_show_decor)
             menu.addAction(view)
+        cur = QAction("마우스 커서에도 올라타기", menu, checkable=True)
+        cur.setChecked(s.cursor_play)
+        cur.toggled.connect(self.set_cursor_play)
+        menu.addAction(cur)
         climb = QAction("창 위에도 올라가기", menu, checkable=True)
         climb.setChecked(s.climb)
         climb.toggled.connect(self.set_climb)

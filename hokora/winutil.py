@@ -25,6 +25,21 @@ def set_app_user_model_id(app_id: str) -> None:
             log.warning("AppUserModelID 설정 실패", exc_info=True)
 
 
+def set_click_through(hwnd: int, on: bool) -> None:
+    """창을 클릭이 통과하게(WS_EX_TRANSPARENT) — 커서 위에 올라탄 캐릭터가 클릭을 가로채지 않게."""
+    if not IS_WIN:
+        return
+    user32 = ctypes.windll.user32
+    ex = user32.GetWindowLongW(ctypes.c_void_p(hwnd), -20)
+    new = ex | 0x20 if on else ex & ~0x20
+    if new != ex:
+        user32.SetWindowLongW(ctypes.c_void_p(hwnd), -20, new)
+
+
+def left_button_down() -> bool:
+    return bool(IS_WIN and ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000)
+
+
 def keep_topmost(hwnd: int) -> None:
     """작업표시줄을 누르면 작업표시줄이 위로 올라오므로 가끔 다시 맨 위로."""
     if IS_WIN:

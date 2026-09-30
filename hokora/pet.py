@@ -16,6 +16,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QWidget
 
+from . import winutil
 from .render import Character, Pose, draw_character
 from .sprites import image_sprites
 from .state import PAT_COOLDOWN
@@ -33,6 +34,14 @@ MAX_THROW = 2600.0
 JUMP_CHANCE = 0.18              # 다음 행동을 고를 때 창으로 점프할 확률 (창 위 걷기를 켰을 때)
 JUMP_CLEAR = 40.0               # 목표보다 이만큼 더 높이 뛰어오름
 EDGE = 10.0                     # 창 끝에서 이만큼 앞에서 돌아서거나 떨어질지 정함
+CURSOR = -1000                  # 발판 번호: 마우스 커서 (창은 hwnd, 작업표시줄 바닥은 -1, -2 …)
+CURSOR_CHANCE = 0.10            # 다음 행동을 고를 때 커서로 뛰어오를 확률 (커서가 가까이 가만히 있을 때)
+FOLLOW_CHANCE = 0.12            # 커서 쪽으로 걸어갈 확률
+RIDE_SHAKE = 1500.0             # 커서를 이보다 빠르게(px/s) 움직이면 떨어짐
+CLIMB_SPEED = 32.0              # 벽 타기 속도 px/s
+CLIMB_CHANCE = 0.35             # 화면 끝 벽에 닿았을 때 벽을 탈 확률
+GRAB_CHANCE = 0.5               # 던져져 천장·벽에 부딪혔을 때 매달릴 확률
+SHAKE_REVERSALS = 3             # 창을 이만큼 번갈아 흔들면 떨어짐
 # 동작 → (프레임 수, 한 바퀴 시간). 애니메이션 식의 주기에 맞춰 끊김 없이 반복되게.
 # 프레임 수는 그림 장수(2·3·4·6장)로 나누어떨어지게 12.
 FRAMES = {
@@ -49,10 +58,13 @@ FRAMES = {
     "skill": (12, 1.2),    # 캐릭터 특기 두 장: 레이무 빗자루질 반복, 치르노·사쿠야는 한 번
     "run": (12, 0.4),      # 뛰기 (마리사 도망 등)
     "caught": (12, 0.628), # 붙잡힘
+    "ride": (8, 8.0),      # 커서 위에 앉기 (앉기 그림)
+    "climb": (12, 0.628),  # 벽 타기
+    "hang": (12, 1.57),    # 매달려 대롱대롱 (sin 4t 한 바퀴)
 }
 RUN_SPEED = 150.0
 # 이 상태들은 정해진 시간이 지나면 알아서 다음 행동으로 (각본 중이 아닐 때)
-TIMED = {"idle", "walk", "sit", "happy", "startled", "wave", "skill", "run", "caught"}
+TIMED = {"idle", "walk", "sit", "happy", "startled", "wave", "skill", "run", "caught", "ride"}
 
 
 ONE_SHOT = {"happy"}
@@ -88,7 +100,8 @@ class SpriteCache:
             pm.fill(Qt.transparent)
             p = QPainter(pm)
             code_kind = {"jump": "happy", "startled": "held", "wave": "happy", "skill": "idle",
-                         "run": "walk", "caught": "held"}.get(kind, kind)
+                         "run": "walk", "caught": "held", "ride": "sit", "climb": "held",
+                         "hang": "held"}.get(kind, kind)
             draw_character(p, ch, Pose(kind=code_kind, t=t, facing=facing, blink=blink),
                            QRectF(0, 0, CHAR_W, CHAR_H))
             p.end()
@@ -114,6 +127,11 @@ class World(Protocol):
     bottom: float      # 가장 낮은 바닥 — 이보다 한참 아래로 떨어지면 구조
 
     climbing: bool     # 창 위에도 올라가기 켜짐
+    cursor_play: bool  # 커서 올라타기·따라가기 켜짐
+    cursor: QPointF    # 마우스 커서 위치
+    cursor_speed: float
+    cursor_vel: QPointF
+    cursor_down: bool  # 왼쪽 버튼을 누르고 있음
     platforms: list    # 지금 올라설 수 있는 창 윗변들 (winutil.Platform)
 
     def on_pat(self, pet: "PetWindow") -> None: ...
@@ -125,6 +143,7 @@ class World(Protocol):
     def ground_under(self, x: float): ...                   # x 에 있는 바닥 발판
     def has_surface_below(self, x: float, y: float) -> bool: ...
     def portal(self, x: float, direction: int) -> float | None: ...   # 모니터 사이 틈 건너편
+    def cursor_taken(self, pet: "PetWindow") -> bool: ...    # 다른 캐릭터가 이미 커서에 타고 있음
 
 
 class PetWindow(QWidget):
@@ -163,17 +182,25 @@ class PetWindow(QWidget):
         self._edge_choice: bool | None = None   # 창 끝에 왔을 때 떨어질지(True) 돌아설지(False)
         self.scripted = False            # 이벤트(새전 도둑 등)가 움직이는 중 — 스스로 행동을 고르지 않음
         self.frozen_until = 0.0          # 사쿠야의 시간 정지
+        self._to_cursor = False          # 커서를 노리고 뛰는 중
+        self._follow = False             # 커서 쪽으로 걸어가는 중
+        self._click_through = False
+        self._shakes: deque[tuple[float, int, int]] = deque(maxlen=12)   # (시각, 축 0=x 1=y, 방향)
+        self._startle_on_land = False
+        self._wall = 0                   # 매달린/타는 벽 방향 (-1 왼쪽, 1 오른쪽, 0 천장)
+        self._climb_to = 0.0
         self._place()
 
     @property
     def busy(self) -> bool:
         """부드럽게 움직여야 하는 중(던져짐·잡힘) — 이때만 프레임을 올린다."""
-        return self.state in ("fall", "held", "jump", "run", "walk")
+        return self.state in ("fall", "held", "jump", "run", "walk", "ride", "climb", "hang")
 
     @property
     def grounded(self) -> bool:
         """발판 위에서 다른 걸 할 수 있는 상태 (공중·잡힘·낮잠·각본 중이 아님)."""
-        return (self.on is not None and not self.scripted and self.state not in ("fall", "jump", "held", "sleep")
+        return (self.on is not None and self.on != CURSOR and not self.scripted
+                and self.state not in ("fall", "jump", "held", "sleep", "ride", "climb", "hang")
                 and time.monotonic() >= self.frozen_until)
 
     def act(self, state: str, seconds: float, vx: float = 0.0) -> None:
@@ -187,7 +214,15 @@ class PetWindow(QWidget):
     # ── 상태 ──
     def _choose_next(self) -> None:
         now = time.monotonic()
+        self._follow = False
+        if self.on == CURSOR:                                  # 커서에서 실컷 탔으면 폴짝 내려감
+            target = self.world.jump_target(self)
+            if not (target and self._jump_to(*target)):
+                self._drop()
+            return
         if random.random() < 0.12 and self.world.try_skill(self):
+            return
+        if self._try_cursor(now):
             return
         if self.world.climbing and random.random() < JUMP_CHANCE:
             target = self.world.jump_target(self)
@@ -208,6 +243,26 @@ class PetWindow(QWidget):
             self.vx = 0
             self.state_until = now + random.uniform(5, 12)
 
+    def _try_cursor(self, now: float) -> bool:
+        """커서가 가까이 가만히 있으면 가끔 뛰어올라 타거나, 같은 높이면 그쪽으로 걸어감."""
+        w = self.world
+        if not w.cursor_play or w.cursor_down or w.cursor_speed > 150:
+            return False
+        c = w.cursor
+        dx, up = c.x() - self.pos_x, self.pos_y - c.y()
+        if (w.climbing and 40 < up < 420 and abs(dx) < 380 and not w.cursor_taken(self)
+                and random.random() < CURSOR_CHANCE):
+            if self._jump_to(c.x(), c.y()):
+                self._to_cursor = True
+                return True
+        if -30 < up < 260 and 40 < abs(dx) < 320 and random.random() < FOLLOW_CHANCE:
+            self.state, self._follow = "walk", True
+            self.facing = 1 if dx > 0 else -1
+            self.vx = self.facing * random.uniform(*WALK_SPEED) * 1.6     # 커서 쪽으로는 종종걸음
+            self.state_until = now + 8
+            return True
+        return False
+
     def _jump_to(self, tx: float, ty: float) -> bool:
         """(tx, ty) 에 내려앉도록 포물선으로 점프."""
         apex = max(self.pos_y - ty, 0.0) + JUMP_CLEAR     # 지금 발 위치에서 최고점까지 높이
@@ -223,6 +278,7 @@ class PetWindow(QWidget):
         self.vx, self.vy = (tx - self.pos_x) / t, vy0
         self.facing = 1 if self.vx >= 0 else -1
         self.state, self.on = "jump", None
+        self._to_cursor = False
         self.squash = 0.12
         return True
 
@@ -262,6 +318,28 @@ class PetWindow(QWidget):
         """발판이 사라지거나 끝에서 걸어 나감 → 떨어지기 (걷던 속도는 유지)."""
         self.state, self.vy, self.on = "fall", 0.0, None
         self._edge_choice = None
+        self._follow = False
+
+    def _knock_off(self, vx: float, vy: float) -> None:
+        """흔들리거나 떨쳐져서 날아감 → 착지하면 깜짝 놀람."""
+        self._drop()
+        self.vx, self.vy = vx, vy
+        self._startle_on_land = True
+
+    def _hang(self, wall: int, seconds: float) -> None:
+        """천장(wall=0)이나 벽(-1 왼쪽, 1 오른쪽)에 매달림."""
+        self.state, self.on, self._wall = "hang", None, wall
+        self.vx = self.vy = 0.0
+        self.tilt = 0.0
+        if wall:
+            self.facing = wall
+        self._anim_kind, self._anim_start = "hang", self.t
+        self.state_until = time.monotonic() + seconds
+
+    def _let_go(self) -> None:
+        wall = self._wall
+        self._drop()
+        self.vx = -wall * random.uniform(40, 90) if wall else random.uniform(-40, 40)
 
     def _land(self, y: float, hwnd: int | None, now: float) -> None:
         self.pos_y = y
@@ -272,9 +350,60 @@ class PetWindow(QWidget):
         self.state_until = now + random.uniform(1, 2)
         self.on = hwnd
         self._edge_choice = None
-        if hwnd is not None:
+        self._to_cursor = False
+        if hwnd == CURSOR:                                     # 커서 위에 앉기
+            self._on_left = self.world.cursor.x()
+            self.state = "ride"
+            self.state_until = now + random.uniform(6, 18)
+        elif hwnd is not None:
             plats = [p for p in self.world.platforms if p.hwnd == hwnd]
             self._on_left = plats[0].win_left if plats else 0.0
+        if self._startle_on_land:
+            self._startle_on_land = False
+            self.react(False)
+
+    def _look_at_cursor(self) -> None:
+        """가만히 있을 때 커서가 가까이 오면 그쪽을 봄."""
+        w = self.world
+        if not w.cursor_play:
+            return
+        c = w.cursor
+        dx = c.x() - self.pos_x
+        if abs(dx) < 220 and -60 < self.pos_y - c.y() < 320 and abs(dx) > 12:
+            self.facing = 1 if dx > 0 else -1
+
+    def _shaken(self, dx: float, dy: float, now: float) -> bool:
+        """올라탄 창이 좌우·위아래로 번갈아 크게 움직였는지 (흔들기)."""
+        for axis, d in ((0, dx), (1, dy)):
+            if abs(d) >= 6:
+                self._shakes.append((now, axis, 1 if d > 0 else -1))
+        while self._shakes and now - self._shakes[0][0] > 0.9:
+            self._shakes.popleft()
+        flips = sum(1 for a, b in zip(self._shakes, list(self._shakes)[1:]) if a[1] == b[1] and a[2] != b[2])
+        if flips >= SHAKE_REVERSALS:
+            self._shakes.clear()
+            return True
+        return False
+
+    def _start_climb(self, wall: int) -> None:
+        self.state, self._wall, self.on = "climb", wall, None
+        self.vx = self.vy = 0.0
+        self.facing = wall
+        self._climb_to = self.pos_y - random.uniform(120, 380)
+        self._anim_kind, self._anim_start = "climb", self.t
+
+    def _climb_step(self, dt: float, now: float) -> None:
+        """벽을 타고 오르다 턱(옆 모니터 바닥 등)이 나오면 올라서고, 다 오르면 매달림."""
+        w = self.world
+        self.pos_y -= CLIMB_SPEED * dt
+        beyond = self.pos_x + self._wall * (CHAR_W / 2 + 10)
+        for p in w.platforms:
+            if p.hwnd != CURSOR and p.x1 <= beyond <= p.x2 and self.pos_y <= p.y <= self.pos_y + CLIMB_SPEED * dt + 2:
+                self.pos_x = beyond + self._wall * 6
+                self._land(p.y, p.hwnd, now)
+                return
+        if self.pos_y <= self._climb_to or self.pos_y - CHAR_H <= w.top + 4:
+            self._hang(self._wall, random.uniform(2, 5))
 
     def freeze(self, seconds: float) -> None:
         self.frozen_until = time.monotonic() + seconds
@@ -297,6 +426,11 @@ class PetWindow(QWidget):
 
         if self.state == "held":
             pass  # 마우스가 옮김
+        elif self.state == "climb":
+            self._climb_step(dt, now)
+        elif self.state == "hang":
+            if now >= self.state_until:
+                self._let_go()
         elif self.state in ("fall", "jump"):
             prev_y = self.pos_y
             # 등가속도 운동의 정확한 식 → 프레임 간격(15/30fps)이 달라도 계산한 포물선 그대로 날아감
@@ -307,15 +441,31 @@ class PetWindow(QWidget):
                 self.tilt += self.vx * dt * 0.35
             lo, hi = w.left + CHAR_W / 2, w.right - CHAR_W / 2
             if self.pos_x < lo or self.pos_x > hi:
+                wall = -1 if self.pos_x < lo else 1
                 self.pos_x = min(max(self.pos_x, lo), hi)
+                if self.state == "fall" and abs(self.vx) > 500 and random.random() < GRAB_CHANCE:
+                    self._hang(wall, random.uniform(2, 5))              # 벽에 착 달라붙음
+                    self._place()
+                    return
                 self.vx = -self.vx * 0.5
             if self.pos_y - CHAR_H < w.top:
                 self.pos_y = w.top + CHAR_H
+                if self.state == "fall" and random.random() < GRAB_CHANCE:
+                    self._hang(0, random.uniform(2, 5))                 # 천장에 매달림
+                    self._place()
+                    return
                 self.vy = abs(self.vy) * 0.3
             if self.pos_y > w.bottom + 300:                   # 모니터 사이 빈 곳으로 빠지면 가까운 바닥 위로
                 g = w.ground_under(self.pos_x)
                 self.pos_x = min(max(self.pos_x, g.x1 + 30), g.x2 - 30)
                 self.pos_y, self.vy = g.y - 200, 0.0
+            if self.vy > 0 and self._to_cursor:              # 커서 끝에 착지
+                c = w.cursor
+                if abs(self.pos_x - c.x()) < 14 and prev_y <= c.y() + 2 <= self.pos_y + 6 and not w.cursor_down:
+                    self.pos_x, self.vx = c.x(), 0.0
+                    self._land(c.y() + 1, CURSOR, now)
+                    self._place()
+                    return
             if self.vy > 0:                                   # 내려올 때만 창·작업표시줄에 착지
                 hit = w.find_landing(self.pos_x, prev_y, self.pos_y)
                 if hit is not None:
@@ -332,11 +482,27 @@ class PetWindow(QWidget):
             plat = w.platform(self.on, self.pos_x, self._on_left) if self.on is not None else None
             if plat is None:
                 self._drop()
+            elif self.on == CURSOR and (w.cursor_down or w.cursor_speed > RIDE_SHAKE):
+                v = w.cursor_vel                              # 커서를 세게 흔들거나 누르면 떨어짐
+                self._knock_off(v.x() * 0.35, min(v.y() * 0.35, 0.0) - 180)
             else:
-                if plat.win_left != self._on_left:            # 창을 끌어 옮기면 같이
-                    self.pos_x += plat.win_left - self._on_left
-                    self._on_left = plat.win_left
-                self.pos_y = plat.y
+                dx, dy = plat.win_left - self._on_left, plat.y - self.pos_y
+                if plat.hwnd > 0 and self._shaken(dx, dy, now):   # 올라탄 창을 흔들면 우수수
+                    self._knock_off(random.choice((-1, 1)) * random.uniform(120, 260), -random.uniform(300, 480))
+                    plat = None
+                else:
+                    if dx:                                    # 창을 끌어 옮기면 같이 (커서도 같은 방식)
+                        self.pos_x += dx
+                        self._on_left = plat.win_left
+                    self.pos_y = plat.y + (1 if self.on == CURSOR else 0)
+            if plat is not None and self.state in ("idle", "sit") and self.on != CURSOR:
+                self._look_at_cursor()
+            if self._follow and self.state == "walk":
+                c = w.cursor
+                if abs(c.x() - self.pos_x) < 28 or w.cursor_speed > 900:   # 다 왔거나 커서가 휙 가 버림
+                    self._follow = False
+                    self.state, self.vx = "idle", 0.0
+                    self.state_until = now + random.uniform(2, 4)
             if self.state in ("walk", "run") and plat is not None and self.vx:
                 self.pos_x += self.vx * dt
                 self.walk_phase += abs(self.vx) * dt / WALK_STRIDE
@@ -350,10 +516,16 @@ class PetWindow(QWidget):
                     if through is not None:                   # 배율이 다른 옆 모니터로 건너가기
                         self._through_portal(through)
                     else:                                     # 끝: 아래에 착지할 곳이 있으면 가끔 뛰어내림
+                        beyond = (plat.x2 if d > 0 else plat.x1) + d * (EDGE + 6)
+                        drop_ok = w.has_surface_below(beyond, self.pos_y)
+                        if (plat.hwnd < 0 and not drop_ok and not self.scripted and self._edge_choice is None
+                                and random.random() < CLIMB_CHANCE):
+                            self._start_climb(d)                  # 화면 끝 벽: 영차영차 타고 오름
+                            self._place()
+                            return
                         if self._edge_choice is None:
-                            beyond = (plat.x2 if d > 0 else plat.x1) + d * (EDGE + 6)
                             chance = 0.6 if plat.hwnd < 0 else 0.45
-                            self._edge_choice = w.has_surface_below(beyond, self.pos_y) and random.random() < chance
+                            self._edge_choice = drop_ok and random.random() < chance
                         if not self._edge_choice:
                             self.vx = -self.vx
                             self.facing = -d
@@ -361,6 +533,10 @@ class PetWindow(QWidget):
             self.tilt = self.tilt * max(0.0, 1 - dt * 10) if abs(self.tilt) > 0.5 else 0.0
             if not self.scripted and self.state in TIMED and now >= self.state_until:
                 self._choose_next()
+        riding = self.on == CURSOR
+        if riding != self._click_through:
+            self._click_through = riding
+            winutil.set_click_through(int(self.winId()), riding)
         self._place()
         # 그림이 바뀔 때만 다시 그림 (낮잠 중엔 z 가 떠오르므로 계속)
         if (self._frame_key() != self._drawn_key or self.squash or self.tilt or self.hearts
@@ -459,6 +635,7 @@ class PetWindow(QWidget):
                 return
             self.state = "held"
             self.on = None
+            self._to_cursor = self._follow = False
             self.vx = self.vy = 0
             self.tilt = 0.0
             self.setCursor(Qt.ClosedHandCursor)

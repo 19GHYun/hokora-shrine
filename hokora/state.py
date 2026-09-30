@@ -52,6 +52,7 @@ class GameState:
     shrine_x: float = 0.82           # 신사 위치 (화면 폭 대비 0~1)
     income_carry: float = 0.0        # 분당 수입의 소수점 이월
     climb: bool = True               # 캐릭터가 열려 있는 창 위에도 올라감
+    cursor_play: bool = True         # 마우스 커서 위에 올라타기·따라가기
     omikuji_date: str = ""           # 마지막으로 오미쿠지를 뽑은 날 (YYYY-MM-DD)
     omikuji_count: int = 0
     decor_owned: list[str] = field(default_factory=list)       # 산 장식
