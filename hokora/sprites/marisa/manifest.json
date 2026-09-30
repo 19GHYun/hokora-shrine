@@ -11,14 +11,6 @@
       72,
       206
     ],
-    "walk_0": [
-      74,
-      201
-    ],
-    "walk_1": [
-      74,
-      198
-    ],
     "sit": [
       72,
       203
@@ -46,22 +38,6 @@
     "sleep": [
       69,
       184
-    ],
-    "walk_2": [
-      76,
-      203
-    ],
-    "walk_3": [
-      75,
-      203
-    ],
-    "walk_4": [
-      75,
-      202
-    ],
-    "walk_5": [
-      76,
-      205
     ],
     "idle_0": [
       72,
@@ -130,12 +106,64 @@
     "caught": [
       68,
       190
+    ],
+    "walk_0": [
+      68,
+      200
+    ],
+    "walk_1": [
+      68,
+      197
+    ],
+    "walk_2": [
+      67,
+      205
+    ],
+    "walk_3": [
+      67,
+      203
+    ],
+    "walk_4": [
+      68,
+      199
+    ],
+    "walk_5": [
+      67,
+      205
+    ],
+    "walk_6": [
+      61,
+      197
+    ],
+    "walk_7": [
+      65,
+      197
+    ],
+    "walk_8": [
+      61,
+      203
+    ],
+    "walk_9": [
+      64,
+      203
+    ],
+    "walk_10": [
+      66,
+      201
+    ],
+    "walk_11": [
+      64,
+      205
     ]
   },
   "sources": [
     "Gemini_Generated_Image_u1flfzu1flfzu1fl.png",
     "marisa1.png",
     "marisa2.png",
-    "marisa3.png"
-  ]
+    "marisa3.png",
+    "marisa_run2.png",
+    "marisa_run2.png",
+    "marisa_run2.png"
+  ],
+  "walk_cycles": 2
 }

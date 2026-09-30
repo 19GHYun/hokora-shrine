@@ -43,6 +43,8 @@ PRESETS = {
     "react": ["sit_0", "sit_1", "fall", "happy_0", "happy_1", "happy_2", "happy_3", "held_0", "held_1", "held_2"],
     "life": ["sleep_0", "sleep_1", "wave_0", "wave_1", "skill_0", "skill_1", "run_0", "run_1", "caught"],
     "walk": [],            # 장수 자유: 찾은 만큼 walk_0, walk_1 … (8·12·16장 등)
+    "guest": ["idle_0", "idle_1", "blink", "bow", "walk_0", "walk_1", "walk_2", "walk_3",
+              "skill_0", "skill_1", "caught", "happy"],   # 손님 시트 한 장
 }
 REPLACE_PREFIX = {"walk": "walk_"}     # 이 프리셋은 같은 동작의 옛 그림을 먼저 지움
 
@@ -377,7 +379,8 @@ def main() -> int:
     ap.add_argument("character", help="캐릭터 키 (reimu, marisa, ...)")
     ap.add_argument("--names", help="찾은 순서대로 붙일 프레임 이름, 쉼표로 구분")
     ap.add_argument("--preset", choices=sorted(PRESETS),
-                    help="표준 세트 시트의 이름을 자동으로 (move / react / life / walk). --append 도 자동으로 켜짐")
+                    help="표준 세트 시트의 이름을 자동으로 (move / react / life / walk / guest). --append 도 자동으로 켜짐")
+    ap.add_argument("--walk-cycles", type=int, help="걷기 한 벌에 걸음이 몇 바퀴인지 직접 (자동으로 못 셀 때)")
     ap.add_argument("--grid", help="행x열 (예: 3x4). 캐릭터끼리 붙어 있으면 칸으로 똑같이 잘라서 나눔")
     ap.add_argument("--append", action="store_true",
                     help="기존 그림을 지우지 않고 추가 (같은 이름은 덮어씀) — 시트 여러 장을 합칠 때")
@@ -469,7 +472,7 @@ def main() -> int:
         p.end()
         canvas.save(str(out_dir / f"{name}.png"))
         anchors[name] = [ax, ay]
-    walk_cycles = _count_walk_cycles(out_dir, anchors) if args.preset == "walk" else None
+    walk_cycles = args.walk_cycles or (_count_walk_cycles(out_dir, anchors) if args.preset == "walk" else None)
     if walk_cycles is None and manifest_path.exists():
         walk_cycles = json.loads(manifest_path.read_text(encoding="utf-8")).get("walk_cycles")
     if args.names:
@@ -492,13 +495,13 @@ def _lifts(frames, names) -> list[float]:
     """같은 줄에서 다른 그림보다 발이 떠 있는 만큼(점프). 시트 픽셀 단위.
 
     AI가 바닥선을 완벽히 맞추진 못하므로 키의 4% 미만 차이는 무시하고(떨림 방지),
-    원래 공중에 있는 자세(held, fall)는 제외한다."""
+    폴짝 뛰는 장면(happy, jump)에만 쓴다 — 걷기 등은 AI 가 줄마다 높이를 조금씩 다르게 그려도 바닥에 붙인다."""
     bottoms = [b for _, _, b in frames]
     heights = [img.height() for img, _, _ in frames]
     med_h = sorted(heights)[len(heights) // 2]
     lifts = []
     for i, name in enumerate(names):
-        if name.startswith(("held", "fall")):
+        if not name.startswith(("happy", "jump")):   # 떠 있는 게 의미 있는 건 폴짝 뛰는 장면뿐
             lifts.append(0.0)
             continue
         # 같은 줄 = 발 위치가 키의 절반 이내로 비슷한 그림들 (위아래 줄은 키만큼 떨어져 있음)

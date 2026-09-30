@@ -19,7 +19,8 @@ IDLE_HAPPY_HELD = "idle_0,idle_1,blink,happy_0,happy_1,happy_2,happy_3,held_0,he
 REACT = "sit_0,sit_1,fall,happy_0,happy_1,happy_2,happy_3,held_0,held_1,held_2"
 
 # (캐릭터, [(시트 파일, "names" 또는 "preset:이름", 새로 시작?)])
-# 마리사 걷기(marisa_run.png)는 모자끼리 붙어 줄 경계에서 잘려서 아직 안 씀 → 다시 뽑으면 여기 추가
+# how: "이름,이름,…" 또는 "preset:이름". 뒤에 " --옵션 값" 을 붙이면 그대로 넘김 (예: " --grid 3x4")
+GUEST = "idle_0,idle_1,blink,bow,walk_0,walk_1,walk_2,walk_3,skill_0,skill_1,caught,happy"
 PLAN = {
     "reimu": [("Gemini_Generated_Image_ftv5b5ftv5b5ftv5.png",
                "idle,blink,walk_0,walk_1,sit,happy,held,sit_1,idle_1,fall,sleep", True),
@@ -29,7 +30,8 @@ PLAN = {
               ("reimu_run.png", "preset:walk", False)],
     "marisa": [("Gemini_Generated_Image_u1flfzu1flfzu1fl.png", FIRST, True),
                ("marisa1.png", WALK6, False), ("marisa2.png", IDLE_HAPPY_HELD, False),
-               ("marisa3.png", "preset:life", False)],
+               ("marisa3.png", "preset:life", False),
+               ("marisa_run2.png", "preset:walk --walk-cycles 2", False)],
     "sakuya": [("Gemini_Generated_Image_w9b67cw9b67cw9b6.png", FIRST, True),
                ("sakuya1.png", WALK6, False),
                ("sakuya2.png", "idle_0,idle_1,blink,happy_0,-,happy_1,happy_2,-,held_0,held_1", False),
@@ -47,6 +49,11 @@ PLAN = {
                 ("flan_run.png", "preset:walk", False)],
     "remilia": [("remil2.png", MOVE_A, True), ("remil3.png", REACT, False), ("remil4.png", "preset:life", False),
                 ("remil_run.png", "preset:walk", False)],
+    "sunny": [("sunnymilk2.png", GUEST + " --grid 3x4", True)],
+    "luna": [("lunachild2.png", GUEST, True)],
+    "star": [("starsapphire2.png", GUEST, True)],
+    "aya": [("Aya2.png", GUEST, True)],
+    "suika": [("suika2.png", GUEST + " --grid 3x4", True)],
     "props": [("item1.png", "sakura,lantern,fox,omikuji_rack,ema_rack,umbrella,temizuya,furin,saisen_box", True)],
 }
 
@@ -61,10 +68,12 @@ def main() -> int:
                 print(f"[{key}] 시트 없음 — 건너뜀: {path}")
                 continue
             cmd = [sys.executable, str(ROOT / "tools" / "import_sheet.py"), str(path), key]
+            how, *extra = how.split(" ")
             if how.startswith("preset:"):
                 cmd += ["--preset", how.split(":", 1)[1]]
             else:
                 cmd += ["--names", how] + ([] if fresh else ["--append"])
+            cmd += extra
             print(f"[{key}] {sheet}", flush=True)
             if subprocess.call(cmd) != 0:
                 print(f"[{key}] 실패: {sheet}")
