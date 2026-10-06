@@ -128,6 +128,7 @@ class World(Protocol):
     bottom: float      # 가장 낮은 바닥 — 이보다 한참 아래로 떨어지면 구조
 
     climbing: bool     # 창 위에도 올라가기 켜짐
+    scale: float       # 그리는 크기 (1.0 보통, 0.85 작게, 0.7 아주 작게)
     cursor_play: bool  # 커서 올라타기·따라가기 켜짐
     cursor: QPointF    # 마우스 커서 위치
     cursor_speed: float
@@ -193,6 +194,11 @@ class PetWindow(QWidget):
         self._wall = 0                   # 매달린/타는 벽 방향 (-1 왼쪽, 1 오른쪽, 0 천장)
         self._climb_to = 0.0
         self._place()
+
+    @property
+    def head_y(self) -> float:
+        """창 안에서 머리 꼭대기 높이 (하트·zzz 자리)."""
+        return WIN_H - FOOT_MARGIN - CHAR_H * self.world.scale
 
     @property
     def busy(self) -> bool:
@@ -315,7 +321,7 @@ class PetWindow(QWidget):
         self.vx = 0
         self.state_until = time.monotonic() + (1.0 if good else 1.2)
         if good:
-            self.hearts.append([0.0, WIN_W / 2, WIN_H - FOOT_MARGIN - CHAR_H])
+            self.hearts.append([0.0, WIN_W / 2, self.head_y])
 
     def _drop(self) -> None:
         """발판이 사라지거나 끝에서 걸어 나감 → 떨어지기 (걷던 속도는 유지)."""
@@ -579,7 +585,7 @@ class PetWindow(QWidget):
         self.vx = 0
         self.state_until = time.monotonic() + 1.0
         self.squash = 0.18
-        self.hearts.append([0.0, WIN_W / 2 + random.uniform(-10, 10), WIN_H - FOOT_MARGIN - CHAR_H])
+        self.hearts.append([0.0, WIN_W / 2 + random.uniform(-10, 10), self.head_y])
         now = time.monotonic()
         if now - self.last_reward >= PAT_COOLDOWN:
             self.last_reward = now
@@ -597,6 +603,9 @@ class PetWindow(QWidget):
         # 찌그러짐은 발을 기준으로, 빙글 도는 건 몸 가운데를 기준으로 (발 기준이면 몸이 창 밖으로 휘둘려 잘림)
         fx, fy = WIN_W / 2, WIN_H - FOOT_MARGIN
         p.translate(fx, fy)
+        k = self.world.scale
+        if k != 1.0:                                   # 작게 보기
+            p.scale(k, k)
         if self.tilt:
             p.translate(0, -SPIN_PIVOT)
             p.rotate(self.tilt)
@@ -611,7 +620,7 @@ class PetWindow(QWidget):
             p.fillRect(self.rect(), QColor(90, 120, 200, 110))
             p.setCompositionMode(QPainter.CompositionMode_SourceOver)
         if self.state == "sleep":
-            _zzz(p, WIN_W / 2 + 14, WIN_H - FOOT_MARGIN - CHAR_H + 6, self.t)
+            _zzz(p, WIN_W / 2 + 14, self.head_y + 6, self.t)
         if self.hearts:
             p.setRenderHint(QPainter.Antialiasing)
             for age, hx, hy in self.hearts:

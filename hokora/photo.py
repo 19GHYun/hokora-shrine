@@ -150,7 +150,8 @@ def take(game) -> tuple[QImage, Path] | None:
     inside = [w for w in shots if x0 <= w.x() + w.width() / 2 <= x1]
     friends = len([w for w in inside if w in game.pets])
     guests = len([w for w in inside if w in game.guests])
-    cap = f"⛩ {s.stage_name}   ·   친구 {friends}명" + (f" · 손님 {guests}명" if guests else "")
+    cap = (f"⛩ {s.stage_name}   ·   친구 {friends}명" + (f" · 손님 {guests}명" if guests else "")
+           + (f"   ·   도리이 {s.torii:,}개" if s.torii else ""))
     p.drawText(QRectF(BORDER + 4, BORDER + h_ + 6, W, 24), Qt.AlignLeft | Qt.AlignVCenter, cap)
     f2 = QFont("Malgun Gothic", 10)
     p.setFont(f2)

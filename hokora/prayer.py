@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
-from . import season
+from . import omamori, season
 from .state import GameState
 
 INCOME_BOOST = 2        # 번영 기원: 수입 배수
@@ -59,7 +59,7 @@ def income_multiplier(s: GameState) -> float:
         m *= NEWS_BOOST
     if season.is_new_year():
         m *= season.NEW_YEAR_BOOST
-    return m
+    return m * (1 + omamori.bonus(s, "income"))
 
 
 def news_active(s: GameState) -> bool:

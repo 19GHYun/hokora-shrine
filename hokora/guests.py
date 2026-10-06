@@ -25,6 +25,7 @@ from PySide6.QtGui import QColor, QPainter, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
 from . import affection as aff
+from . import omamori
 from .bubble import say
 from .news import NewsCard, answer_for, make_article
 from .pet import RUN_SPEED, PetWindow
@@ -595,7 +596,7 @@ class AyaVisit(Visit):
     def _lost(self) -> bool:
         """취재 상대가 붙잡혀 가거나 떨어짐."""
         t = self.target
-        if t is None or t.on is None or t.state in ("held", "fall", "jump"):
+        if t is None or t.on is None or t.state in ("held", "fall", "jump") or not t.isVisible():
             self._release()
             self.target = None
             return True
@@ -755,6 +756,7 @@ class SuikaVisit(Visit):
         su.face(g.shrine.pos_x)
         if self.treated or random.random() < 0.5:
             amount = max(50, int(s.income_per_min * random.uniform(15, 25))) * (2 if self.treated else 1)
+            amount = int(amount * (1 + omamori.bonus(s, "suika")))
             s.add_saisen(amount)
             s.suika_saisen += amount
             g.shrine.set_saisen(s.saisen)
@@ -833,7 +835,7 @@ class Visits:
         if self._forced in VISITS:
             kind, self._forced = self._forced, ""
             self.start(kind)
-        elif random.random() < VISIT_CHANCE:
+        elif random.random() < VISIT_CHANCE * (1 + omamori.bonus(g.state, "guest")):
             kinds = available(g.state)
             if kinds:
                 self.start(random.choice(kinds))

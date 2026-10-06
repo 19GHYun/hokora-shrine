@@ -42,15 +42,24 @@ class DecorWindow(QWidget):
         self.host, self.key = host, key
         name, _, bonus, height = DECOR[key]
         self.setToolTip(f"{name}  (분당 새전 +{bonus})")
-        img = decor_image(key)
-        self.scale = height / max(1, img.height())
-        self.setFixedSize(max(10, round(img.width() * self.scale)), height + GROUND_MARGIN)
         self.pos_x = x
         self.night = False
+        self.rescale(place=False)
         self._press = None
         self._dragging = False
         self.pos_x = self._clamp(x)
         self._place()
+
+    def rescale(self, place: bool = True) -> None:
+        """크기 설정(host.scale)에 맞춰 창 크기를 다시 정함."""
+        img = decor_image(self.key)
+        height = DECOR[self.key][3] * float(getattr(self.host, "scale", 1.0))
+        self.scale = height / max(1, img.height())
+        self.setFixedSize(max(10, round(img.width() * self.scale)), round(height) + GROUND_MARGIN)
+        if place:
+            self.pos_x = self._clamp(self.pos_x)
+            self._place()
+        self.update()
 
     @staticmethod
     def width_for(key: str) -> float:

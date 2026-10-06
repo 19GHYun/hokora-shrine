@@ -14,6 +14,7 @@ import random
 import time
 from typing import TYPE_CHECKING
 
+from . import omamori
 from .bubble import say
 from .omikuji import can_draw
 from .prayer import charm_active
@@ -219,7 +220,7 @@ class Events:
             if now >= self._thief_next_check:
                 self._thief_next_check = now + THIEF_CHECK
                 if (now - self._thief_last >= THIEF_COOLDOWN and not charm_active(self.game.state)
-                        and random.random() < THIEF_CHANCE):
+                        and random.random() < THIEF_CHANCE * (1 - omamori.bonus(self.game.state, "thief"))):
                     self.start_thief()
             return
         m = self.thief

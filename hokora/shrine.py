@@ -51,11 +51,15 @@ class ShrineWindow(QWidget):
         self.night = on
         self.update()
 
+    @property
+    def _k(self) -> float:
+        return float(getattr(self.host, "scale", 1.0))
+
     def set_level(self, level: int) -> None:
-        """신사 단계가 바뀌면 창 크기도 건물에 맞게."""
+        """신사 모양(단계)이나 크기가 바뀌면 창 크기도 건물에 맞게."""
         self.level = level
         w, h = STAGE_SIZE[level]
-        self.setFixedSize(w + 20, h + LABEL_SPACE)
+        self.setFixedSize(round(w * self._k) + 20, round(h * self._k) + LABEL_SPACE)
         self.pos_x = self._clamp(self.pos_x)
         self._place()
         self.update()
@@ -91,8 +95,10 @@ class ShrineWindow(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         # 건물은 창 아래쪽에 (바닥 = 창 아래)
         bw, bh = STAGE_SIZE[self.level]
+        k = self._k
         p.save()
-        p.translate((self.width() - bw) / 2, self.height() - GROUND_MARGIN - bh)
+        p.translate((self.width() - bw * k) / 2, self.height() - GROUND_MARGIN - bh * k)
+        p.scale(k, k)
         DRAW_STAGE[self.level](p)
         if self.night:
             night_glow(p, bw, bh)

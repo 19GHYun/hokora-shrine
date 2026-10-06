@@ -99,6 +99,16 @@ class GameState:
     attend_days: int = 0
     season_fx: bool = True           # 계절 연출 (벚꽃잎·단풍잎·눈·반딧불)
     photos: int = 0
+    # 보이는 모습
+    shrine_look: int = 0             # 신사 모양 (0 = 가장 높이 올린 단계 그대로, 1~ = 그 단계 모양)
+    size_scale: float = 1.0          # 신사·캐릭터·장식 크기 (1.0 보통, 0.85 작게, 0.7 아주 작게)
+    resting: list[str] = field(default_factory=list)   # 신사에서 쉬는(작업표시줄에 안 나오는) 친구
+    # 센본토리이 (torii.py)·부적 (omamori.py)
+    torii: int = 0
+    omamori: dict[str, int] = field(default_factory=dict)   # 부적 → 레벨
+    equipped: list[str] = field(default_factory=list)       # 지닌 부적 (최대 3개)
+    gacha_pulls: int = 0
+    gacha_pity: int = 0              # 마지막 전설 부적 뒤로 뽑은 횟수
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
     @property
@@ -111,7 +121,7 @@ class GameState:
 
     @property
     def income_per_min(self) -> int:
-        return SHRINE_STAGES[self.shrine_level][1] + self.decor_bonus
+        return SHRINE_STAGES[self.shrine_level][1] + self.decor_bonus + self.torii // 2   # 도리이 2개마다 +1
 
     def buy_decor(self, key: str) -> bool:
         if key not in DECOR or key in self.decor_owned or self.saisen < DECOR[key][1]:
@@ -119,6 +129,11 @@ class GameState:
         self.saisen -= DECOR[key][1]
         self.decor_owned.append(key)
         return True
+
+    @property
+    def look_stage(self) -> int:
+        """화면에 보일 신사 모양 (수입은 shrine_level 그대로)."""
+        return self.shrine_look if 1 <= self.shrine_look <= self.shrine_level else self.shrine_level
 
     @property
     def next_stage_cost(self) -> int | None:

@@ -11,6 +11,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
+from . import omamori
 from .state import SAISEN_BOX, GameState
 
 MIN_AWAY = 10 * 60        # 이보다 짧게 비우면 일기는 쓰지 않음
@@ -19,7 +20,7 @@ MIN_AWAY = 10 * 60        # 이보다 짧게 비우면 일기는 쓰지 않음
 def offline_income(s: GameState, seconds: float) -> int:
     """꺼져 있던 동안 새전함에 쌓인 새전 (새전함 단계만큼만, 최대 시간까지)."""
     cap_h, rate, _ = SAISEN_BOX[s.box_level]
-    return int(s.income_per_min * min(seconds, cap_h * 3600) / 60 * rate)
+    return int(s.income_per_min * min(seconds, cap_h * 3600) / 60 * rate * (1 + omamori.bonus(s, "offline")))
 
 
 def _hm(seconds: float) -> str:

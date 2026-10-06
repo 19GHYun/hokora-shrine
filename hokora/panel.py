@@ -6,18 +6,19 @@ import time
 from typing import Callable
 
 from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton,
                                QTabBar, QVBoxLayout, QWidget)
 
 from . import affection as aff
-from . import daily, season
+from . import daily, omamori, season, torii
 from .decor import decor_image
 from .guests import GUEST_ABOUT, VISITS, guest_stage
 from .omikuji import can_draw
 from .prayer import NEWS_BOOST, WISHES, blocked, fmt_left, income_multiplier, left, news_active
 from .progress import UNLOCKS
 from .render import CHARACTERS, GUESTS, Pose, draw_character
+from .shrine import DRAW_STAGE, STAGE_SIZE
 from .sprites import image_sprites
 from .state import DECOR, SAISEN_BOX, SHRINE_STAGES, GameState
 
@@ -51,7 +52,7 @@ QPushButton#ghost { background: #FFFFFF; color: #9E1027; border: 1px solid rgba(
 QPushButton#ghost:hover { background: #FBE3E7; }
 QCheckBox { color: #2B1D21; font-family: 'Malgun Gothic'; font-size: 12px; font-weight: 700; }
 QCheckBox::indicator { width: 15px; height: 15px; }
-QTabBar::tab { background: transparent; color: #8C7479; padding: 6px 16px; margin-right: 4px;
+QTabBar::tab { background: transparent; color: #8C7479; padding: 6px 10px; margin-right: 3px;
                font-family: 'Malgun Gothic'; font-size: 12px; font-weight: 700;
                border-bottom: 2px solid transparent; }
 QTabBar::tab:selected { color: #B3122C; border-bottom: 2px solid #C8102E; }
@@ -111,6 +112,158 @@ class _Stamps(QWidget):
         p.end()
 
 
+class _LookButton(QWidget):
+    """신사 모양 고르기: 그 단계 신사의 작은 그림. 아직 못 키운 단계는 잠김."""
+
+    W, H = 72, 58
+
+    def __init__(self, stage: int, on_pick: Callable[[int], None]):
+        super().__init__()
+        self.stage, self.on_pick = stage, on_pick
+        self.selected = self.locked = None
+        self.setFixedSize(self.W, self.H + 18)
+
+    def set_state(self, selected: bool, locked: bool) -> None:
+        if (selected, locked) != (self.selected, self.locked):
+            self.selected, self.locked = selected, locked
+            self.setCursor(Qt.ArrowCursor if locked else Qt.PointingHandCursor)
+            self.setToolTip("아직 키우지 않은 단계예요" if locked else SHRINE_STAGES[self.stage][0])
+            self.update()
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(1, 1, self.W - 2, self.H - 2)
+        p.setPen(QPen(QColor("#C8102E"), 2) if self.selected else QPen(QColor(200, 16, 46, 50), 1))
+        p.setBrush(QColor(255, 255, 255, 230))
+        p.drawRoundedRect(r, 8, 8)
+        bw, bh = STAGE_SIZE[self.stage]
+        k = min((r.width() - 10) / bw, (r.height() - 8) / bh)
+        p.save()
+        p.translate(r.center().x() - bw * k / 2, r.bottom() - 4 - bh * k)
+        p.scale(k, k)
+        DRAW_STAGE[self.stage](p)
+        p.restore()
+        if self.locked:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(246, 240, 242, 190))
+            p.drawRoundedRect(r, 8, 8)
+            p.setPen(QColor(140, 116, 121))
+            p.drawText(r, Qt.AlignCenter, "🔒")
+        f = QFont("Malgun Gothic", 8)
+        f.setBold(bool(self.selected))
+        p.setFont(f)
+        p.setPen(QColor("#B3122C") if self.selected else QColor("#8C7479"))
+        p.drawText(QRectF(0, self.H, self.W, 18), Qt.AlignCenter, f"{self.stage}단계")
+        p.end()
+
+    def mousePressEvent(self, e) -> None:
+        if e.button() == Qt.LeftButton and not self.locked:
+            self.on_pick(self.stage)
+
+
+class _CharmTile(QWidget):
+    """부적 하나: 그림·이름·레벨·효과. 가진 부적을 누르면 지니기/내려놓기."""
+
+    W, H = 84, 128
+
+    def __init__(self, state: GameState, key: str, on_click: Callable[[str], None]):
+        super().__init__()
+        self.state, self.key, self.on_click = state, key, on_click
+        self.setFixedSize(self.W, self.H)
+
+    def paintEvent(self, _e) -> None:
+        s, c = self.state, omamori.CHARMS[self.key]
+        lv = s.omamori.get(self.key, 0)
+        owned, worn = lv > 0, self.key in s.equipped
+        self.setCursor(Qt.PointingHandCursor if owned else Qt.ArrowCursor)
+        self.setToolTip(("눌러서 내려놓기" if worn else "눌러서 지니기") if owned else "아직 없는 부적")
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(1, 1, self.W - 2, self.H - 2)
+        rim = QColor(omamori.RARITY[c.rarity][1])
+        if worn:
+            p.setPen(QPen(QColor("#C8102E"), 2.2))
+        elif owned:
+            rim.setAlpha(110)
+            p.setPen(QPen(rim, 1.2))
+        else:
+            p.setPen(QPen(QColor(200, 16, 46, 40), 1, Qt.DashLine))
+        p.setBrush(QColor(255, 255, 255, 225 if owned else 150))
+        p.drawRoundedRect(r, 9, 9)
+        omamori.draw_omamori(p, QRectF(18, 8, self.W - 36, 56), c if owned else None, locked=not owned)
+        f = QFont("Malgun Gothic", 8)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QColor(omamori.RARITY[c.rarity][1]) if owned else QColor(140, 116, 121))
+        p.drawText(QRectF(2, 68, self.W - 4, 16), Qt.AlignCenter, c.name.replace(" 부적", "") if owned else "???")
+        small = QFont("Malgun Gothic", 7)
+        p.setFont(small)
+        p.setPen(QColor("#8C7479"))
+        p.drawText(QRectF(2, 84, self.W - 4, 14), Qt.AlignCenter,
+                   f"Lv.{lv} · {omamori.RARITY[c.rarity][0]}" if owned else omamori.RARITY[c.rarity][0])
+        if owned:
+            p.setPen(QColor("#3A2A2E"))
+            p.drawText(QRectF(4, 98, self.W - 8, 28), Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap,
+                       omamori.effect_text(c, lv))
+        if worn:
+            badge = QRectF(5, 5, 30, 15)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor("#C8102E"))
+            p.drawRoundedRect(badge, 7, 7)
+            p.setPen(QColor("#FFFFFF"))
+            p.drawText(badge, Qt.AlignCenter, "지님")
+        p.end()
+
+    def mousePressEvent(self, e) -> None:
+        if e.button() == Qt.LeftButton and self.state.omamori.get(self.key):
+            self.on_click(self.key)
+
+
+class _PullStrip(QWidget):
+    """방금 뽑은 부적들 (1개 또는 10개)."""
+
+    def __init__(self):
+        super().__init__()
+        self.results: list[tuple] = []
+        self.setFixedHeight(0)
+
+    def set_results(self, s: GameState, results: list[tuple[str, str]]) -> None:
+        self.results = [(omamori.CHARMS[k], tag, s.omamori.get(k, 1)) for k, tag in results]
+        self.setFixedHeight(96 if results else 0)
+        self.update()
+
+    def paintEvent(self, _e) -> None:
+        if not self.results:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        p.setPen(QPen(QColor(200, 16, 46, 60), 1))
+        p.setBrush(QColor(255, 248, 236, 235))
+        p.drawRoundedRect(r, 10, 10)
+        f = QFont("Malgun Gothic", 8)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QColor("#B3122C"))
+        best = max(["N", "R", "SR", "SSR"].index(c.rarity) for c, _, _ in self.results)
+        p.drawText(QRectF(10, 4, r.width() - 20, 16), Qt.AlignLeft | Qt.AlignVCenter,
+                   {3: "✨ 전설 부적이다!!", 2: "✨ 귀한 부적이 나왔다!"}.get(best, "방금 뽑은 부적"))
+        n = len(self.results)
+        cell = min(56.0, (r.width() - 12) / n)
+        x0 = r.center().x() - cell * n / 2
+        tagf = QFont("Malgun Gothic", 7)
+        tagf.setBold(True)
+        for i, (c, tag, lv) in enumerate(self.results):
+            x = x0 + i * cell
+            omamori.draw_omamori(p, QRectF(x + cell / 2 - 17, 22, 34, 48), c)
+            label, col = {"new": ("NEW!", "#C8102E"), "up": (f"Lv.{lv}", "#3E8E5A"), "max": ("반환", "#8C7479")}[tag]
+            p.setFont(tagf)
+            p.setPen(QColor(col))
+            p.drawText(QRectF(x, 74, cell, 14), Qt.AlignCenter, label)
+        p.end()
+
+
 def _hearts(s: GameState, key: str) -> str:
     """도감 카드의 하트 (분홍색)."""
     return f"<span style='color:#E0457B'>{aff.hearts(s, key)}</span>"
@@ -119,7 +272,7 @@ def _hearts(s: GameState, key: str) -> str:
 class ShrinePanel(QWidget):
     def __init__(self, state: GameState, on_upgrade: Callable[[], None], on_omikuji: Callable[[], None],
                  on_decor: Callable[[str, str], None], on_pray: Callable[[str], None],
-                 on_box: Callable[[], None], tab: int = 0):
+                 on_box: Callable[[], None], tab: int = 0, on_action: Callable[[str, object], object] | None = None):
         super().__init__(None, Qt.Popup | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_DeleteOnClose, True)
@@ -131,6 +284,7 @@ class ShrinePanel(QWidget):
         self.on_decor = on_decor
         self.on_pray = on_pray
         self.on_box = on_box
+        self.on_action = on_action
         self.setFixedWidth(490)
 
         v = QVBoxLayout(self)
@@ -146,13 +300,13 @@ class ShrinePanel(QWidget):
         self.tabs.setDrawBase(False)
         self.tabs.setExpanding(False)
         v.addWidget(self.tabs)
-        page1, page2, page3, page4, page5, page6 = (QWidget() for _ in range(6))
-        p1, p3, p4, p5, p6 = (QVBoxLayout(pg) for pg in (page1, page3, page4, page5, page6))
-        for lay in (p1, p3, p4, p5, p6):
+        page1, page2, page3, page4, page5, page6, page7 = (QWidget() for _ in range(7))
+        p1, p3, p4, p5, p6, p7 = (QVBoxLayout(pg) for pg in (page1, page3, page4, page5, page6, page7))
+        for lay in (p1, p3, p4, p5, p6, p7):
             lay.setContentsMargins(0, 4, 0, 0)
             lay.setSpacing(10)
-        self.pages = [page1, page6, page4, page2, page5, page3]
-        for name, page in zip(("신사", "부탁", "참배", "도감", "손님", "꾸미기"), self.pages):
+        self.pages = [page1, page6, page4, page7, page2, page5, page3]
+        for name, page in zip(("신사", "부탁", "참배", "부적", "도감", "손님", "꾸미기"), self.pages):
             self.tabs.addTab(name)
             page.hide()
             v.addWidget(page)
@@ -181,6 +335,21 @@ class ShrinePanel(QWidget):
         box.addWidget(self.box_label, 1)
         box.addWidget(self.box_btn)
         p1.addLayout(box)
+
+        # ── 센본토리이 ──
+        trow = QHBoxLayout()
+        self.torii_label = QLabel(objectName="goal")
+        self.torii_label.setWordWrap(True)
+        self.torii_btn = QPushButton(objectName="upgrade")
+        self.torii_btn.setCursor(Qt.PointingHandCursor)
+        self.torii_btn.clicked.connect(lambda: self._act("torii", 1))
+        self.torii10_btn = QPushButton(objectName="ghost")
+        self.torii10_btn.setCursor(Qt.PointingHandCursor)
+        self.torii10_btn.clicked.connect(lambda: self._act("torii", 10))
+        trow.addWidget(self.torii_label, 1)
+        trow.addWidget(self.torii_btn)
+        trow.addWidget(self.torii10_btn)
+        p1.addLayout(trow)
 
         # ── 오미쿠지 ──
         omi = QHBoxLayout()
@@ -221,11 +390,50 @@ class ShrinePanel(QWidget):
                 info.addWidget(g_label)
                 info.addWidget(g_bar)
                 goals.append((g_label, g_bar))
+            out = QCheckBox("밖에 나와 있기")
+            out.setToolTip("끄면 신사 안에서 쉬어요 (작업표시줄에 안 나와요)")
+            out.setCursor(Qt.PointingHandCursor)
+            out.setStyleSheet("font-size: 11px;")
+            out.toggled.connect(lambda on, k=key: self._act("out", (k, on)))
+            info.addWidget(out)
             info.addStretch(1)
             h.addWidget(pic)
             h.addLayout(info, 1)
             grid.addWidget(card, i // 2, i % 2)
-            self.cards[key] = (pic, name, goals)
+            self.cards[key] = (pic, name, goals, out)
+
+        # ── 부적 (수여소) ──
+        intro = QLabel("수여소에서 부적을 뽑아요. 3개까지 지니면 효과가 나고, 같은 부적이 또 나오면 "
+                       "레벨이 올라요 (최대 Lv.5).", objectName="goal")
+        intro.setWordWrap(True)
+        p7.addWidget(intro)
+        prow = QHBoxLayout()
+        self.pull1 = QPushButton(objectName="upgrade")
+        self.pull10 = QPushButton(objectName="upgrade")
+        for b, n in ((self.pull1, 1), (self.pull10, 10)):
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, n=n: self._pull(n))
+            prow.addWidget(b, 1)
+        p7.addLayout(prow)
+        self.pity_label = QLabel(objectName="goal")
+        self.pity_label.setWordWrap(True)
+        p7.addWidget(self.pity_label)
+        self.pull_strip = _PullStrip()
+        p7.addWidget(self.pull_strip)
+        p7.addWidget(QLabel("지닌 부적", objectName="section"))
+        self.worn_label = QLabel(objectName="done")
+        self.worn_label.setWordWrap(True)
+        p7.addWidget(self.worn_label)
+        cgrid = QGridLayout()
+        cgrid.setSpacing(6)
+        self.charm_tiles = []
+        for i, key in enumerate(omamori.CHARMS):
+            tile = _CharmTile(state, key, self._equip)
+            cgrid.addWidget(tile, i // 5, i % 5)
+            self.charm_tiles.append(tile)
+        p7.addLayout(cgrid)
+        self.charm_stats = QLabel(objectName="sub")
+        p7.addWidget(self.charm_stats)
 
         # ── 부탁: 출석 도장 + 오늘의 부탁 ──
         p6.addWidget(QLabel("💮 출석 도장", objectName="section"))
@@ -325,6 +533,29 @@ class ShrinePanel(QWidget):
             h.addWidget(btn)
             p4.addWidget(card)
             self.wish_rows[key] = (btn, status)
+
+        # ── 꾸미기: 신사 모양·크기 ──
+        p3.addWidget(QLabel("신사 모양", objectName="section"))
+        lrow = QHBoxLayout()
+        lrow.setSpacing(6)
+        self.look_btns = [_LookButton(st, lambda st: self._act("look", st)) for st in SHRINE_STAGES]
+        for b in self.look_btns:
+            lrow.addWidget(b)
+        lrow.addStretch(1)
+        p3.addLayout(lrow)
+        look_tip = QLabel("모양만 바뀌고, 수입은 가장 높이 올린 단계 그대로예요.", objectName="goal")
+        p3.addWidget(look_tip)
+        srow = QHBoxLayout()
+        srow.addWidget(QLabel("크기", objectName="section"))
+        self.size_btns: dict[float, QPushButton] = {}
+        for k, label in ((1.0, "보통"), (0.85, "작게"), (0.7, "아주 작게")):
+            b = QPushButton(label, objectName="ghost")
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, k=k: self._act("scale", k))
+            srow.addWidget(b)
+            self.size_btns[k] = b
+        srow.addStretch(1)
+        p3.addLayout(srow)
 
         # ── 꾸미기 ──
         tip = QLabel("장식을 사서 신사 옆에 놓으면 분당 새전이 늘어요. 놓은 장식은 좌우로 끌어서 옮길 수 있어요.",
@@ -433,7 +664,7 @@ class ShrinePanel(QWidget):
             self.omi_btn.setEnabled(False)
         self.omi_label.setWordWrap(True)
 
-        for key, (pic, name, goals) in self.cards.items():
+        for key, (pic, name, goals, out) in self.cards.items():
             met = key in s.unlocked
             if pic.property("met") != met:          # 그림은 만났을 때만 다시 그림
                 pic.setPixmap(portrait(key, PORTRAIT, silhouette=not met))
@@ -459,6 +690,43 @@ class ShrinePanel(QWidget):
                 for label, bar in goals[1:]:
                     label.hide()
                     bar.hide()
+            out.setVisible(met)
+            out.blockSignals(True)
+            out.setChecked(key not in s.resting)
+            out.blockSignals(False)
+        # 센본토리이
+        nm, ttl = torii.next_milestone(s), torii.title(s)
+        self.torii_label.setText(f"⛩ 센본토리이 {s.torii:,}개 — 분당 새전 +{torii.income(s)}"
+                                 + (f"  「{ttl}」" if ttl else "")
+                                 + (f"\n2개마다 분당 +1 · 다음 칭호 「{nm[1]}」까지 {nm[0] - s.torii:,}개" if nm
+                                    else "\n모든 칭호를 얻었어요!"))
+        c1, c10 = torii.cost(s), torii.cost_many(s, 10)
+        self.torii_btn.setText(f"봉납  {c1:,}")
+        self.torii_btn.setEnabled(s.saisen >= c1)
+        self.torii10_btn.setText(f"10개  {c10:,}")
+        self.torii10_btn.setEnabled(s.saisen >= c10)
+
+        # 부적
+        price = omamori.price(s)
+        self.pull1.setText(f"1번 뽑기   새전 {price:,}")
+        self.pull1.setEnabled(s.saisen >= price)
+        self.pull10.setText(f"10번 뽑기   새전 {price * 9:,}")
+        self.pull10.setEnabled(s.saisen >= price * 9)
+        self.pity_label.setText(f"10번 뽑기는 한 번 값을 덜 받고 귀함 이상 하나 보장  ·  전설까지 최대 {omamori.PITY - s.gacha_pity}번")
+        worn = [omamori.CHARMS[k] for k in s.equipped if k in omamori.CHARMS]
+        self.worn_label.setText(("  ·  ".join(f"{c.name.replace(' 부적', '')}: {omamori.effect_text(c, s.omamori.get(c.key, 1))}"
+                                              for c in worn) + f"   ({len(worn)}/{omamori.SLOTS})") if worn
+                                else f"아직 지닌 부적이 없어요. 아래 부적을 눌러서 지녀요 (0/{omamori.SLOTS})")
+        for tile in self.charm_tiles:
+            tile.update()
+        self.charm_stats.setText(f"모은 부적 {len(s.omamori)}/{len(omamori.CHARMS)}   ·   뽑은 횟수 {s.gacha_pulls:,}")
+
+        # 신사 모양·크기
+        for b in self.look_btns:
+            b.set_state(b.stage == s.look_stage, b.stage > s.shrine_level)
+        for k, b in self.size_btns.items():
+            self._role(b, "small" if abs(s.size_scale - k) < 0.01 else "ghost")
+
         day = daily.cycle_day(s)
         self.stamps.update()
         if not s.attend_streak:
@@ -536,6 +804,22 @@ class ShrinePanel(QWidget):
     def _omikuji(self) -> None:
         self.close()             # 오미쿠지 종이를 띄우려고 창은 닫음
         self.on_omikuji()
+
+    def _act(self, name: str, value=None):
+        result = self.on_action(name, value) if self.on_action is not None else None
+        self.refresh()
+        return result
+
+    def _pull(self, n: int) -> None:
+        res = self._act("pull", n)
+        if res:
+            self.pull_strip.set_results(self.state, res)
+            self.pull_strip.parentWidget().layout().activate()   # 결과 줄 높이를 먼저 반영
+            self._fit_tab(self.tabs.currentIndex())          # 결과 줄만큼 창 높이가 바뀜
+
+    def _equip(self, key: str) -> None:
+        if not self._act("equip", key):
+            self.worn_label.setText(f"칸이 꽉 찼어요 ({omamori.SLOTS}/{omamori.SLOTS}). 지닌 부적을 눌러서 먼저 내려놓아요.")
 
     def _pray(self, key: str) -> None:
         if key == "snack":

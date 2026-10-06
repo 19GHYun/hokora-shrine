@@ -18,7 +18,8 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import __version__, winutil
 from . import affection as aff
-from . import daily, photo, season
+from . import daily, omamori, photo, season, torii
+from .bubble import _alive as bubble_alive
 from .bubble import say
 from .daily import StampCard
 from .decor import DecorWindow
@@ -35,6 +36,7 @@ from .prayer import buy as buy_wish
 from .progress import UNLOCKS, newly_unlocked
 from .render import CHARACTERS, Pose, draw_character
 from .shrine import ShrineWindow
+from .torii import ToriiRow
 from .state import APP_NAME, DECOR, LOG_DIR, PAT_REWARD, SAISEN_BOX, SaveStore
 
 log = logging.getLogger("Hokora")
@@ -118,7 +120,8 @@ class Game(QObject):
         self.hidden_for_fullscreen = False
         prim = self.app.primaryScreen().availableGeometry()
         self.shrine = ShrineWindow(self, prim.x() + self.state.shrine_x * prim.width(),
-                                   self.state.shrine_level)
+                                   self.state.look_stage)
+        self.torii_row = ToriiRow(self)
         self.shrine.set_saisen(self.state.saisen)
         self.decors: dict[str, DecorWindow] = {
             k: DecorWindow(self, k, x) for k, x in self.state.decor_pos.items() if k in DECOR}
@@ -127,7 +130,8 @@ class Game(QObject):
         self._panel_tab = 0
         keys = list(CHARACTERS) if os.environ.get("HOKORA_ALL") == "1" else self.state.unlocked
         for key in keys:
-            self._spawn(key)
+            if key not in self.state.resting:          # 쉬는 친구는 신사 안에
+                self._spawn(key)
 
         self.clock = QElapsedTimer()
         self.clock.start()
@@ -231,7 +235,12 @@ class Game(QObject):
         hidden = self.visits.hidden_decor                 # 서니가 숨긴 장식도
         decors = [w for k, w in self.decors.items() if k != hidden] if self.state.show_decor else []
         fx = [self.fx] if self.fx.kind and self.state.season_fx else []   # 흩날림은 맨 뒤
-        return [*fx, *decors, self.shrine, *self.pets, *self.guests]
+        row = [self.torii_row] if self.state.torii else []
+        return [*fx, *row, *decors, self.shrine, *self.pets, *self.guests]
+
+    @property
+    def scale(self) -> float:
+        return self.state.size_scale
 
     def keep(self, w) -> None:
         """잠깐 떠 있는 창(일기·신문·효과)을 닫힐 때까지 붙잡아 둠."""
@@ -257,6 +266,7 @@ class Game(QObject):
         self.day_timer.start()
         self._refresh_platforms()
         self._refresh_season()
+        self._sync_torii()
         QTimer.singleShot(3500, self._new_day)
         if self._away >= MIN_AWAY:
             QTimer.singleShot(2500, lambda: self._show_diary(self._away, time.time() - self._away,
@@ -276,8 +286,12 @@ class Game(QObject):
         for pet in everyone:
             pet.step(dt)
         self.shrine.step(dt)
-        if self.fx.isVisible():
-            self.fx.follow(self.shrine.pos_x, self.ground_under(self.shrine.pos_x).y)
+        if self.fx.isVisible() or self.torii_row.isVisible():
+            g = self.ground_under(self.shrine.pos_x)
+            if self.fx.isVisible():
+                self.fx.follow(self.shrine.pos_x, g.y)
+            if self.torii_row.isVisible():              # 도리이 줄은 신사 옆에 붙어 다님
+                self.torii_row.place(self.shrine.x() + 10, self.shrine.x() + self.shrine.width() - 10, g.y, g.x1, g.x2)
         self.events.tick()
         self.visits.tick()
         fps = FPS_BUSY if any(p.busy for p in everyone) else FPS_CALM
@@ -410,6 +424,7 @@ class Game(QObject):
             return
         if pet.pat():
             reward = PAT_REWARD * pat_multiplier(self.state) * aff.pat_bonus(self.state, pet.ch.key)
+            reward += int(omamori.bonus(self.state, "pat"))           # 복 부적
             now = time.monotonic()
             if now - getattr(pet, "_aff_at", 0.0) >= aff.PAT_GAIN_EVERY:   # 쓰다듬으면 조금씩 친해짐
                 pet._aff_at = now
@@ -439,15 +454,20 @@ class Game(QObject):
         if self.panel is not None:
             self.panel.close()
         self.panel = ShrinePanel(self.state, self.upgrade, self.omikuji, self.on_decor, self.pray, self.upgrade_box,
-                                 self._panel_tab)
+                                 self._panel_tab, self.on_action)
         self.panel.tabs.currentChanged.connect(lambda i: setattr(self, "_panel_tab", i))
         self.panel.destroyed.connect(lambda *_: setattr(self, "panel", None))
         top = self.shrine.y() + 20
         self.panel.show_above(self.shrine.pos_x, top, self.left, self.right)
 
     def _say_at_shrine(self, text: str) -> None:
-        if not self.hidden_for_fullscreen:
-            say(text, self.shrine.pos_x, self.shrine.y() + 26)
+        """신사 위 말풍선. 새 말이 뜨면 앞의 것은 닫음 (연달아 눌러도 겹치지 않게)."""
+        if self.hidden_for_fullscreen:
+            return
+        old = getattr(self, "_shrine_bubble", None)
+        if old is not None and old in bubble_alive:
+            old.close()
+        self._shrine_bubble = say(text, self.shrine.pos_x, self.shrine.y() + 26)
 
     # ── 오늘의 부탁·출석 ──
     def _every_half_minute(self) -> None:
@@ -496,6 +516,7 @@ class Game(QObject):
             self.shrine.set_night(night)
             for d in self.decors.values():
                 d.set_night(night)
+            self._sync_torii()
         kind = season.fx_kind() if self.state.season_fx else ""
         self.fx.set_kind(kind)
         show = bool(kind) and not self.hidden_for_fullscreen
@@ -509,6 +530,122 @@ class Game(QObject):
         self._refresh_season()
         log.info("계절 연출: %s", "켬" if on else "끔")
         self.save()
+
+    # ── 신사 관리 창의 버튼들: 모양·크기·외출·도리이·부적 ──
+    def on_action(self, name: str, value=None):
+        handlers = {"look": self.set_look, "scale": self.set_scale, "out": lambda v: self.set_out(*v),
+                    "torii": self.offer_torii, "pull": self.pull_omamori, "equip": self.equip_omamori}
+        return handlers[name](value)
+
+    def set_look(self, stage: int) -> None:
+        """신사 모양만 바꿈 (수입은 가장 높이 올린 단계 그대로)."""
+        s = self.state
+        s.shrine_look = 0 if stage >= s.shrine_level else max(1, stage)
+        self.shrine.set_level(s.look_stage)
+        log.info("신사 모양: %d단계", s.look_stage)
+        self.save()
+
+    def set_scale(self, k: float) -> None:
+        self.state.size_scale = k
+        self.shrine.set_level(self.shrine.level)
+        for d in self.decors.values():
+            d.rescale()
+        for p in [*self.pets, *self.guests]:
+            p.update()
+        self._sync_torii()
+        log.info("크기: %.2f", k)
+        self.save()
+
+    def set_out(self, key: str, out: bool) -> None:
+        """친구를 작업표시줄에 내보내거나, 신사에서 쉬게 함."""
+        s = self.state
+        pet = next((p for p in self.pets if p.ch.key == key), None)
+        if out:
+            if key in s.resting:
+                s.resting.remove(key)
+            if pet is None and key in s.unlocked:
+                self._drop_in(key)
+        else:
+            if key not in s.resting:
+                s.resting.append(key)
+            if pet is not None:
+                if self.events.thief is pet:
+                    self.events.cancel_thief()
+                self.events.cancel_play()
+                self.pets.remove(pet)
+                pet.close()
+                pet.deleteLater()
+                self._say_at_shrine(f"{aff.josa(pet.ch.name, '은', '는')} 신사 안에서 쉬어요")
+        self.save()
+
+    def _drop_in(self, key: str) -> None:
+        """하늘에서 신사 옆으로 뚝 (해금·다시 내보내기)."""
+        pet = self._spawn(key)
+        g = self.ground_under(self.shrine.pos_x)
+        pet.pos_x = min(max(self.shrine.pos_x + random.uniform(-160, 160), g.x1 + 40), g.x2 - 40)
+        pet.pos_y, pet.vx, pet.vy, pet.state, pet.on = max(self.top + 80, g.y - 600), 0.0, 0.0, "fall", None
+        pet._place()
+        if not self.hidden_for_fullscreen:
+            pet.show()
+
+    def _sync_torii(self) -> None:
+        s = self.state
+        name = torii.title(s)
+        tip = f"센본토리이 {s.torii:,}개  ·  분당 새전 +{torii.income(s)}" + (f"  ·  「{name}」" if name else "")
+        self.torii_row.setup(s.torii, self.scale, bool(self._night), tip)
+        show = s.torii > 0 and not self.hidden_for_fullscreen
+        if show != self.torii_row.isVisible():
+            if show:
+                g = self.ground_under(self.shrine.pos_x)
+                self.torii_row.place(self.shrine.x() + 10, self.shrine.x() + self.shrine.width() - 10, g.y, g.x1, g.x2)
+            self.torii_row.setVisible(show)
+
+    def offer_torii(self, k: int) -> list[str] | None:
+        s = self.state
+        before = s.saisen
+        got = torii.offer(s, k)
+        if got is None:
+            return None
+        self.shrine.set_saisen(s.saisen)
+        self.shrine.pop(f"-{before - s.saisen:,}")
+        self._sync_torii()
+        log.info("도리이 %d개 봉납 → %d개", k, s.torii)
+        self._say_at_shrine(f"⛩ 도리이 {k}개 봉납!  모두 {s.torii:,}개 · 분당 새전 +{torii.income(s)}")
+        for i, name in enumerate(got):
+            def cheer(name=name):
+                self._say_at_shrine(f"🎉 「{name}」 — 도리이가 {s.torii:,}개가 됐다!")
+                for p in self.pets:
+                    p.react(True)
+                if not self.hidden_for_fullscreen:
+                    burst = PetalBurst(self.shrine.pos_x, self.shrine.y() + self.shrine.height())
+                    self.keep(burst)
+                    burst.show()
+            self.later(1.6 + i * 2.0, cheer)
+        self.save()
+        return got
+
+    def pull_omamori(self, n: int):
+        s = self.state
+        res = omamori.pull(s, n)
+        if res is None:
+            return None
+        self.shrine.set_saisen(s.saisen)
+        log.info("부적 뽑기 %d번: %s", n, [k for k, _ in res])
+        if any(omamori.CHARMS[k].rarity == "SSR" for k, _ in res):
+            for p in self.pets:
+                p.react(True)
+            if not self.hidden_for_fullscreen:
+                burst = PetalBurst(self.shrine.pos_x, self.shrine.y() + self.shrine.height())
+                self.keep(burst)
+                burst.show()
+        self.save()
+        return res
+
+    def equip_omamori(self, key: str) -> bool:
+        ok = omamori.toggle_equip(self.state, key)
+        if ok:
+            self.save()
+        return ok
 
     # ── 사진 찍기 ──
     def take_photo(self) -> None:
@@ -625,6 +762,7 @@ class Game(QObject):
         head = menu.addAction(f"{pet.ch.name}   {aff.hearts(s, key)}")
         head.setEnabled(False)
         menu.addAction("💬 말 걸기", lambda: self.talk_to(pet))
+        menu.addAction("🏠 신사에서 쉬게 하기", lambda: self.set_out(key, False))
         gifts = menu.addMenu("🎁 선물하기")
         gifts.setStyleSheet(MENU_STYLE)
         known = aff.level(s, key) >= 2                      # 친해지면 좋아하는 선물을 알게 됨
@@ -651,6 +789,7 @@ class Game(QObject):
             pet.act("wave", 1.6)
         say(line, pet.pos_x, pet.pos_y - 76, 3.5)
         if gained:
+            gained += int(omamori.bonus(self.state, "affection"))   # 인연 부적
             self.later(1.2, lambda: self._add_affection(pet, gained))
             daily.bump(self.state, "talk")             # 그날 처음 말 건 친구만
             self._daily_check()
@@ -666,7 +805,7 @@ class Game(QObject):
         line = random.choice([f"{icon} {name}! 제일 좋아해!", f"{icon} 와아, {aff.josa(name, '이다', '다')}!"]) if fav else \
             random.choice([f"{icon} 고마워!", f"{icon} 잘 먹을게~"])
         say(line, pet.pos_x, pet.pos_y - 76, 3.0)
-        self._add_affection(pet, gained)
+        self._add_affection(pet, gained + int(omamori.bonus(self.state, "affection")))
         daily.bump(self.state, "gift")
         self._daily_check()
         self.save()
@@ -728,9 +867,11 @@ class Game(QObject):
 
     def _decor_spot(self, key: str) -> float:
         """신사 양옆으로 번갈아 가며, 신사·다른 장식과 겹치지 않는 가장 가까운 빈자리."""
-        w = DecorWindow.width_for(key)
+        w = DecorWindow.width_for(key) * self.scale
         g = self.ground_under(self.shrine.pos_x)
         taken = [(self.shrine.pos_x - self.shrine.width() / 2, self.shrine.pos_x + self.shrine.width() / 2)]
+        if self.torii_row.isVisible():
+            taken.append((self.torii_row.x(), self.torii_row.x() + self.torii_row.width()))
         taken += [(d.pos_x - d.width() / 2, d.pos_x + d.width() / 2) for d in self.decors.values()]
         gap = 8
         for step in range(0, 3000, 10):
@@ -765,7 +906,7 @@ class Game(QObject):
         if not self.state.upgrade_shrine():
             return
         s = self.state
-        self.shrine.set_level(s.shrine_level)
+        self.shrine.set_level(s.look_stage)
         self.shrine.set_saisen(s.saisen)
         self.on_shrine_moved(self.shrine.pos_x)
         log.info("신사 업그레이드 → %s", s.stage_name)
@@ -794,13 +935,7 @@ class Game(QObject):
             self.state.unlocked.append(key)
             log.info("해금: %s", key)
             if all(p.ch.key != key for p in self.pets):
-                pet = self._spawn(key)
-                g = self.ground_under(self.shrine.pos_x)
-                pet.pos_x = min(max(self.shrine.pos_x + random.uniform(-160, 160), g.x1 + 40), g.x2 - 40)
-                pet.pos_y, pet.vx, pet.vy, pet.state, pet.on = max(self.top + 80, g.y - 600), 0.0, 0.0, "fall", None
-                pet._place()
-                if not self.hidden_for_fullscreen:
-                    pet.show()
+                self._drop_in(key)
             if not self.hidden_for_fullscreen:
                 self._say_at_shrine(UNLOCKS[key].arrive_line)
             self.save()

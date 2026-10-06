@@ -15,6 +15,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
+from . import omamori
 from .state import GameState
 
 # 부탁 종류 → (아이콘, 글, 목표 범위). 목표가 None 이면 신사 수입에 맞춰 정함
@@ -108,6 +109,7 @@ def check(s: GameState) -> tuple[list[dict], int]:
     for task in s.daily_tasks:
         if not task["done"] and count(s, task) >= task["goal"]:
             task["done"] = True
+            task["reward"] = int(task["reward"] * (1 + omamori.bonus(s, "daily")))   # 개운 부적
             s.add_saisen(task["reward"])
             s.daily_done += 1
             done_now.append(task)

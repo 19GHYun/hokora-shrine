@@ -54,9 +54,10 @@ class Bubble(QWidget):
 _alive: list[Bubble] = []
 
 
-def say(text: str, cx: float, bottom: float, seconds: float = 4.0) -> None:
+def say(text: str, cx: float, bottom: float, seconds: float = 4.0) -> Bubble:
     b = Bubble(text, seconds)
     _alive.append(b)
     b.destroyed.connect(lambda *_: _alive.remove(b) if b in _alive else None)
     b.show_at(cx, bottom)
+    return b
 
