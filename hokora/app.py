@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import __version__, winutil
 from . import affection as aff
-from . import daily, omamori, photo, season, torii
+from . import daily, omamori, photo, season, torii, wardrobe
 from .bubble import _alive as bubble_alive
 from .bubble import say
 from .daily import StampCard
@@ -227,6 +227,8 @@ class Game(QObject):
         g = self.ground_under(self.shrine.pos_x)
         x = random.uniform(g.x1 + 80, g.x2 - 80)
         pet = PetWindow(CHARACTERS[key], self, x)
+        pet.skin = self.state.skins.get(key)
+        pet.fx_kind = self.state.effects.get(key)
         self.pets.append(pet)
         return pet
 
@@ -534,7 +536,9 @@ class Game(QObject):
     # ── 신사 관리 창의 버튼들: 모양·크기·외출·도리이·부적 ──
     def on_action(self, name: str, value=None):
         handlers = {"look": self.set_look, "scale": self.set_scale, "out": lambda v: self.set_out(*v),
-                    "torii": self.offer_torii, "pull": self.pull_omamori, "equip": self.equip_omamori}
+                    "torii": self.offer_torii, "pull": self.pull_omamori, "equip": self.equip_omamori,
+                    "wpull": self.pull_wardrobe, "wear": lambda v: self.wear(*v), "wfx": lambda v: self.set_fx(*v),
+                    "exchange": self.exchange_cloth}
         return handlers[name](value)
 
     def set_look(self, stage: int) -> None:
@@ -640,6 +644,50 @@ class Game(QObject):
                 burst.show()
         self.save()
         return res
+
+    # ── 의상실 ──
+    def pull_wardrobe(self, n: int):
+        s = self.state
+        res = wardrobe.pull(s, n)
+        if res is None:
+            return None
+        self.shrine.set_saisen(s.saisen)
+        log.info("의상실 뽑기 %d번: %s", n, [k for k, _ in res])
+        if any(wardrobe.ITEMS[k].rarity == "SSR" for k, _ in res) and not self.hidden_for_fullscreen:
+            burst = PetalBurst(self.shrine.pos_x, self.shrine.y() + self.shrine.height())
+            self.keep(burst)
+            burst.show()
+            for p in self.pets:
+                p.react(True)
+        self.save()
+        return res
+
+    def wear(self, char: str, skin: str | None) -> bool:
+        if not wardrobe.wear(self.state, char, skin):
+            return False
+        pet = next((p for p in self.pets if p.ch.key == char), None)
+        if pet is not None:
+            pet.skin = self.state.skins.get(char)
+            pet.react(True)
+            pet.update()
+        self.save()
+        return True
+
+    def set_fx(self, char: str, fx: str | None) -> bool:
+        if not wardrobe.set_effect(self.state, char, fx):
+            return False
+        pet = next((p for p in self.pets if p.ch.key == char), None)
+        if pet is not None:
+            pet.fx_kind = self.state.effects.get(char)
+        self.save()
+        return True
+
+    def exchange_cloth(self, item_id: str) -> bool:
+        ok = wardrobe.exchange(self.state, item_id)
+        if ok:
+            log.info("옷감 교환: %s", item_id)
+            self.save()
+        return ok
 
     def equip_omamori(self, key: str) -> bool:
         ok = omamori.toggle_equip(self.state, key)
@@ -763,6 +811,22 @@ class Game(QObject):
         head.setEnabled(False)
         menu.addAction("💬 말 걸기", lambda: self.talk_to(pet))
         menu.addAction("🏠 신사에서 쉬게 하기", lambda: self.set_out(key, False))
+        mine = [i for i in s.wardrobe if i.startswith(f"{key}:")]
+        fxs = [i for i in s.wardrobe if i.startswith("fx:")]
+        if mine:
+            clothes = menu.addMenu("👘 옷 갈아입기")
+            clothes.setStyleSheet(MENU_STYLE)
+            for skin, name in [(None, "기본 옷")] + [(i.split(":")[1], wardrobe.ITEMS[i].name) for i in mine]:
+                act = clothes.addAction(name, lambda skin=skin: self.wear(key, skin))
+                act.setCheckable(True)
+                act.setChecked(s.skins.get(key) == skin)
+        if fxs:
+            effects = menu.addMenu("✨ 이펙트")
+            effects.setStyleSheet(MENU_STYLE)
+            for fx, name in [(None, "없음")] + [(i.split(":")[1], wardrobe.ITEMS[i].name) for i in fxs]:
+                act = effects.addAction(name, lambda fx=fx: self.set_fx(key, fx))
+                act.setCheckable(True)
+                act.setChecked(s.effects.get(key) == fx)
         gifts = menu.addMenu("🎁 선물하기")
         gifts.setStyleSheet(MENU_STYLE)
         known = aff.level(s, key) >= 2                      # 친해지면 좋아하는 선물을 알게 됨

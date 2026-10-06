@@ -193,3 +193,39 @@ python tools/import_sheet.py 아야.png aya --preset guest
 ```
 
 칸끼리 붙어 있으면 `--grid 3x4` 를 더하면 칸 단위로 나눕니다.
+
+## 전용 의상 (스킨)
+
+색·재질 스킨은 코드로 만들지만, 완전히 다른 옷(유카타·산타 등)은 그림을 뽑아야 합니다.
+**같은 캐릭터를 다른 옷으로** 시트 A·B·C·걷기를 모두 뽑아서 `<캐릭터>@<옷>` 이름으로 넣으면,
+의상실 뽑기에 **전설** 등급으로 저절로 들어갑니다.
+
+1. 기준 그림: 캐릭터의 `idle_0.png` 를 첨부하고 아래로 서 있는 그림을 한 장 뽑습니다.
+
+```
+Using the attached image as the exact character and style reference, draw this SAME character
+(same face, same hair, same eyes, same chibi plush proportions, same thick outline) standing still,
+full body, turned slightly to the viewer's right, but wearing a different outfit:
+[옷 설명]
+Background: solid flat pure green (#00FF00). No shadow, no text, no other objects.
+```
+
+2. 그 그림을 첨부해서 위의 공통 프롬프트로 시트 A·B·C 와 걷기 시트를 뽑습니다.
+3. 넣기 (캐릭터 이름 뒤에 `@옷`):
+
+```
+python tools/import_sheet.py 시트A.png reimu@yukata --preset move
+python tools/import_sheet.py 시트B.png reimu@yukata --preset react
+python tools/import_sheet.py 시트C.png reimu@yukata --preset life
+python tools/import_sheet.py 걷기.png reimu@yukata --preset walk
+```
+
+| 옷 이름 (`@` 뒤) | 화면 이름 | `[옷 설명]` 예 |
+| --- | --- | --- |
+| `yukata` | 유카타 | `a summer yukata with a floral pattern, a wide obi sash tied in a bow at the back, wooden geta sandals` |
+| `santa` | 산타 | `a red Santa dress with white fluffy trim, a Santa hat, black boots` |
+| `pajama` | 잠옷 | `cute pastel pajamas with a matching nightcap, holding a small pillow` |
+| `swimsuit` | 수영복 | `a cute one-piece swimsuit with a frilly skirt, a straw hat, a swim ring` |
+| `school` | 교복 | `a Japanese sailor school uniform with a red neckerchief, loafers` |
+
+다른 이름도 되지만 화면에는 그 영어 이름 그대로 나옵니다 (`hokora/wardrobe.py` 의 `ART_NAMES` 에 한글 이름 추가).

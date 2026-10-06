@@ -109,6 +109,13 @@ class GameState:
     equipped: list[str] = field(default_factory=list)       # 지닌 부적 (최대 3개)
     gacha_pulls: int = 0
     gacha_pity: int = 0              # 마지막 전설 부적 뒤로 뽑은 횟수
+    # 의상실 (wardrobe.py)
+    wardrobe: list[str] = field(default_factory=list)       # 가진 옷·이펙트 ("reimu:blue", "fx:hearts")
+    skins: dict[str, str] = field(default_factory=dict)     # 캐릭터 → 입은 옷 (없으면 기본)
+    effects: dict[str, str] = field(default_factory=dict)   # 캐릭터 → 이펙트
+    cloth: int = 0                   # 옷감 (중복으로 모임 → 원하는 것 교환)
+    wardrobe_pulls: int = 0
+    wardrobe_pity: int = 0
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
     @property

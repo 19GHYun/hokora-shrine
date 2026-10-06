@@ -14,11 +14,13 @@
 """
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import math
 import os
 import re
+from collections.abc import Mapping
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -70,6 +72,13 @@ class ImageSprites:
                 raise ValueError(f"그림 없음: {folder / name}.png")
             self.images[name] = (img, QPointF(ax, ay))
         self._seq_cache: dict[str, list[str]] = {}
+
+    def variant(self, fn) -> "ImageSprites":
+        """같은 그림을 fn(QImage) 으로 바꾼 판 (색 스킨 등). 그림마다 처음 그릴 때 바꾼다."""
+        v = copy.copy(self)
+        v.images = _Lazy(self.images, fn)
+        v._seq_cache = self._seq_cache                  # 그림 이름이 같으니 순서도 같음
+        return v
 
     def sequence(self, kind: str) -> list[str]:
         """이 동작에 쓸 그림 이름들 (재생 순서)."""
@@ -154,6 +163,30 @@ class ImageSprites:
                dpr: float) -> tuple[QPixmap, QPointF]:
         """pick + draw (미리보기 도구용)."""
         return self.draw(*self.pick(kind, phase, t, blink), facing, dpr)
+
+
+class _Lazy(Mapping):
+    """{이름: (그림, 발 위치)} 를 fn 으로 바꿔서 보여 주는 사전. 실제로 꺼낼 때 한 번만 바꿈."""
+
+    def __init__(self, base: Mapping, fn):
+        self.base, self.fn = base, fn
+        self.done: dict[str, tuple] = {}
+
+    def __getitem__(self, name: str):
+        hit = self.done.get(name)
+        if hit is None:
+            img, anchor = self.base[name]
+            hit = self.done[name] = (self.fn(img), anchor)
+        return hit
+
+    def __contains__(self, name) -> bool:
+        return name in self.base
+
+    def __iter__(self):
+        return iter(self.base)
+
+    def __len__(self) -> int:
+        return len(self.base)
 
 
 _loaded: dict[str, ImageSprites | None] = {}

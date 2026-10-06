@@ -16,7 +16,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QWidget
 
-from . import winutil
+from . import wardrobe, winutil
 from .render import Character, Pose, draw_character
 from .sprites import image_sprites
 from .state import PAT_COOLDOWN
@@ -82,13 +82,14 @@ class SpriteCache:
         screen = QGuiApplication.primaryScreen()
         self.dpr = max(1.0, screen.devicePixelRatio() if screen else 1.0)
 
-    def get(self, ch: Character, kind: str, frame: int, facing: int, blink: bool) -> tuple[QPixmap, QPointF]:
+    def get(self, ch: Character, kind: str, frame: int, facing: int, blink: bool,
+            skin: str | None = None) -> tuple[QPixmap, QPointF]:
         n, loop = FRAMES[kind]
         t = frame * loop / n
-        images = image_sprites(ch.key)
+        images = wardrobe.sprites_for(ch.key, skin)
         if images is not None:                 # 그림 캐릭터: 같은 그림·같은 움직임이면 한 번만 그림
             look = images.pick(kind, frame / n, t, blink)
-            key = (ch.key, *look, facing)
+            key = (ch.key, skin, *look, facing)
             hit = self._cache.get(key)
             if hit is None:
                 hit = self._cache[key] = images.draw(*look, facing, self.dpr)
@@ -192,6 +193,12 @@ class PetWindow(QWidget):
         self._shakes: deque[tuple[float, int, int]] = deque(maxlen=12)   # (시각, 축 0=x 1=y, 방향)
         self._startle_on_land = False
         self._wall = 0                   # 매달린/타는 벽 방향 (-1 왼쪽, 1 오른쪽, 0 천장)
+        self.skin: str | None = None     # 입은 옷 (의상실)
+        self.fx_kind: str | None = None  # 발자국·오라 이펙트
+        self.fx_marks: list[list] = []   # [화면 x, 화면 y, 나이, 수명, 씨앗, 종류]
+        self._fx_dist = 0.0
+        self._fx_at = 0.0
+        self._fx_n = 0
         self._climb_to = 0.0
         self._place()
 
@@ -427,6 +434,7 @@ class PetWindow(QWidget):
             self.update()
         self.t += dt
         w = self.world
+        x0 = self.pos_x
         self.squash = self.squash * max(0.0, 1 - dt * 8) if self.squash > 0.01 else 0.0
         if self.hearts:
             for h in self.hearts:
@@ -542,6 +550,8 @@ class PetWindow(QWidget):
             self.tilt = self.tilt * max(0.0, 1 - dt * 10) if abs(self.tilt) > 0.5 else 0.0
             if not self.scripted and self.state in TIMED and now >= self.state_until:
                 self._choose_next()
+        if self.fx_kind or self.fx_marks:
+            self._fx_step(dt, abs(self.pos_x - x0))
         riding = self.on == CURSOR
         if riding != self._click_through:
             self._click_through = riding
@@ -549,8 +559,44 @@ class PetWindow(QWidget):
         self._place()
         # 그림이 바뀔 때만 다시 그림 (낮잠 중엔 z 가 떠오르므로 계속)
         if (self._frame_key() != self._drawn_key or self.squash or self.tilt or self.hearts
-                or self.state == "sleep"):
+                or self.state == "sleep" or self.fx_marks):
             self.update()
+
+    def _fx_step(self, dt: float, moved: float) -> None:
+        """이펙트: 걸으면 발자국, 음표는 신날 때, 반짝이는 늘 몸 둘레에."""
+        for m in self.fx_marks:
+            m[2] += dt
+        self.fx_marks = [m for m in self.fx_marks if m[2] < m[3]]
+        kind = self.fx_kind
+        if not kind or self.state == "sleep":
+            return
+        k = self.world.scale
+        if kind in wardrobe.FOOTPRINTS:
+            if self.on is not None and self.state in ("walk", "run"):
+                self._fx_dist += moved
+                if self._fx_dist >= 13 * k:
+                    self._fx_dist = 0.0
+                    self._fx_n += 1
+                    seed = (self._fx_n * 0.09) % 1.0 if kind == "rainbow" else random.random()
+                    self.fx_marks.append([self.pos_x - self.facing * 5 * k, self.pos_y, 0.0, 1.3, seed, kind])
+        elif kind == "notes":
+            if self.state in ("walk", "run", "happy", "wave", "skill") and self.t >= self._fx_at:
+                self._fx_at = self.t + 0.8
+                self.fx_marks.append([self.pos_x + random.uniform(-14, 14) * k, self.pos_y - CHAR_H * k,
+                                      0.0, 1.6, random.random(), kind])
+        elif kind == "sparkle" and self.t >= self._fx_at:
+            self._fx_at = self.t + 0.3
+            self.fx_marks.append([self.pos_x + random.uniform(-24, 24) * k, self.pos_y - random.uniform(4, CHAR_H) * k,
+                                  0.0, random.uniform(0.7, 1.1), random.random(), kind])
+
+    def _draw_fx(self, p: QPainter, front: bool) -> None:
+        """발자국은 캐릭터 뒤(front=False), 음표·반짝이는 앞에."""
+        if not self.fx_marks or self._placed is None:
+            return
+        ox, oy = self._placed
+        for x, y, age, life, seed, kind in self.fx_marks:
+            if (kind in wardrobe.FOOTPRINTS) != front:
+                wardrobe.draw_mark(p, kind, x - ox, y - oy, age, life, seed)
 
     def _frame_key(self) -> tuple:
         kind = self.state if self.state in FRAMES else "idle"
@@ -597,9 +643,12 @@ class PetWindow(QWidget):
         key = self._frame_key()
         self._drawn_key = key
         kind, frame, facing, blink = key
-        pm, anchor = sprites().get(self.ch, kind, frame, facing, blink)
+        pm, anchor = sprites().get(self.ch, kind, frame, facing, blink, self.skin)
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
+        if self.fx_marks:
+            p.setRenderHint(QPainter.Antialiasing)
+            self._draw_fx(p, front=False)
         # 찌그러짐은 발을 기준으로, 빙글 도는 건 몸 가운데를 기준으로 (발 기준이면 몸이 창 밖으로 휘둘려 잘림)
         fx, fy = WIN_W / 2, WIN_H - FOOT_MARGIN
         p.translate(fx, fy)
@@ -619,6 +668,7 @@ class PetWindow(QWidget):
             p.setCompositionMode(QPainter.CompositionMode_SourceAtop)
             p.fillRect(self.rect(), QColor(90, 120, 200, 110))
             p.setCompositionMode(QPainter.CompositionMode_SourceOver)
+        self._draw_fx(p, front=True)
         if self.state == "sleep":
             _zzz(p, WIN_W / 2 + 14, self.head_y + 6, self.t)
         if self.hearts:

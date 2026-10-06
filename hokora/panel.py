@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QPro
                                QTabBar, QVBoxLayout, QWidget)
 
 from . import affection as aff
-from . import daily, omamori, season, torii
+from . import daily, omamori, season, torii, wardrobe
 from .decor import decor_image
 from .guests import GUEST_ABOUT, VISITS, guest_stage
 from .omikuji import can_draw
@@ -60,15 +60,25 @@ QTabBar::tab:hover { color: #9E1027; }
 """
 
 
-def portrait(key: str, size: int, silhouette: bool) -> QPixmap:
-    """도감용 얼굴(서 있는 모습). 못 만난 캐릭터는 검은 실루엣."""
+_portraits: dict[tuple, QPixmap] = {}
+
+
+def portrait(key: str, size: int, silhouette: bool, skin: str | None = None) -> QPixmap:
+    """도감용 얼굴(서 있는 모습). 못 만난 캐릭터는 검은 실루엣. skin 이면 그 옷을 입은 모습."""
+    ck = (key, size, silhouette, skin)
+    if ck not in _portraits:
+        _portraits[ck] = _portrait(key, size, silhouette, skin)
+    return _portraits[ck]
+
+
+def _portrait(key: str, size: int, silhouette: bool, skin: str | None) -> QPixmap:
     pm = QPixmap(size * 2, size * 2)
     pm.setDevicePixelRatio(2)
     pm.fill(Qt.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
     p.setRenderHint(QPainter.SmoothPixmapTransform)
-    sprites = image_sprites(key)
+    sprites = wardrobe.sprites_for(key, skin) if key in CHARACTERS else image_sprites(key)
     if sprites is not None:
         img, anchor = sprites.images[sprites.sequence("idle")[0]]
         s = size * 0.95 / img.height()
@@ -264,6 +274,164 @@ class _PullStrip(QWidget):
         p.end()
 
 
+class _WTile(QWidget):
+    """의상실 칸: 옷(그 옷을 입은 모습) 또는 이펙트(아이콘). 누르면 입기/쓰기, 없는 건 옷감 교환."""
+
+    W, H = 84, 108
+
+    def __init__(self, on_click: Callable[[tuple], None]):
+        super().__init__()
+        self.on_click = on_click
+        self.setFixedSize(self.W, self.H)
+        self.payload: tuple | None = None
+        self.pix: QPixmap | None = None
+        self.icon = ""
+        self.title = self.sub = ""
+        self.rarity = "N"
+        self.mode = "own"                  # worn / own / trade / locked
+
+    def set(self, payload: tuple, title: str, sub: str, rarity: str, mode: str,
+            pix: QPixmap | None = None, icon: str = "") -> None:
+        self.payload, self.title, self.sub, self.rarity, self.mode = payload, title, sub, rarity, mode
+        self.pix, self.icon = pix, icon
+        self.setCursor(Qt.ArrowCursor if mode == "locked" else Qt.PointingHandCursor)
+        self.setToolTip({"worn": "입고 있어요", "own": "눌러서 입기", "trade": "눌러서 옷감으로 교환",
+                         "locked": "옷감이 모자라요 — 뽑기로 얻거나 옷감을 모아요"}[mode])
+        self.update()
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        r = QRectF(1, 1, self.W - 2, self.H - 2)
+        rim = QColor(wardrobe.RARITY[self.rarity][1])
+        if self.mode == "worn":
+            p.setPen(QPen(QColor("#C8102E"), 2.2))
+        elif self.mode == "own":
+            rim.setAlpha(110)
+            p.setPen(QPen(rim, 1.2))
+        else:
+            p.setPen(QPen(QColor(200, 16, 46, 40), 1, Qt.DashLine))
+        p.setBrush(QColor(255, 255, 255, 225 if self.mode in ("worn", "own") else 150))
+        p.drawRoundedRect(r, 9, 9)
+        art = QRectF(10, 6, self.W - 20, 60)
+        if self.pix is not None:
+            p.drawPixmap(art.toRect(), self.pix)
+        elif self.icon:
+            wardrobe.draw_icon(p, art, self.icon)
+        if self.mode in ("trade", "locked"):                  # 아직 없는 것: 흐리게
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(250, 246, 247, 170))
+            p.drawRoundedRect(art, 6, 6)
+        f = QFont("Malgun Gothic", 8)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QColor(wardrobe.RARITY[self.rarity][1]) if self.mode in ("worn", "own") else QColor(140, 116, 121))
+        p.drawText(QRectF(2, 68, self.W - 4, 16), Qt.AlignCenter, self.title)
+        small = QFont("Malgun Gothic", 7)
+        p.setFont(small)
+        p.setPen(QColor("#C8102E") if self.mode == "trade" else QColor("#8C7479"))
+        p.drawText(QRectF(2, 85, self.W - 4, 16), Qt.AlignCenter, self.sub)
+        if self.mode == "worn":
+            badge = QRectF(5, 5, 30, 15)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor("#C8102E"))
+            p.drawRoundedRect(badge, 7, 7)
+            p.setPen(QColor("#FFFFFF"))
+            p.drawText(badge, Qt.AlignCenter, "입음")
+        p.end()
+
+    def mousePressEvent(self, e) -> None:
+        if e.button() == Qt.LeftButton and self.payload and self.mode in ("own", "trade"):
+            self.on_click(self.payload)
+
+
+class _CharPick(QWidget):
+    """의상실에서 옷을 입힐 친구 고르기 (작은 얼굴)."""
+
+    S = 46
+
+    def __init__(self, key: str, on_pick: Callable[[str], None]):
+        super().__init__()
+        self.key, self.on_pick = key, on_pick
+        self.selected = False
+        self.skin: str | None = None
+        self.setFixedSize(self.S, self.S + 2)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(CHARACTERS[key].name)
+
+    def set_state(self, selected: bool, skin: str | None) -> None:
+        if (selected, skin) != (self.selected, self.skin):
+            self.selected, self.skin = selected, skin
+            self.update()
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(1, 1, self.S - 2, self.S - 2)
+        p.setPen(QPen(QColor("#C8102E"), 2) if self.selected else QPen(QColor(200, 16, 46, 50), 1))
+        p.setBrush(QColor(255, 255, 255, 230))
+        p.drawEllipse(r)
+        p.drawPixmap(QRectF(5, 3, self.S - 10, self.S - 10).toRect(), portrait(self.key, 60, False, self.skin))
+        p.end()
+
+    def mousePressEvent(self, e) -> None:
+        if e.button() == Qt.LeftButton:
+            self.on_pick(self.key)
+
+
+class _WardrobeStrip(QWidget):
+    """방금 뽑은 옷·이펙트."""
+
+    def __init__(self):
+        super().__init__()
+        self.results: list[tuple] = []
+        self.setFixedHeight(0)
+
+    def set_results(self, results: list[tuple[str, str]]) -> None:
+        self.results = [(wardrobe.ITEMS[k], tag) for k, tag in results]
+        self.setFixedHeight(100 if results else 0)
+        self.update()
+
+    def paintEvent(self, _e) -> None:
+        if not self.results:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        p.setPen(QPen(QColor(200, 16, 46, 60), 1))
+        p.setBrush(QColor(255, 248, 236, 235))
+        p.drawRoundedRect(r, 10, 10)
+        f = QFont("Malgun Gothic", 8)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QColor("#B3122C"))
+        best = max(["N", "R", "SR", "SSR"].index(it.rarity) for it, _ in self.results)
+        p.drawText(QRectF(10, 4, r.width() - 20, 16), Qt.AlignLeft | Qt.AlignVCenter,
+                   {3: "✨ 전설이다!!", 2: "✨ 귀한 게 나왔다!"}.get(best, "방금 뽑은 것"))
+        n = len(self.results)
+        cell = min(56.0, (r.width() - 12) / n)
+        x0 = r.center().x() - cell * n / 2
+        tagf = QFont("Malgun Gothic", 7)
+        tagf.setBold(True)
+        for i, (it, tag) in enumerate(self.results):
+            x = x0 + i * cell
+            box = QRectF(x + cell / 2 - 21, 22, 42, 50)
+            p.setPen(QPen(QColor(wardrobe.RARITY[it.rarity][1]), 1.4))
+            p.setBrush(QColor(255, 255, 255, 220))
+            p.drawRoundedRect(box, 6, 6)
+            if it.char is not None:
+                p.drawPixmap(box.adjusted(3, 2, -3, -2).toRect(), portrait(it.char, 60, False, it.skin))
+            else:
+                wardrobe.draw_icon(p, box, it.skin)
+            p.setFont(tagf)
+            p.setPen(QColor("#C8102E") if tag == "new" else QColor("#8C7479"))
+            p.drawText(QRectF(x, 76, cell, 14), Qt.AlignCenter,
+                       "NEW!" if tag == "new" else f"옷감+{wardrobe.CLOTH_GAIN[it.rarity]}")
+        p.end()
+
+
 def _hearts(s: GameState, key: str) -> str:
     """도감 카드의 하트 (분홍색)."""
     return f"<span style='color:#E0457B'>{aff.hearts(s, key)}</span>"
@@ -300,13 +468,13 @@ class ShrinePanel(QWidget):
         self.tabs.setDrawBase(False)
         self.tabs.setExpanding(False)
         v.addWidget(self.tabs)
-        page1, page2, page3, page4, page5, page6, page7 = (QWidget() for _ in range(7))
-        p1, p3, p4, p5, p6, p7 = (QVBoxLayout(pg) for pg in (page1, page3, page4, page5, page6, page7))
-        for lay in (p1, p3, p4, p5, p6, p7):
+        page1, page2, page3, page4, page5, page6, page7, page8 = (QWidget() for _ in range(8))
+        p1, p3, p4, p5, p6, p7, p8 = (QVBoxLayout(pg) for pg in (page1, page3, page4, page5, page6, page7, page8))
+        for lay in (p1, p3, p4, p5, p6, p7, p8):
             lay.setContentsMargins(0, 4, 0, 0)
             lay.setSpacing(10)
-        self.pages = [page1, page6, page4, page7, page2, page5, page3]
-        for name, page in zip(("신사", "부탁", "참배", "부적", "도감", "손님", "꾸미기"), self.pages):
+        self.pages = [page1, page6, page4, page7, page8, page2, page5, page3]
+        for name, page in zip(("신사", "부탁", "참배", "부적", "의상", "도감", "손님", "꾸미기"), self.pages):
             self.tabs.addTab(name)
             page.hide()
             v.addWidget(page)
@@ -434,6 +602,64 @@ class ShrinePanel(QWidget):
         p7.addLayout(cgrid)
         self.charm_stats = QLabel(objectName="sub")
         p7.addWidget(self.charm_stats)
+
+        # ── 의상실 ──
+        intro = QLabel("옷 색·재질과 발자국 이펙트를 뽑아요. 효과는 없고 보기만 바뀌어요. "
+                       "중복은 옷감이 되고, 옷감으로 원하는 걸 교환할 수 있어요.", objectName="goal")
+        intro.setWordWrap(True)
+        p8.addWidget(intro)
+        self.pickup_label = QLabel(objectName="done")
+        p8.addWidget(self.pickup_label)
+        wrow = QHBoxLayout()
+        self.wpull1 = QPushButton(objectName="upgrade")
+        self.wpull10 = QPushButton(objectName="upgrade")
+        for b, n in ((self.wpull1, 1), (self.wpull10, 10)):
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, n=n: self._wpull(n))
+            wrow.addWidget(b, 1)
+        p8.addLayout(wrow)
+        self.wpity_label = QLabel(objectName="goal")
+        self.wpity_label.setWordWrap(True)
+        p8.addWidget(self.wpity_label)
+        self.wstrip = _WardrobeStrip()
+        p8.addWidget(self.wstrip)
+        p8.addWidget(QLabel("입히기", objectName="section"))
+        crow = QHBoxLayout()
+        crow.setSpacing(4)
+        self.char_picks = {k: _CharPick(k, self._pick_char) for k in wardrobe.CHAR_COLORS}
+        for w in self.char_picks.values():
+            crow.addWidget(w)
+        crow.addStretch(1)
+        p8.addLayout(crow)
+        self.w_char = next((k for k in wardrobe.CHAR_COLORS if k in state.unlocked), "reimu")
+        self.w_view = "skin"                                  # 옷 / 이펙트 중 하나만 보여서 창이 너무 길어지지 않게
+        vrow = QHBoxLayout()
+        self.view_btns = {}
+        for key, label in (("skin", "👘 옷"), ("fx", "✨ 이펙트")):
+            b = QPushButton(label, objectName="ghost")
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, key=key: self._wview(key))
+            vrow.addWidget(b)
+            self.view_btns[key] = b
+        vrow.addStretch(1)
+        p8.addLayout(vrow)
+        self.skin_box, self.fx_box = QWidget(), QWidget()
+        sgrid, fgrid = QGridLayout(self.skin_box), QGridLayout(self.fx_box)
+        self.skin_tiles, self.fx_tiles = [], []
+        most = max(len(wardrobe.skins_of(k)) for k in wardrobe.CHAR_COLORS)
+        for grid_, tiles, n in ((sgrid, self.skin_tiles, 1 + most), (fgrid, self.fx_tiles, 1 + len(wardrobe.EFFECTS))):
+            grid_.setContentsMargins(0, 0, 0, 0)
+            grid_.setSpacing(6)
+            for i in range(n):
+                t = _WTile(self._wclick)
+                grid_.addWidget(t, i // 5, i % 5)
+                tiles.append(t)
+            grid_.setColumnStretch(5, 1)
+        p8.addWidget(self.skin_box)
+        p8.addWidget(self.fx_box)
+        self.fx_box.hide()
+        self.wstats = QLabel(objectName="sub")
+        p8.addWidget(self.wstats)
 
         # ── 부탁: 출석 도장 + 오늘의 부탁 ──
         p6.addWidget(QLabel("💮 출석 도장", objectName="section"))
@@ -721,6 +947,9 @@ class ShrinePanel(QWidget):
             tile.update()
         self.charm_stats.setText(f"모은 부적 {len(s.omamori)}/{len(omamori.CHARMS)}   ·   뽑은 횟수 {s.gacha_pulls:,}")
 
+        # 의상실
+        self._refresh_wardrobe()
+
         # 신사 모양·크기
         for b in self.look_btns:
             b.set_state(b.stage == s.look_stage, b.stage > s.shrine_level)
@@ -816,6 +1045,84 @@ class ShrinePanel(QWidget):
             self.pull_strip.set_results(self.state, res)
             self.pull_strip.parentWidget().layout().activate()   # 결과 줄 높이를 먼저 반영
             self._fit_tab(self.tabs.currentIndex())          # 결과 줄만큼 창 높이가 바뀜
+
+    def _refresh_wardrobe(self) -> None:
+        s = self.state
+        pick = wardrobe.pickup(s)
+        self.pickup_label.setText(f"이번 주 픽업: {CHARACTERS[pick].name}의 옷 (확률 {wardrobe.PICKUP_WEIGHT}배)"
+                                  if pick else "")
+        price = wardrobe.price(s)
+        self.wpull1.setText(f"1번 뽑기   새전 {price:,}")
+        self.wpull1.setEnabled(s.saisen >= price)
+        self.wpull10.setText(f"10번 뽑기   새전 {price * 9:,}")
+        self.wpull10.setEnabled(s.saisen >= price * 9)
+        self.wpity_label.setText(f"10번 뽑기는 귀함 이상 하나 보장  ·  전설까지 최대 {wardrobe.PITY - s.wardrobe_pity}번"
+                                 f"  ·  옷감 {s.cloth:,}")
+        if self.w_char not in s.unlocked:
+            self.w_char = next((k for k in wardrobe.CHAR_COLORS if k in s.unlocked), "reimu")
+        for k, w in self.char_picks.items():
+            w.setVisible(k in s.unlocked)
+            w.set_state(k == self.w_char, s.skins.get(k))
+        for key, b in self.view_btns.items():
+            self._role(b, "small" if key == self.w_view else "ghost")
+        ch = self.w_char
+        worn = s.skins.get(ch)
+        skins = [None] + wardrobe.skins_of(ch)
+        for i, tile in enumerate(self.skin_tiles):
+            tile.setVisible(i < len(skins))
+        for tile, skin in zip(self.skin_tiles, skins):
+            if skin is None:
+                tile.set(("wear", None), "기본 옷", "처음 옷", "N", "worn" if worn is None else "own",
+                         pix=portrait(ch, 120, False))
+                continue
+            it = wardrobe.ITEMS[f"{ch}:{skin}"]
+            owned = it.id in s.wardrobe
+            cost = wardrobe.CLOTH_COST[it.rarity]
+            mode = "worn" if worn == skin else "own" if owned else "trade" if s.cloth >= cost else "locked"
+            tile.set(("wear", skin) if owned else ("exchange", it.id), it.name.split(" ", 1)[1],
+                     wardrobe.RARITY[it.rarity][0] if owned else f"옷감 {cost}", it.rarity, mode,
+                     pix=portrait(ch, 120, False, skin))
+        cur = s.effects.get(ch)
+        fx_list = [None] + list(wardrobe.EFFECTS)
+        for tile, fx in zip(self.fx_tiles, fx_list):
+            if fx is None:
+                tile.set(("wfx", None), "없음", "이펙트 끄기", "N", "worn" if cur is None else "own")
+                continue
+            it = wardrobe.ITEMS[f"fx:{fx}"]
+            owned = it.id in s.wardrobe
+            cost = wardrobe.CLOTH_COST[it.rarity]
+            mode = "worn" if cur == fx else "own" if owned else "trade" if s.cloth >= cost else "locked"
+            tile.set(("wfx", fx) if owned else ("exchange", it.id), it.name,
+                     wardrobe.RARITY[it.rarity][0] if owned else f"옷감 {cost}", it.rarity, mode, icon=fx)
+        total = len(wardrobe.pool(s))
+        have = len([i for i in s.wardrobe if i in wardrobe.ITEMS])
+        self.wstats.setText(f"모은 옷·이펙트 {have}/{total}   ·   뽑은 횟수 {s.wardrobe_pulls:,}")
+
+    def _wview(self, key: str) -> None:
+        self.w_view = key
+        self.skin_box.setVisible(key == "skin")
+        self.fx_box.setVisible(key == "fx")
+        self._refresh_wardrobe()
+        self.fx_box.parentWidget().layout().activate()
+        self._fit_tab(self.tabs.currentIndex())
+
+    def _pick_char(self, key: str) -> None:
+        self.w_char = key
+        self._refresh_wardrobe()
+
+    def _wclick(self, payload: tuple) -> None:
+        what, value = payload
+        if what == "exchange":
+            self._act("exchange", value)
+        else:
+            self._act(what, (self.w_char, value))
+
+    def _wpull(self, n: int) -> None:
+        res = self._act("wpull", n)
+        if res:
+            self.wstrip.set_results(res)
+            self.wstrip.parentWidget().layout().activate()
+            self._fit_tab(self.tabs.currentIndex())
 
     def _equip(self, key: str) -> None:
         if not self._act("equip", key):
