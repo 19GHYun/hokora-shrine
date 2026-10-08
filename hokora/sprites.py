@@ -176,7 +176,11 @@ class _Lazy(Mapping):
         hit = self.done.get(name)
         if hit is None:
             img, anchor = self.base[name]
-            hit = self.done[name] = (self.fn(img), anchor)
+            res = self.fn(img)
+            if isinstance(res, tuple):                   # (그림, (dx, dy)): 여백을 붙여 발 위치가 옮겨짐
+                res, (dx, dy) = res
+                anchor = QPointF(anchor.x() + dx, anchor.y() + dy)
+            hit = self.done[name] = (res, anchor)
         return hit
 
     def __contains__(self, name) -> bool:

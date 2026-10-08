@@ -458,7 +458,8 @@ class Game(QObject):
         self.panel = ShrinePanel(self.state, self.upgrade, self.omikuji, self.on_decor, self.pray, self.upgrade_box,
                                  self._panel_tab, self.on_action)
         self.panel.tabs.currentChanged.connect(lambda i: setattr(self, "_panel_tab", i))
-        self.panel.destroyed.connect(lambda *_: setattr(self, "panel", None))
+        panel = self.panel                        # 예전 창이 늦게 닫혀도 새 창을 잊지 않게
+        panel.destroyed.connect(lambda *_: setattr(self, "panel", None) if self.panel is panel else None)
         top = self.shrine.y() + 20
         self.panel.show_above(self.shrine.pos_x, top, self.left, self.right)
 

@@ -72,6 +72,8 @@ CHAR_COLORS = {
     "flandre": ["blue", "green", "purple", "black"],
 }
 FILTERS = {"mono": ("흑백", "R"), "ghost": ("유령", "SR"), "silver": ("은빛", "SR"), "gold": ("금빛", "SSR")}
+# 그림체: 지금 그림을 코드로 다른 그림체처럼 (도트·수채화·연필 스케치·네온)
+STYLES = {"pixel": ("도트", "SR"), "pastel": ("수채화", "SR"), "sketch": ("연필 스케치", "SR"), "neon": ("네온", "SSR")}
 EFFECTS = {
     "hearts": ("하트 발자국", "R"), "petals": ("벚꽃 발자국", "R"), "notes": ("음표", "R"),
     "stars": ("별 발자국", "SR"), "sparkle": ("반짝이 오라", "SR"), "rainbow": ("무지개 발자국", "SSR"),
@@ -86,7 +88,7 @@ ART_NAMES = {"yukata": "유카타", "santa": "산타", "swimsuit": "수영복", 
 class Item:
     id: str              # "reimu:blue" / "reimu:gold" / "fx:hearts"
     char: str | None     # 이펙트는 None (누구에게나)
-    kind: str            # color / filter / fx
+    kind: str            # color / filter / style / art / fx
     skin: str
     name: str
     rarity: str
@@ -101,6 +103,8 @@ def _catalog() -> dict[str, Item]:
             items.append(Item(f"{ch}:{c}", ch, "color", c, f"{SHORT[ch]} {name}", rank))
         for f, (name, rank) in FILTERS.items():
             items.append(Item(f"{ch}:{f}", ch, "filter", f, f"{SHORT[ch]} {name}", rank))
+        for st, (name, rank) in STYLES.items():
+            items.append(Item(f"{ch}:{st}", ch, "style", st, f"{SHORT[ch]} {name}", rank))
     for folder in sorted(SPRITE_DIR.glob("*@*")):                    # 전용 의상 (그림)
         char, _, skin = folder.name.partition("@")
         if char in CHAR_COLORS and (folder / "manifest.json").exists():
@@ -110,9 +114,9 @@ def _catalog() -> dict[str, Item]:
     return {it.id: it for it in items}
 
 
-def skins_of(char: str) -> list[str]:
-    """그 캐릭터가 입을 수 있는 옷 (색 → 재질 → 전용 의상 순)."""
-    return [it.skin for it in ITEMS.values() if it.char == char]
+def skins_of(char: str, kinds: tuple[str, ...] = ("color", "filter", "art")) -> list[str]:
+    """그 캐릭터가 입을 수 있는 옷 (기본: 색 → 재질 → 전용 의상, kinds=("style",) 면 그림체)."""
+    return [it.skin for it in ITEMS.values() if it.char == char and it.kind in kinds]
 
 
 ITEMS = _catalog()
@@ -297,7 +301,111 @@ def _filter_fn(kind: str):
     return fn
 
 
+def _lum(r: int, g: int, b: int) -> float:
+    return (0.3 * r + 0.59 * g + 0.11 * b) / 255
+
+
+def _pastel_fn(r, g, b, a):
+    """수채화: 색은 옅고 밝게, 진한 선은 부드러운 갈회색으로."""
+    h, s, v = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+    if _lum(r, g, b) < 0.3:
+        return 132, 112, 120, a
+    rr, gg, bb = colorsys.hsv_to_rgb(h, s * 0.55, 0.72 + v * 0.28)
+    return int(rr * 255), int(gg * 255), int(bb * 255), a
+
+
+def _sketch_fn(r, g, b, a):
+    """연필 스케치: 어두운 곳은 흑연, 나머지는 종이에 연한 음영 (원래 색이 아주 살짝)."""
+    lum = _lum(r, g, b)
+    if lum < 0.33:
+        return 70, 68, 76, a
+    gray = 250 - (1 - lum) * 75
+    return (int(gray * 0.9 + r * 0.1), int(gray * 0.9 + g * 0.1), int(gray * 0.86 + b * 0.1), a)
+
+
+def _pixelate(img: QImage, block: int):
+    """도트: 큰 픽셀로 뭉치고 가장자리를 딱 잘라, 바깥에 한 칸 테두리. (그림, 발 위치 이동)"""
+    w, h = img.width(), img.height()
+    sw, sh = max(1, w // block), max(1, h // block)
+    small = QImage(sw + 2, sh + 2, QImage.Format_ARGB32)          # 테두리가 들어갈 한 칸 여백
+    small.fill(Qt.transparent)
+    p = QPainter(small)
+    p.setRenderHint(QPainter.SmoothPixmapTransform)
+    p.drawImage(QRectF(1, 1, sw, sh), img)
+    p.end()
+    mv = memoryview(small.bits()).cast("B")
+    stride, W, H = small.bytesPerLine(), sw + 2, sh + 2
+    solid = [[False] * W for _ in range(H)]
+    for y in range(H):
+        for x in range(W):
+            i = y * stride + x * 4
+            if mv[i + 3] >= 110:
+                solid[y][x] = True
+                mv[i + 3] = 255
+            else:
+                mv[i + 3] = 0
+    for y in range(H):
+        for x in range(W):
+            if not solid[y][x] and any(0 <= y + dy < H and 0 <= x + dx < W and solid[y + dy][x + dx]
+                                       for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+                i = y * stride + x * 4
+                mv[i], mv[i + 1], mv[i + 2], mv[i + 3] = 60, 40, 52, 255     # BGRA: 진한 테두리
+    big = small.scaled(W * block, H * block, Qt.IgnoreAspectRatio, Qt.FastTransformation)
+    return big, (block, block)
+
+
+def _neon(img: QImage, hue: float):
+    """네온: 몸은 어둡게, 실루엣 둘레에 빛나는 선과 번짐. (그림, 발 위치 이동)"""
+    neon = QColor.fromHsvF(hue % 1.0, 0.55, 1.0)
+    nr, ng, nb = neon.red(), neon.green(), neon.blue()
+    body = _map_pixels(img, lambda r, g, b, a: (int(14 + r * 0.32), int(14 + g * 0.32), int(30 + b * 0.34), a))
+    w, h = img.width(), img.height()
+    k = 3                                                          # 실루엣은 1/3 크기에서 찾음 (빠르게)
+    sw, sh = max(1, w // k), max(1, h // k)
+    small = img.scaled(sw, sh, Qt.IgnoreAspectRatio, Qt.SmoothTransformation).convertToFormat(QImage.Format_ARGB32)
+    mv = memoryview(small.bits()).cast("B")
+    stride = small.bytesPerLine()
+    solid = [[mv[y * stride + x * 4 + 3] >= 90 for x in range(sw)] for y in range(sh)]
+    edge = QImage(sw, sh, QImage.Format_ARGB32)
+    edge.fill(Qt.transparent)
+    ev = memoryview(edge.bits()).cast("B")
+    es = edge.bytesPerLine()
+    for y in range(sh):
+        for x in range(sw):
+            if solid[y][x] and any(not (0 <= y + dy < sh and 0 <= x + dx < sw) or not solid[y + dy][x + dx]
+                                   for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))):
+                i = y * es + x * 4
+                ev[i], ev[i + 1], ev[i + 2], ev[i + 3] = nb, ng, nr, 255
+    line = edge.scaled(w, h, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    glow = edge.scaled(max(1, sw // 3), max(1, sh // 3), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    m = 12                                                         # 번짐이 잘리지 않게 여백
+    out = QImage(w + 2 * m, h + 2 * m, QImage.Format_ARGB32_Premultiplied)
+    out.fill(Qt.transparent)
+    p = QPainter(out)
+    p.setRenderHint(QPainter.SmoothPixmapTransform)
+    p.setOpacity(0.85)
+    p.drawImage(QRectF(0, 0, w + 2 * m, h + 2 * m), glow)
+    p.setOpacity(1.0)
+    p.drawImage(m, m, body)
+    p.setCompositionMode(QPainter.CompositionMode_Plus)
+    p.drawImage(m, m, line)
+    p.drawImage(m, m, line)
+    p.end()
+    return out, (m, m)
+
+
 def transform_for(char: str, skin: str) -> Callable[[QImage], QImage] | None:
+    if skin in STYLES:
+        if skin == "pixel":
+            base = image_sprites(char)
+            block = max(4, round(2.4 / base.scale)) if base is not None else 7   # 화면에서 한 칸이 2~3px
+            return lambda img: _pixelate(img, block)
+        if skin == "neon":
+            spec = OUTFIT.get(char)
+            hue = 280 / 360 if spec is None or spec[0] == "dark" else _center(spec[0])
+            return lambda img: _neon(img, hue)
+        fn = _pastel_fn if skin == "pastel" else _sketch_fn
+        return lambda img: _map_pixels(img, fn)
     if skin in FILTERS:
         fn = _filter_fn(skin)
     elif char in OUTFIT:

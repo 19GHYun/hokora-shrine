@@ -635,7 +635,7 @@ class ShrinePanel(QWidget):
         self.w_view = "skin"                                  # 옷 / 이펙트 중 하나만 보여서 창이 너무 길어지지 않게
         vrow = QHBoxLayout()
         self.view_btns = {}
-        for key, label in (("skin", "👘 옷"), ("fx", "✨ 이펙트")):
+        for key, label in (("skin", "👘 옷"), ("style", "🎨 그림체"), ("fx", "✨ 이펙트")):
             b = QPushButton(label, objectName="ghost")
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda _=False, key=key: self._wview(key))
@@ -1067,7 +1067,8 @@ class ShrinePanel(QWidget):
             self._role(b, "small" if key == self.w_view else "ghost")
         ch = self.w_char
         worn = s.skins.get(ch)
-        skins = [None] + wardrobe.skins_of(ch)
+        kinds = ("style",) if self.w_view == "style" else ("color", "filter", "art")
+        skins = [None] + wardrobe.skins_of(ch, kinds)
         for i, tile in enumerate(self.skin_tiles):
             tile.setVisible(i < len(skins))
         for tile, skin in zip(self.skin_tiles, skins):
@@ -1100,15 +1101,24 @@ class ShrinePanel(QWidget):
 
     def _wview(self, key: str) -> None:
         self.w_view = key
-        self.skin_box.setVisible(key == "skin")
+        self.skin_box.setVisible(key in ("skin", "style"))   # 옷과 그림체는 같은 칸을 같이 씀
         self.fx_box.setVisible(key == "fx")
         self._refresh_wardrobe()
+        self._wrelayout()
+
+    def _wrelayout(self) -> None:
+        """보이는 칸 수가 바뀌면 칸 묶음 → 페이지 → 창 순서로 높이를 다시 맞춤."""
+        for box in (self.skin_box, self.fx_box):
+            box.layout().invalidate()
+            box.layout().activate()
+            box.adjustSize()
         self.fx_box.parentWidget().layout().activate()
         self._fit_tab(self.tabs.currentIndex())
 
     def _pick_char(self, key: str) -> None:
         self.w_char = key
         self._refresh_wardrobe()
+        self._wrelayout()
 
     def _wclick(self, payload: tuple) -> None:
         what, value = payload
