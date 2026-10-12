@@ -229,3 +229,87 @@ python tools/import_sheet.py 걷기.png reimu@yukata --preset walk
 | `school` | 교복 | `a Japanese sailor school uniform with a red neckerchief, loafers` |
 
 다른 이름도 되지만 화면에는 그 영어 이름 그대로 나옵니다 (`hokora/wardrobe.py` 의 `ART_NAMES` 에 한글 이름 추가).
+
+## 계절 한정 장식 시트 (9개)
+
+`hokora/sprites/props/_preview.png`(지금 장식들)를 그림체 참고용으로 첨부합니다. 초록이 많아서 배경은 자홍입니다.
+
+```
+Using the attached image ONLY as an art style reference (thick soft dark-brown outline,
+flat colors with gentle shading, cute chibi game-asset style, same scale as those props),
+draw 9 small seasonal Japanese decoration props as ONE sheet, 3 rows x 3 columns,
+each prop standing on its own bottom line, with clear magenta space between them so nothing touches:
+1. A kadomatsu (New Year bamboo and pine decoration in a straw-wrapped base).
+2. A cute snowman with a red scarf and a small bucket on its head.
+3. A small Christmas tree with colorful ornaments and a gold star on top.
+4. A pair of tiny hina dolls (emperor and empress) on a small two-step red stand.
+5. Koinobori: three carp streamers (black, red, blue) flying on a tall wooden pole.
+6. A tanabata bamboo branch in a small stand, with colorful paper wish strips hanging from it.
+7. Three sunflowers in a terracotta pot.
+8. Tsukimi: a pyramid of white moon-viewing dango on a small wooden stand, with pampas grass.
+9. A carved Halloween jack-o'-lantern pumpkin wearing a small witch hat.
+Background: solid flat pure magenta (#FF00FF) everywhere. No text, no shadows, no grid lines, no ground.
+```
+
+```
+python tools/import_sheet.py 계절장식.png props --names kadomatsu,snowman,xmas_tree,hina,koinobori,tanabata,sunflower,tsukimi,pumpkin --append
+```
+
+## 신사 스킨 시트 (4채)
+
+`docs/photo.png`(지금 신사가 나온 사진)를 그림체 참고용으로 첨부합니다.
+
+```
+Using the attached image ONLY as an art style reference (thick soft dark-brown outline,
+flat colors with gentle shading, cute chibi game-asset style), draw 4 small Japanese shrine buildings
+as ONE sheet, 2 rows x 2 columns, all the same size, each standing on its own small stone base
+at the bottom of its cell, seen from the front and slightly from the right,
+with clear magenta space between them so nothing touches:
+1. Moriya Shrine style: a wooden shrine hall with a teal-blue roof, a thick shimenawa rope,
+   and two small onbashira log pillars on both sides.
+2. A snowy shrine: a red shrine hall with thick white snow piled on the roof, small icicles,
+   and a little snow-covered stone lantern beside it.
+3. A cherry blossom shrine: a red shrine hall with two small pale-pink cherry trees on both sides
+   and petals scattered on the roof.
+4. A tiny Scarlet Devil Mansion: a small red-brick western mansion with a clock tower,
+   a dark red roof and small bat-shaped decorations.
+No people, no animals, no grass, no sky.
+Background: solid flat pure magenta (#FF00FF) everywhere. No text, no shadows, no grid lines.
+```
+
+```
+python tools/import_sheet.py 신사스킨.png shrines --names moriya,snowy,sakura,scarlet --grid 2x2
+```
+
+## 새 손님: 니토리 · 코이시 · 테위
+
+손님마다 2장입니다. 먼저 **새 캐릭터 기준 그림** 프롬프트(위)로 서 있는 그림을 뽑고
+(그림체 참고로 `hokora/sprites/reimu/idle_0.png` 첨부), 그 그림을 첨부해서 **손님 시트** 프롬프트를 뽑습니다.
+
+| 손님 | 배경 | `[캐릭터 설명]` | `[손님 특기]` |
+| --- | --- | --- | --- |
+| 니토리 | `magenta (#FF00FF)` | `Kawashiro Nitori from Touhou Project: short blue hair in two small pigtails tied with red bead hair ties, a green cap, blue eyes, a blue-and-teal outfit with many pockets and a round key pendant on the chest, a big green backpack, blue boots.` | `Pulling a wrench and a small gadget out of her backpack, grinning proudly (showing off her inventions)` |
+| 코이시 | `magenta (#FF00FF)` | `Komeiji Koishi from Touhou Project: short wavy pale grey-green hair, a black hat with a yellow ribbon, green eyes, a yellow blouse, a dark green skirt with a small flower pattern, a closed purple third eye at her chest connected by thin purple cords that wrap loosely around her body, a soft absent-minded smile.` | `Tiptoeing sneakily with a finger on her lips (9), then popping out with both arms wide and a playful "boo!" face (10)` |
+| 테위 | `green (#00FF00)` | `Inaba Tewi from Touhou Project: short wavy black hair, floppy white rabbit ears, red eyes, a short pink dress with a frilly hem, a carrot necklace, bare feet.` | `Holding a small shovel with a mischievous grin (digging a pitfall trap)` |
+
+```
+python tools/import_sheet.py 니토리.png nitori --preset guest
+python tools/import_sheet.py 코이시.png koishi --preset guest
+python tools/import_sheet.py 테위.png tewi --preset guest
+```
+
+칸끼리 붙어 있으면 `--grid 3x4` 를 더합니다.
+
+## 홍보 배너 (README·릴리스·SNS)
+
+`docs/photo.png` 와 `docs/characters.png` 를 첨부합니다. 글자는 나중에 코드로 얹으니 그리지 않게 합니다.
+
+```
+Using the attached images as the exact character and art style reference (cute chibi plush-style
+characters with thick soft outlines), draw a wide banner illustration, aspect ratio 2:1 (1280x640):
+the same characters gathered happily around a small red Japanese shrine and a short row of red torii gates,
+all standing on top of a Windows taskbar at the bottom of a computer desktop.
+Cozy early-evening sky with soft pink and orange clouds, a few cherry blossom petals floating.
+Keep the left third of the image calm and mostly empty sky (space for a title).
+Do NOT write any text, letters, logos or watermarks anywhere.
+```
