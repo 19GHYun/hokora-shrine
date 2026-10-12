@@ -55,11 +55,17 @@ PLAN = {
     "aya": [("Aya2.png", GUEST, True)],
     "suika": [("suika2.png", GUEST + " --grid 3x4", True)],
     "props": [("item1.png", "sakura,lantern,fox,omikuji_rack,ema_rack,umbrella,temizuya,furin,saisen_box", True),
-              ("1.png", "kadomatsu,snowman,xmas_tree,hina,koinobori,tanabata,sunflower,tsukimi,pumpkin", False)],
+              ("1.png", "kadomatsu,snowman,xmas_tree,hina,koinobori,tanabata,sunflower,tsukimi,pumpkin", False),
+              ("mistia_item.png", "yatai", False)],
     "shrines": [("2.png", "moriya,snowy,sakura,scarlet --grid 2x2", True)],
     # 니토리: 다시 넣으면 몇 컷의 모자 위에 위 칸 장화 끝이 붙어 들어옴 → 맨 위 몇 줄을 지워야 함
     "nitori": [("3_1_1.png", GUEST + " --grid 3x4", True)],
     "tewi": [("3_3_1.png", GUEST + " --grid 3x4", True)],
+    "youmu": [("youmu_1.png", "preset:move", True),
+              ("youmu_2.png", "sit_0,-,fall,happy_0,happy_1,happy_2,happy_3,held_0,held_1,held_2", False),
+              ("youmu_3.png", "preset:life --grid 3x3", False)],
+    "yuyuko": [("yuyuko_1.png", GUEST + " --grid 3x4", True)],
+    "mystia": [("mistia_1.png", GUEST + " --grid 3x4", True)],
     "koishi": [("3_2_1.png", "idle_0,idle_1,blink,bow,-,walk_0,walk_1,walk_2,walk_3,skill_0,skill_1,caught,happy", True)],
 }
 

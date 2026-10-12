@@ -74,10 +74,15 @@
     "pumpkin": [
       84,
       174
+    ],
+    "yatai": [
+      124,
+      206
     ]
   },
   "sources": [
     "item1.png",
-    "1.png"
+    "1.png",
+    "mistia_item.png"
   ]
 }

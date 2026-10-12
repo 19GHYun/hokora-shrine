@@ -37,7 +37,7 @@ PICKUP_WEIGHT = 3
 CLOTH_GAIN = {"N": 1, "R": 3, "SR": 10, "SSR": 40}       # 중복 → 옷감
 CLOTH_COST = {"N": 10, "R": 30, "SR": 100, "SSR": 300}   # 옷감 → 원하는 것 교환
 SHORT = {"reimu": "레이무", "marisa": "마리사", "sakuya": "사쿠야", "cirno": "치르노", "sanae": "사나에",
-         "remilia": "레밀리아", "flandre": "플랑드르"}
+         "remilia": "레밀리아", "flandre": "플랑드르", "youmu": "요우무"}
 
 # 캐릭터 → 옷 색 범위: (색상 범위(도) 또는 "dark", 최소 채도, 최소 밝기, 최대 채도, 최대 밝기)
 OUTFIT = {
@@ -48,6 +48,7 @@ OUTFIT = {
     "sanae": ((200, 250), 0.30, 0.20, 1.0, 1.0),      # 파란 치마
     "remilia": ((330, 358), 0.10, 0.55, 1.0, 1.0),    # 분홍 드레스·빨간 리본 (살색 10~20도는 빼고)
     "flandre": ((335, 20), 0.40, 0.30, 1.0, 1.0),     # 빨간 옷
+    "youmu": ((110, 170), 0.20, 0.15, 1.0, 1.0),      # 초록 조끼·치마
 }
 # 색 스킨: id → (이름, 바꿀 색상(도, None 이면 무채색), 채도 배수, 밝기 배수, 등급)
 COLORS = {
@@ -70,6 +71,7 @@ CHAR_COLORS = {
     "sanae": ["red", "orange", "purple", "black"],
     "remilia": ["sky", "mint", "purple", "black"],
     "flandre": ["blue", "green", "purple", "black"],
+    "youmu": ["blue", "purple", "red", "black"],
 }
 FILTERS = {"mono": ("흑백", "R"), "ghost": ("유령", "SR"), "silver": ("은빛", "SR"), "gold": ("금빛", "SSR")}
 # 그림체: 지금 그림을 코드로 다른 그림체처럼 (도트·수채화·연필 스케치·네온)

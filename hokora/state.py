@@ -146,6 +146,8 @@ class GameState:
     nitori_until: float = 0.0        # 니토리의 증기 선풍기: 이때까지 수입 ×1.5
     koishi_found: int = 0
     tewi_luck: int = 0
+    yuyuko_fed: int = 0              # 유유코를 배불리 먹인 횟수 → 3번이면 요우무
+    mystia_until: float = 0.0        # 미스티아의 장어구이: 이때까지 수입 ×1.3
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
     @property

@@ -55,6 +55,7 @@ def diary_lines(s: GameState, seconds: float, start: float, rng: random.Random |
         "sanae": [f"사나에가 기적을 {n(1)}번 일으켰다.", "사나에가 레이무에게 포교 이야기를 늘어놓았다."],
         "remilia": ["레밀리아가 양산을 쓰고 신사를 둘러봤다."],
         "flandre": ["플랑드르가 뭔가를 부쉈다… 다행히 신사는 멀쩡하다.", "플랑드르가 언니를 졸졸 따라다녔다."],
+        "youmu": ["요우무가 신사 정원수를 반듯하게 다듬었다.", "요우무가 반령과 함께 툇마루에서 수행했다."],
     }
     if "remilia" in s.unlocked and _night_overlap(start, start + seconds):
         pool["remilia"].append("레밀리아가 밤새 신사 지붕 위에서 달을 봤다.")
@@ -70,6 +71,10 @@ def diary_lines(s: GameState, seconds: float, start: float, rng: random.Random |
         guests.append("마당에 웬 구멍이… 테위의 짓이 틀림없다.")
     if s.guest_visits.get("koishi"):
         guests.append("누군가 다녀간 것 같은데… 아무도 기억하지 못한다.")
+    if s.guest_visits.get("yuyuko"):
+        guests.append("유유코가 공양물 냄새를 맡고 기웃거렸다.")
+    if s.guest_visits.get("mystia"):
+        guests.append("밤사이 신사 앞에서 장어 굽는 냄새가 났다.")
     if s.guest_visits.get("nitori"):
         guests.append("니토리가 신사 앞에 노점을 폈다가 접고 갔다.")
     if guests and rng.random() < 0.5:

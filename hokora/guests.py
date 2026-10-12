@@ -20,12 +20,13 @@ import random
 import time
 from typing import TYPE_CHECKING, Callable
 
-from PySide6.QtCore import QAbstractAnimation, QPointF, QPropertyAnimation, Qt, QTimer
+from PySide6.QtCore import QAbstractAnimation, QPointF, QPropertyAnimation, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
 from . import affection as aff
-from . import omamori, wardrobe
+from . import omamori, season, wardrobe
+from .decor import decor_image
 from .bubble import say
 from .news import NewsCard, answer_for, make_article
 from .pet import RUN_SPEED, PetWindow
@@ -47,6 +48,8 @@ VISITS = {
     "tewi": (("tewi",), 1),
     "koishi": (("koishi",), 2),
     "nitori": (("nitori",), 3),
+    "yuyuko": (("yuyuko",), 2),
+    "mystia": (("mystia",), 1),        # 밤에만
 }
 VISIT_CHECK = 60.0        # 이 간격으로 손님이 올지 주사위
 VISIT_CHANCE = 0.15
@@ -67,6 +70,24 @@ TEWI_STAY = 40.0
 KOISHI_STAY = 60.0
 KOISHI_ALPHA = 0.22       # 코이시가 보이는 정도 (무의식 — 거의 투명)
 NITORI_STAY = 70.0
+YUYUKO_STAY = 75.0
+YUYUKO_FOODS = {  # 키 → (아이콘, 이름, 배부름, 값(× 신사 단계)). 배부름 100 이면 만족
+    "onigiri": ("🍙", "주먹밥", 20, 50),
+    "dango": ("🍡", "경단", 35, 120),
+    "bento": ("🍱", "도시락", 60, 250),
+}
+MYSTIA_STAY = 90.0
+MYSTIA_MENU = {  # 키 → (아이콘, 이름, 설명)
+    "kabayaki": ("🐟", "장어구이", "30분 동안 새전 수입 ×1.3"),
+    "oden": ("🍢", "오뎅", "친구 모두 호감도 +2"),
+    "song": ("🎵", "미스티아의 노래", "옷감 +10, 다들 신나게"),
+}
+
+
+def mystia_price(s, key: str) -> int:
+    if key == "kabayaki":
+        return max(150, s.income_per_min * 40)
+    return (100 if key == "oden" else 150) * s.shrine_level
 NITORI_GOODS = {  # 니토리 노점: 키 → (아이콘, 이름, 설명). 들를 때마다 셋을 골라 펼침
     "fan": ("⚡", "증기 선풍기", "30분 동안 새전 수입 ×1.5"),
     "cloth": ("🧵", "옷감 묶음", "옷감 +30"),
@@ -96,6 +117,8 @@ GUEST_TALK = {
     "tewi": ["행운이 필요해? 대가는 당근이야~", "함정? 무슨 함정~?", "이나바 테위, 오래 산 토끼야!"],
     "koishi": ["……어라, 나 보여?", "무의식이 이끄는 대로~", "언니한테는 비밀이야."],
     "nitori": ["맹우! 뭐 필요한 거 있어?", "갓파의 기술은 세계 제일!", "오이 있으면 줘~"],
+    "yuyuko": ["배고파~ 뭐 먹을 거 없어?", "요우무는 잘 지내려나~", "꽃구경엔 경단이지~"],
+    "mystia": ["어서 와요~ 오늘은 장어가 맛있어요!", "♪ 밤참은 포장마차에서~", "참새는 굽지 않아요!"],
 }
 APOLOGY = {
     "sunny": "들켰다~ 미안해, 돌려줄게!",
@@ -111,18 +134,32 @@ GUEST_ABOUT = {  # 도감: (아직 못 만났을 때 힌트, 만난 뒤 설명)
     "tewi": ("행운을 나눠 주는 장난꾸러기 토끼", "함정을 파요. 쓰다듬으면 오미쿠지 행운"),
     "koishi": ("무의식으로 다니는 사토리 요괴", "거의 투명하게 숨어 있어요 — 찾아서 클릭!"),
     "nitori": ("발명품을 파는 갓파 엔지니어", "노점에서 선풍기·옷감·뽑기를 팔아요"),
+    "yuyuko": ("배고픈 명계의 아가씨", "먹을 걸 대접하면 새전을 두고 가요 (3번이면 요우무가)"),
+    "mystia": ("밤에만 여는 포장마차 주인", "장어구이·오뎅·노래를 팔아요"),
 }
 INTERVIEW_Q = ["최근 새전 사정은 어떤가요?", "독자들께 한 말씀 부탁드려요!", "요즘 신사에 무슨 일이 있었나요?"]
 DRINK_WITH = {  # 스이카가 한 잔 권했을 때
     "reimu": "…낮술은 좀 그렇지 않아?", "marisa": "오, 좋지! 한 잔만!", "cirno": "얼음 넣어 줄까?",
     "sakuya": "근무 중이라서요.", "sanae": "미성년자는 안 돼요!", "remilia": "와인이라면 몰라도.",
-    "flandre": "나도 마실래!",
+    "flandre": "나도 마실래!", "youmu": "근무 중이라… 한 잔만이요.",
 }
 
 
 def available(s) -> list[str]:
-    """지금 신사 단계에 찾아올 수 있는 방문 종류."""
-    return [k for k, (_, stage) in VISITS.items() if s.shrine_level >= stage]
+    """지금 신사 단계에 찾아올 수 있는 방문 종류 (미스티아는 밤에만)."""
+    return [k for k, (_, stage) in VISITS.items()
+            if s.shrine_level >= stage and (k != "mystia" or season.is_night())]
+
+
+def fade(w: QWidget, to: float, seconds: float, then: Callable[[], None] | None = None) -> None:
+    """창을 서서히 나타내거나 사라지게."""
+    anim = QPropertyAnimation(w, b"windowOpacity", w)
+    anim.setDuration(int(seconds * 1000))
+    anim.setStartValue(w.windowOpacity())
+    anim.setEndValue(to)
+    if then is not None:
+        anim.finished.connect(then)
+    anim.start(QAbstractAnimation.DeleteWhenStopped)
 
 
 def guest_stage(key: str) -> int:
@@ -216,6 +253,31 @@ class Pit(_Overlay):
         p.end()
 
 
+class Stall(QWidget):
+    """미스티아의 포장마차 (클릭은 통과)."""
+
+    H = 96
+
+    def __init__(self, cx: float, ground: float, k: float):
+        super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint
+                         | Qt.NoDropShadowWindowHint | Qt.WindowTransparentForInput | Qt.WindowDoesNotAcceptFocus)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_ShowWithoutActivating, True)
+        self.setAttribute(Qt.WA_DeleteOnClose, True)
+        self.img = decor_image("yatai")
+        h = self.H * k
+        w = self.img.width() * h / max(1, self.img.height())
+        self.setFixedSize(max(10, round(w)), round(h) + 2)
+        self.move(round(cx - w / 2), round(ground - h))
+        self.setWindowOpacity(0.0)
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        p.drawImage(QRectF(0, 0, self.width(), self.height() - 2), self.img)
+        p.end()
+
+
 class Guest:
     """손님 한 명 = PetWindow 하나 + 각본용 메모."""
 
@@ -266,13 +328,7 @@ class Guest:
         self.pet.facing = 1 if x > self.pet.pos_x else -1
 
     def fade(self, to: float, seconds: float, then: Callable[[], None] | None = None) -> None:
-        anim = QPropertyAnimation(self.pet, b"windowOpacity", self.pet)
-        anim.setDuration(int(seconds * 1000))
-        anim.setStartValue(self.pet.windowOpacity())
-        anim.setEndValue(to)
-        if then is not None:
-            anim.finished.connect(then)
-        anim.start(QAbstractAnimation.DeleteWhenStopped)
+        fade(self.pet, to, seconds, then)
 
 
 class Visit:
@@ -1161,8 +1217,221 @@ class NitoriVisit(Visit):
         self.say(gu, "우클릭하면 물건을 볼 수 있어!" if self.phase == "shop" else "갓파 노점이야~")
 
 
+# ── 유유코: 배고파~ 먹을 걸 대접하면 새전, 3번 배불리 먹이면 요우무가 찾아옴 ──
+class YuyukoVisit(Visit):
+    kind = "yuyuko"
+
+    def __init__(self, visits: "Visits"):
+        super().__init__(visits)
+        g, sx = self.ground, self.game.shrine.pos_x
+        side = random.choice((-1, 1))
+        self.yuyuko = self.spawn("yuyuko", min(max(sx + side * 110, g.x1 + 40), g.x2 - 40))
+        self.yuyuko.fade(0.92, 2.0)                           # 유령이라 스르르
+        self.yuyuko.face(sx)
+        now = time.monotonic()
+        self.full = 0
+        self.phase, self.leave_at, self.beg_at = "hungry", now + YUYUKO_STAY, now + 1.5
+        self._held = False
+        self._youmu_said = False
+
+    def update(self, now: float) -> None:
+        y = self.yuyuko
+        if y.gone:
+            return
+        p = y.pet
+        if p.state == "held":
+            self._held = True
+        if not y.ready:
+            return
+        if self._held:
+            self._held = False
+            p.act("caught", 1.2)
+            self.say(y, "어머, 들어 올리면 배가 더 고파져~")
+            self.at(1.2, lambda: self.phase == "hungry" and p.act("idle", 99))
+        if not self._youmu_said:                              # 요우무가 있으면 한마디
+            youmu = next((o for o in self.game.pets if o.ch.key == "youmu" and o.grounded), None)
+            if youmu is not None and abs(youmu.pos_x - p.pos_x) < 500:
+                self._youmu_said = True
+                self.game.events._say(youmu, "유유코 님! 또 드시러 오셨어요?")
+        if self.phase != "hungry":
+            return
+        if now >= self.leave_at:
+            self.phase = "bye"
+            self.say(y, "배고파서 돌아갈래~ 다음엔 맛있는 거 줘~", 3.0)
+            self.at(2.0, lambda: self.leave(y, 1.5))
+        elif now >= self.beg_at:
+            self.beg_at = now + random.uniform(12, 18)
+            self.say(y, random.choice(["배고파~ 뭐 먹을 거 없어?", "공양물은 없나~?", "우클릭하면 대접할 수 있어~"]))
+
+    def price(self, key: str) -> int:
+        return YUYUKO_FOODS[key][3] * self.game.state.shrine_level
+
+    def fill_menu(self, gu: Guest, menu: "QMenu") -> None:
+        if self.phase != "hungry":
+            return
+        menu.addSeparator()
+        head = menu.addAction(f"🍽 대접하기  (배부름 {min(self.full, 100)} / 100)")
+        head.setEnabled(False)
+        for key, (icon, name, fill, _) in YUYUKO_FOODS.items():
+            price = self.price(key)
+            a = menu.addAction(f"{icon} {name}  (배부름 +{fill})   새전 {price:,}", lambda key=key: self.feed(key))
+            a.setEnabled(self.game.state.saisen >= price)
+
+    def feed(self, key: str) -> bool:
+        g, s = self.game, self.game.state
+        price = self.price(key)
+        if self.phase != "hungry" or s.saisen < price:
+            return False
+        icon, name, fill, _ = YUYUKO_FOODS[key]
+        s.saisen -= price
+        g.shrine.set_saisen(s.saisen)
+        g.shrine.pop(f"-{price:,}")
+        self.full += fill
+        p = self.yuyuko.pet
+        p.act("skill", 2.4)                                   # 냠냠 → 배 통통
+        self.say(self.yuyuko, random.choice([f"{icon} 냠냠~ 맛있어!", f"{icon} 와아, {aff.josa(name, '이다', '다')}~!",
+                                             f"{icon} 더 줘~"]))
+        if self.full >= 100:
+            self.phase = "full"
+            self.at(2.5, self._satisfied)
+        else:
+            self.at(2.4, lambda: self.phase == "hungry" and p.act("idle", 99))
+        log.info("유유코 대접: %s (%d, 배부름 %d)", key, price, self.full)
+        g.save()
+        return True
+
+    def _satisfied(self) -> None:
+        g, s, y = self.game, self.game.state, self.yuyuko
+        y.pet.act("happy", 99)
+        amount = max(100, s.income_per_min * 25)
+        s.add_saisen(amount)
+        s.yuyuko_fed += 1
+        g.shrine.set_saisen(s.saisen)
+        g.shrine.pop(f"+{amount:,}")
+        self.say(y, f"배불러~ 고마워! 새전 +{amount:,}", 3.0)
+        if s.yuyuko_fed == 3 and "youmu" not in s.unlocked:
+            self.at(3.2, lambda: self.say(y, "답례로 요우무를 보내 줄게~", 3.0))
+            self.at(5.0, g.check_unlocks)
+        self.at(6.5, lambda: self.leave(y, 1.5))
+        g.save()
+
+    def on_click(self, gu: Guest) -> None:
+        self.say(gu, random.choice(["후후~ 배고파~", "우클릭하면 맛있는 걸 줄 수 있어~"]) if self.phase == "hungry"
+                 else "잘 먹었어~")
+
+
+# ── 미스티아: 밤의 포장마차 ──
+class MystiaVisit(Visit):
+    kind = "mystia"
+
+    def __init__(self, visits: "Visits"):
+        super().__init__(visits)
+        g, sx = self.ground, self.game.shrine.pos_x
+        self.side = 1 if (g.x2 - sx) > (sx - g.x1) else -1
+        stall_x = min(max(sx + self.side * 200, g.x1 + 80), g.x2 - 80)
+        self.stall = Stall(stall_x, g.y, self.game.scale)
+        self.effect(self.stall)
+        fade(self.stall, 1.0, 1.2)
+        self.mystia = self.spawn("mystia", stall_x - self.side * 70)
+        self.mystia.fade(1.0, 1.2)
+        self.mystia.face(stall_x)
+        now = time.monotonic()
+        self.sold: set[str] = set()
+        self.phase, self.leave_at, self.shout_at = "open", now + MYSTIA_STAY, now + 1.5
+        self._held = False
+
+    def _grill(self, seconds: float = 2.4) -> None:
+        p = self.mystia.pet
+        p.act("skill", seconds)                               # 부채질 → 꼬치 자랑
+        self.at(seconds, lambda: self.phase == "open" and p.state not in ("held", "fall") and p.act("idle", 99))
+
+    def update(self, now: float) -> None:
+        m = self.mystia
+        if m.gone:
+            return
+        p = m.pet
+        if p.state == "held":
+            self._held = True
+        if not m.ready:
+            return
+        if self._held:
+            self._held = False
+            p.act("caught", 1.2)
+            self.say(m, "꺄! 장어 탄다구요~!")
+            self.at(1.2, lambda: self.phase == "open" and p.act("idle", 99))
+        if self.phase != "open":
+            return
+        if now >= self.leave_at or len(self.sold) == len(MYSTIA_MENU):
+            self._bye()
+        elif now >= self.shout_at:
+            self.shout_at = now + random.uniform(12, 18)
+            self._grill()
+            self.say(m, random.choice(["장어 구워요~ 맛있는 장어!", "♪ 밤참 먹고 가요~", "우클릭해서 주문해요!"]))
+
+    def _bye(self) -> None:
+        self.phase = "bye"
+        self.say(self.mystia, "오늘 장사 끝~ 또 올게요!")
+        self.at(1.5, lambda: self.leave(self.mystia, 1.2))
+        self.at(1.5, lambda: fade(self.stall, 0.0, 1.2, self.stall.close))
+
+    def cancel(self) -> None:
+        if self.phase != "bye":
+            self.phase = "bye"
+            fade(self.stall, 0.0, 0.4, self.stall.close)
+        super().cancel()
+
+    def price(self, key: str) -> int:
+        return mystia_price(self.game.state, key)
+
+    def fill_menu(self, gu: Guest, menu: "QMenu") -> None:
+        if self.phase != "open":
+            return
+        menu.addSeparator()
+        head = menu.addAction("🏮 미스티아 포장마차")
+        head.setEnabled(False)
+        for key, (icon, name, desc) in MYSTIA_MENU.items():
+            price = self.price(key)
+            sold = key in self.sold
+            a = menu.addAction(f"{icon} {name} — 오늘은 다 팔렸어요" if sold else f"{icon} {name}  ({desc})   새전 {price:,}",
+                               lambda key=key: self.buy(key))
+            a.setEnabled(not sold and self.game.state.saisen >= price)
+
+    def buy(self, key: str) -> bool:
+        g, s = self.game, self.game.state
+        price = self.price(key)
+        if self.phase != "open" or key in self.sold or s.saisen < price:
+            return False
+        s.saisen -= price
+        self.sold.add(key)
+        g.shrine.set_saisen(s.saisen)
+        g.shrine.pop(f"-{price:,}")
+        if key == "kabayaki":
+            s.mystia_until = time.time() + 1800
+            line = "🐟 장어구이 나왔어요! 30분 동안 수입 ×1.3"
+            self._grill()
+        elif key == "oden":
+            for o in g.pets:
+                aff.add(s, o.ch.key, 2)
+                o.hearts.append([0.0, o.width() / 2, 40])
+            line = "🍢 오뎅 한 그릇씩~ 다들 더 친해졌어요!"
+        else:
+            s.cloth += 10
+            for o in g.pets:
+                if o.grounded:
+                    o.act("happy" if random.random() < 0.5 else "wave", 2.0)
+            line = "🎵 ♪ 라~ 라라~ 밤참은 포장마차~ ♪  (옷감 +10)"
+        self.say(self.mystia, line, 3.2)
+        log.info("미스티아 포장마차: %s (%d)", key, price)
+        g.save()
+        return True
+
+    def on_click(self, gu: Guest) -> None:
+        self.say(gu, "어서 와요~ 우클릭해서 주문해요!" if self.phase == "open" else "또 와요~")
+
+
 VISIT_CLASSES = {"fairies": FairyVisit, "aya": AyaVisit, "suika": SuikaVisit,
-                 "tewi": TewiVisit, "koishi": KoishiVisit, "nitori": NitoriVisit}
+                 "tewi": TewiVisit, "koishi": KoishiVisit, "nitori": NitoriVisit,
+                 "yuyuko": YuyukoVisit, "mystia": MystiaVisit}
 
 
 class Visits:

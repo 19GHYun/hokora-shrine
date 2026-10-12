@@ -18,6 +18,7 @@ PAT_BOOST = 5           # 인연 기원: 쓰다듬기 보상 배수
 NEWS_BOOST = 1.5        # 붕붕마루 신문 기사 효과: 수입 배수 (news.py)
 NEWS_SECONDS = 30 * 60
 FAN_BOOST = 1.5         # 니토리의 증기 선풍기
+EEL_BOOST = 1.3         # 미스티아의 장어구이
 
 
 @dataclass(frozen=True)
@@ -62,11 +63,17 @@ def income_multiplier(s: GameState) -> float:
         m *= season.NEW_YEAR_BOOST
     if fan_active(s):
         m *= FAN_BOOST
+    if eel_active(s):
+        m *= EEL_BOOST
     return m * (1 + omamori.bonus(s, "income"))
 
 
 def fan_active(s: GameState) -> bool:
     return s.nitori_until > time.time()
+
+
+def eel_active(s: GameState) -> bool:
+    return s.mystia_until > time.time()
 
 
 def news_active(s: GameState) -> bool:

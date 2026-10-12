@@ -30,7 +30,7 @@ log = logging.getLogger("Hokora.events")
 MEET_DIST = 36           # 이만큼 가까이 스치면 인사
 MEET_COOLDOWN = 45.0     # 같은 둘은 이 시간(초) 동안 다시 인사하지 않음
 SKILL_COOLDOWN = {"reimu": 90.0, "cirno": 120.0, "sakuya": 300.0,
-                  "sanae": 240.0, "flandre": 180.0, "remilia": 600.0}
+                  "sanae": 240.0, "flandre": 180.0, "remilia": 600.0, "youmu": 150.0}
 MIRACLE_SAISEN = 10
 TIME_STOP = 3.0
 THIEF_CHECK = 60.0       # 이 간격으로 도둑질할지 주사위
@@ -173,6 +173,9 @@ class Events:
                 pet.facing = 1 if targets[0].pos_x > pet.pos_x else -1
             self.game.later(0.6, lambda: self._blast(pet, targets))
             self._say(pet, random.choice(["와장창~!", "같이 놀자!", "꽈광!"]))
+        elif key == "youmu":
+            pet.act("skill", 1.4)
+            self.game.later(0.9, lambda: self._garden(pet))
         elif key == "remilia":
             if not can_draw(self.game.state) or self.game.state.fate_boost:
                 self._skill_at[key] = now - cool + 60    # 조작할 운명이 없으면 1분 뒤 다시
@@ -189,6 +192,16 @@ class Events:
         g.shrine.set_saisen(g.state.saisen)
         g.shrine.pop(f"+{MIRACLE_SAISEN}")
         self._say(sanae, "기적이 일어났어요!")
+        g.check_unlocks()
+
+    def _garden(self, youmu: "PetWindow") -> None:
+        """요우무의 정원 손질: 놓아 둔 장식이 많을수록 새전이 조금 더."""
+        g = self.game
+        gain = 5 + 3 * len(g.state.decor_pos)
+        g.state.add_saisen(gain)
+        g.shrine.set_saisen(g.state.saisen)
+        g.shrine.pop(f"+{gain}")
+        self._say(youmu, random.choice(["정원 손질 끝!", "베지 못하는 것은 거의 없다!", "가지를 반듯하게~"]))
         g.check_unlocks()
 
     def _blast(self, flan: "PetWindow", targets: list) -> None:

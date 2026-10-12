@@ -471,6 +471,10 @@ CHARACTERS: dict[str, Character] = {
         hair="#78CCF4", hair_dark="#56AEE0", eyes="#3478E0",
         dress="#4188EA", dress_dark="#2C63B8", sleeves="#FFFFFF", shoes="#3C4C70",
         side_locks=False, accessory_back=_cirno_bow, extra_body=_cirno_wings),
+    "youmu": Character(
+        key="youmu", name="콘파쿠 요우무",
+        hair="#E3E7F0", hair_dark="#BCC3D2", eyes="#5A6E8A",
+        dress="#3E7A4E", dress_dark="#2C5A38", sleeves="#FFFFFF", shoes="#5A3E2E"),
 }
 
 
@@ -490,6 +494,10 @@ GUESTS: dict[str, Character] = {
                       dress="#F4B6C8", dress_dark="#E094AA", sleeves="#F4B6C8", shoes="#F4D0C0"),
     "koishi": Character(key="koishi", name="코메이지 코이시", hair="#B8C8B4", hair_dark="#94A890", eyes="#4E9A48",
                         dress="#3E6A3A", dress_dark="#2C4E2A", sleeves="#F2C84E", shoes="#2A2226"),
+    "yuyuko": Character(key="yuyuko", name="사이교지 유유코", hair="#F2A0B4", hair_dark="#D97E94", eyes="#D9607E",
+                        dress="#A8C4E8", dress_dark="#86A6D0", sleeves="#A8C4E8", shoes="#F4D0C0"),
+    "mystia": Character(key="mystia", name="미스티아 로렐라이", hair="#F08AA8", hair_dark="#D46A8A", eyes="#C89030",
+                        dress="#7A5040", dress_dark="#5A3A2E", sleeves="#7A5040", shoes="#5A3A2E"),
     "nitori": Character(key="nitori", name="카와시로 니토리", hair="#4A7EC8", hair_dark="#3460A0", eyes="#3478E0",
                         dress="#4A86B8", dress_dark="#346890", sleeves="#4A86B8", shoes="#3C6A9A"),
 }

@@ -15,8 +15,8 @@ from . import daily, omamori, season, torii, wardrobe
 from .decor import decor_image
 from .guests import GUEST_ABOUT, VISITS, guest_stage
 from .omikuji import can_draw
-from .prayer import (FAN_BOOST, NEWS_BOOST, WISHES, blocked, fan_active, fmt_left, income_multiplier, left,
-                     news_active)
+from .prayer import (EEL_BOOST, FAN_BOOST, NEWS_BOOST, WISHES, blocked, eel_active, fan_active, fmt_left,
+                     income_multiplier, left, news_active)
 from .progress import UNLOCKS
 from .render import CHARACTERS, GUESTS, Pose, draw_character
 from .shrine import DRAW_STAGE, STAGE_SIZE
@@ -904,6 +904,8 @@ class ShrinePanel(QWidget):
             tags.append(f"설날 ×{season.NEW_YEAR_BOOST}")
         if fan_active(s):
             tags.append(f"선풍기 ×{FAN_BOOST:g}")
+        if eel_active(s):
+            tags.append(f"장어 ×{EEL_BOOST:g}")
         self.sub.setText(f"새전 {s.saisen:,}   ·   분당 새전 {s.income_per_min * boost:g}"
                          + (f"  ({', '.join(tags)})" if tags else ""))
         drawable = can_draw(s)
@@ -1073,7 +1075,7 @@ class ShrinePanel(QWidget):
         self.news_label.setText("\n".join(f"· {h}" for h in reversed(s.news[-3:]))
                                 or "아직 기사가 없어요. 신사가 2단계가 되면 기자가 취재하러 와요.")
         self.guest_stats.setText(f"붙잡은 요정 {s.fairies_caught}번   ·   찾아낸 코이시 {s.koishi_found}번   ·   "
-                                 f"스이카가 두고 간 새전 {s.suika_saisen:,}")
+                                 f"배불리 먹인 유유코 {s.yuyuko_fed}번   ·   스이카가 두고 간 새전 {s.suika_saisen:,}")
         self.guest_stats.setWordWrap(True)
         hours = s.runtime_sec / 3600
         self.stats.setText(f"모은 새전 {s.saisen_total:,}   ·   쓰다듬기 {s.pats:,}번   ·   함께한 시간 {hours:.1f}시간"

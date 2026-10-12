@@ -66,6 +66,9 @@ UNLOCKS: dict[str, Unlock] = {
         "flandre", "언니를 따라 플랑드르가 놀러 왔다!",
         (Goal("레밀리아 만나기", lambda s: 1 if "remilia" in s.unlocked else 0, 1, "명"),
          Goal("새전 도둑 잡기", lambda s: s.thief_caught, 3, "번"))),
+    "youmu": Unlock(
+        "youmu", "유유코 님의 심부름으로 요우무가 찾아왔다!",
+        (Goal("유유코를 배불리 먹이기 (손님)", lambda s: s.yuyuko_fed, 3, "번"),)),
 }
 
 

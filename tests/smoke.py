@@ -30,6 +30,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from hokora import app as hk  # noqa: E402
 from hokora import affection as aff  # noqa: E402
 from hokora import daily, guests, omamori, photo, play, prayer, torii, wardrobe  # noqa: E402
+from hokora.events import SKILL_COOLDOWN  # noqa: E402
 
 app = QApplication(sys.argv)
 app.setQuitOnLastWindowClosed(False)
@@ -56,6 +57,7 @@ s.unlocked = ["reimu", "marisa", "cirno", "sakuya", "sanae", "remilia", "flandre
 P = {p.ch.key: p for p in game.pets}
 ev = game.events
 ev._play_next = ev._thief_next_check = time.monotonic() + 1e9     # 저절로 생기는 일은 막고 시험에서만
+ev._skill_at = {k: time.monotonic() for k in SKILL_COOLDOWN}     # 특기도 시험에서만 (시간 정지가 끼어들지 않게)
 game.visits._next = time.monotonic() + 1e9
 RESULTS: list[tuple[str, bool, str]] = []
 G: dict = {}
@@ -85,6 +87,7 @@ def calm() -> None:
     for i, p in enumerate(game.pets):
         place(p, ground().x1 + 120 + i * 110)
         p._choose_next = lambda: None
+        p.frozen_until = 0.0                       # 사쿠야 시간 정지가 걸려 있으면 풂
 
 
 # ── 단계들 (함수, 다음 단계까지 기다릴 ms) ──
@@ -312,6 +315,47 @@ def t_nitori2():
         v.cancel()
 
 
+def t_yuyuko():
+    calm()
+    s.saisen = 10 ** 7
+    s.yuyuko_fed = 2
+    check("유유코 방문", game.visits.start("yuyuko"))
+    v = game.visits.visit
+    if v is not None:
+        check("유유코 대접 (도시락)", v.feed("bento") and v.full == 60)
+        v.feed("bento")
+        check("유유코 배부름", v.phase == "full", v.full)
+
+
+def t_yuyuko2():
+    check("유유코 3번 → 요우무 해금", s.yuyuko_fed == 3 and "youmu" in s.unlocked, (s.yuyuko_fed, "youmu" in s.unlocked))
+    if game.visits.visit:
+        game.visits.visit.cancel()
+
+
+def t_mystia():
+    calm()
+    check("미스티아 방문 (포장마차)", game.visits.start("mystia") and game.visits.visit.stall is not None)
+
+
+def t_mystia2():
+    v = game.visits.visit
+    a0 = aff.points(s, "reimu")
+    if v is not None:
+        check("장어구이 → 수입 ×1.3", v.buy("kabayaki") and prayer.eel_active(s))
+        check("오뎅 → 호감도 +2", v.buy("oden") and aff.points(s, "reimu") == a0 + 2)
+        v.cancel()
+    calm()
+    ev._skill_at.clear()
+    G["s_y"] = s.saisen
+    youmu = next((p for p in game.pets if p.ch.key == "youmu"), None)
+    check("요우무 특기", youmu is not None and ev.try_skill(youmu))
+
+
+def t_youmu():
+    check("요우무 정원 손질 새전", s.saisen > G["s_y"], s.saisen - G["s_y"])
+
+
 def t_end():
     app.quit()
 
@@ -319,7 +363,8 @@ def t_end():
 STEPS = [(t_core, 3000), (t_core2, 2500), (t_thief, 1600), (t_skill, 1800), (t_aff, 6000), (t_tag, 6000),
          (t_duel, 8500), (t_fairies, 8000), (t_fairies2, 17000), (t_aya, 20000), (t_suika, 2000),
          (t_shop, 1000), (t_season_shop, 12000), (t_tewi, 1500), (t_koishi, 7500), (t_nitori, 11000),
-         (t_nitori2, 1500), (t_end, 0)]
+         (t_nitori2, 1500), (t_yuyuko, 9000), (t_yuyuko2, 1500), (t_mystia, 2500), (t_mystia2, 1500),
+         (t_youmu, 0), (t_end, 0)]
 
 
 def run(i: int = 0) -> None:
