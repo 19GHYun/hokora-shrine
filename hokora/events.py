@@ -14,7 +14,7 @@ import random
 import time
 from typing import TYPE_CHECKING
 
-from . import omamori
+from . import omamori, weather
 from .bubble import say
 from .omikuji import can_draw
 from .prayer import charm_active
@@ -44,6 +44,7 @@ PLAY_CHANCE = 0.12       # → 평균 8분쯤에 한 번
 GUARD_CHANCE = 0.7       # 깨어 있는 메이링이 새전 도둑을 막을 확률
 DOZE_EVERY = (120.0, 240.0)   # 메이링이 조는 간격
 DOZE_FOR = (20.0, 40.0)
+GUST_EVERY = (100.0, 200.0)   # 풍우: 센 바람 간격
 
 
 class Events:
@@ -64,6 +65,7 @@ class Events:
         self._doze_until = 0.0
         self._doze_scolded = False
         self._guard_checked = False
+        self._gust_at = time.monotonic() + random.uniform(*GUST_EVERY)
 
     # ── 공통 ──
     def _say(self, pet: "PetWindow", text: str, seconds: float = 2.5) -> None:
@@ -80,6 +82,27 @@ class Events:
         self._thief_tick()
         self._play_tick()
         self._meiling_tick()
+        self._storm_tick()
+
+    # ── 풍우: 가끔 센 바람에 친구가 날아감 ──
+    def _storm_tick(self) -> None:
+        now = time.monotonic()
+        if now < self._gust_at:
+            return
+        self._gust_at = now + random.uniform(*GUST_EVERY)
+        if weather.current().key != "storm":
+            return
+        self.gust()
+
+    def gust(self) -> "PetWindow | None":
+        cands = [p for p in self.game.pets if p.grounded and p.on is not None and p.on < 0]
+        if not cands:
+            return None
+        p = random.choice(cands)
+        d = random.choice((-1, 1))
+        p._knock_off(d * random.uniform(220, 380), -random.uniform(380, 560))
+        self._say(p, random.choice(["바람이~!", "꺄아, 날아간다~!", "으아아 바람!"]))
+        return p
 
     # ── 메이링: 문 앞에서 꾸벅꾸벅 ──
     def _meiling(self):
@@ -164,6 +187,7 @@ class Events:
             near = [p for p in group if p is not a and 60 < abs(p.pos_x - a.pos_x) < 420]
             if near:
                 self.duel = Duel(self, a, random.choice(near))
+                self.game.cutin(a)
                 self.duel.destroyed.connect(lambda *_: setattr(self, "duel", None))
                 self.duel.show()
                 return True
@@ -255,6 +279,7 @@ class Events:
             self.game.state.fate_boost = True
             self._say(pet, "오늘의 운명은 내가 정했어.")
             log.info("레밀리아 운명 조작 → 다음 오미쿠지 대길·중길")
+        self.game.cutin(pet)
         return True
 
     def _miracle(self, sanae: "PetWindow") -> None:
@@ -366,6 +391,7 @@ class Events:
         g.shrine.pop(f"-{amount}")
         m.act("skill", 1.4)
         m.facing = 1 if g.shrine.pos_x > m.pos_x else -1
+        g.cutin(m)
         self._say(m, "잠깐 빌려갈게~!")
         self.thief_phase, self.thief_until = "steal", time.monotonic() + 1.4
         log.info("마리사가 새전 %d 훔침", amount)

@@ -25,7 +25,7 @@ from PySide6.QtGui import QColor, QPainter, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
 from . import affection as aff
-from . import omamori, season, wardrobe
+from . import omamori, season, wardrobe, weather
 from .decor import decor_image
 from .bubble import say
 from .news import NewsCard, answer_for, make_article
@@ -1597,9 +1597,11 @@ class Visits:
         if self._forced in VISITS:
             kind, self._forced = self._forced, ""
             self.start(kind)
-        elif random.random() < VISIT_CHANCE * (1 + omamori.bonus(g.state, "guest")):
+        elif random.random() < VISIT_CHANCE * (1 + omamori.bonus(g.state, "guest")) * weather.current().guests:
             kinds = available(g.state)
             if kinds:
+                if weather.current().key == "drizzle" and "fairies" in kinds and random.random() < 0.5:
+                    kinds = ["fairies"]                      # 안개비: 요정들이 장난치기 좋은 날
                 self.start(random.choice(kinds))
 
     def start(self, kind: str) -> bool:

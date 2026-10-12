@@ -5,7 +5,8 @@
 
 - 저장은 임시 폴더(APPDATA)에, 사진은 임시 폴더에 — 진짜 저장·사진 폴더·클립보드는 건드리지 않는다.
 - 마우스는 가짜 커서, 자리 비움(낮잠)은 끔.
-- 실제로 창을 띄우므로 2분쯤 화면 아래에서 캐릭터들이 움직인다.
+- 기본은 화면에 아무것도 띄우지 않고(오프스크린) 돈다. 화면에 띄워 보려면 HOKORA_SMOKE_SHOW=1.
+- 날씨는 '흐림'으로 고정 (바람·손님 배수가 다른 시험에 끼어들지 않게).
 끝나면 통과/실패를 출력하고, 실패가 있으면 종료 코드 1.
 """
 from __future__ import annotations
@@ -21,7 +22,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TMP = Path(tempfile.mkdtemp(prefix="hokora_smoke_"))
 os.environ.update(APPDATA=str(TMP / "appdata"), HOKORA_ALL="1", HOKORA_NAP_AFTER="999999",
-                  HOKORA_SEASON="summer", HOKORA_NIGHT="0")
+                  HOKORA_SEASON="summer", HOKORA_NIGHT="0", HOKORA_WEATHER="cloudy")
+if os.environ.get("HOKORA_SMOKE_SHOW") != "1":
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    os.environ.setdefault("QT_QPA_FONTDIR", "C:/Windows/Fonts")
 sys.path.insert(0, str(ROOT))
 
 from PySide6.QtCore import QPoint, Qt, QTimer  # noqa: E402
@@ -30,6 +34,8 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from hokora import app as hk  # noqa: E402
 from hokora import affection as aff  # noqa: E402
 from hokora import daily, guests, omamori, photo, play, prayer, torii, wardrobe  # noqa: E402
+from hokora import omikuji as hk_omikuji  # noqa: E402
+from hokora.state import GameState  # noqa: E402
 from hokora import events as hk_events  # noqa: E402
 from hokora.events import SKILL_COOLDOWN  # noqa: E402
 
@@ -418,6 +424,53 @@ def t_reisen():
     s.reisen_until = 0.0
 
 
+def t_weather():
+    calm()
+    base = prayer.income_multiplier(s)
+    for key, want in (("clear", 1.2), ("aurora", 2.0)):
+        os.environ["HOKORA_WEATHER"] = key
+        check(f"날씨 {key} 수입 ×{want}", abs(prayer.income_multiplier(s) / base - want) < 1e-9)
+    os.environ["HOKORA_WEATHER"] = "drizzle"
+    game._refresh_season()
+    check("안개비 연출", game.wfx.isVisible() and game.wfx.kind == "drizzle")
+    os.environ["HOKORA_WEATHER"] = "cloudy"
+    game._refresh_season()
+    check("흐림은 연출 없음", not game.wfx.isVisible())
+    os.environ["HOKORA_WEATHER"] = "storm"
+    p = ev.gust()
+    check("풍우: 바람에 날아감", p is not None and p.state == "fall", p.ch.key if p else None)
+    rates = {}
+    for key in ("cloudy", "sunshower"):                 # 여우비: 대길·중길이 잘 나옴
+        os.environ["HOKORA_WEATHER"] = key
+        st, rng, top = GameState(), random.Random(7), 0
+        for _ in range(3000):
+            st.omikuji_date = ""
+            top += hk_omikuji.draw(st, rng).fortune.rank in ("대길", "중길")
+        rates[key] = top / 3000
+    check("여우비: 대길·중길 2배쯤", rates["sunshower"] > rates["cloudy"] * 1.6, rates)
+    os.environ["HOKORA_WEATHER"] = "cloudy"
+    game._refresh_season()
+
+
+def t_cutin():
+    calm()
+    ev._skill_at.clear()
+    game._cutin_at = -1e9
+    before = len([w for w in game._cards if type(w).__name__ == "CutIn"])
+    ev.try_skill(P["reimu"])
+    after = len([w for w in game._cards if type(w).__name__ == "CutIn"])
+    check("스펠카드 컷인", after == before + 1)
+    s.cutin = False
+    game._cutin_at = -1e9
+    ev._skill_at.clear()
+    calm()
+    ev.try_skill(P["sakuya"])
+    check("컷인 끄기", len([w for w in game._cards if type(w).__name__ == "CutIn"]) <= after)
+    s.cutin = True
+    for p in game.pets:
+        p.frozen_until = 0.0
+
+
 def t_end():
     app.quit()
 
@@ -426,7 +479,7 @@ STEPS = [(t_core, 3000), (t_core2, 2500), (t_thief, 1600), (t_skill, 1800), (t_a
          (t_duel, 8500), (t_fairies, 8000), (t_fairies2, 17000), (t_aya, 20000), (t_suika, 2000),
          (t_shop, 1000), (t_season_shop, 12000), (t_tewi, 1500), (t_koishi, 7500), (t_nitori, 11000),
          (t_nitori2, 1500), (t_yuyuko, 9000), (t_yuyuko2, 1500), (t_mystia, 2500), (t_mystia2, 1500),
-         (t_youmu, 0), (t_meiling, 11000), (t_reisen, 1000), (t_end, 0)]
+         (t_youmu, 0), (t_meiling, 11000), (t_reisen, 1000), (t_weather, 1500), (t_cutin, 500), (t_end, 0)]
 
 
 def run(i: int = 0) -> None:

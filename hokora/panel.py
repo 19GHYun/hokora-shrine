@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QMen
                                QTabBar, QVBoxLayout, QWidget, QWidgetAction)
 
 from . import affection as aff
-from . import daily, omamori, season, torii, wardrobe
+from . import daily, omamori, season, torii, wardrobe, weather
 from .decor import decor_image
 from .guests import GUEST_ABOUT, VISITS, guest_stage
 from .omikuji import can_draw
@@ -534,6 +534,9 @@ class ShrinePanel(QWidget):
             self.tabs.addTab(name)
             page.hide()
             v.addWidget(page)
+        self.weather_label = QLabel(objectName="done")
+        self.weather_label.setWordWrap(True)
+        p1.addWidget(self.weather_label)
         up = QHBoxLayout()
         self.up_bar = QProgressBar()
         self.up_bar.setTextVisible(False)
@@ -928,6 +931,11 @@ class ShrinePanel(QWidget):
             tags.append(f"선풍기 ×{FAN_BOOST:g}")
         if eel_active(s):
             tags.append(f"장어 ×{EEL_BOOST:g}")
+        wt = weather.current()
+        if wt.income != 1:
+            tags.append(f"{wt.name} ×{wt.income:g}")
+        self.weather_label.setText(f"{wt.icon} 지금 天候: {wt.name}({wt.kanji}) — {wt.desc}"
+                                   f"   ·   {weather.next_change()}에 바뀌어요")
         self.sub.setText(f"새전 {s.saisen:,}   ·   분당 새전 {s.income_per_min * boost:g}"
                          + (f"  ({', '.join(tags)})" if tags else ""))
         drawable = can_draw(s)

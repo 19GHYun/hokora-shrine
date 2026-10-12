@@ -85,9 +85,11 @@ EFFECTS = {
 FOOTPRINTS = {"hearts", "petals", "stars", "rainbow"}
 # 전용 의상 그림 폴더(<캐릭터>@<스킨>)의 이름 — 폴더만 넣으면 전설 등급으로 뽑기에 들어감
 ART_NAMES = {"yukata": "유카타", "santa": "산타", "swimsuit": "수영복", "pajama": "잠옷", "school": "교복",
-             "maid": "메이드", "kimono": "기모노", "witch": "마녀", "pumpkin": "호박", "obake": "유령 분장"}
+             "maid": "메이드", "kimono": "기모노", "witch": "마녀", "pumpkin": "호박", "obake": "유령 분장",
+             "reindeer": "루돌프", "gift": "선물 배달"}
 # 기간 한정 전용 의상: 옷 → 뽑기에 나오는 달 (그 달엔 확률 3배). 그 밖의 달엔 옷감이나 새전으로 산다
-ART_SEASON = {"witch": (10,), "pumpkin": (10,), "obake": (10,)}
+ART_SEASON = {"witch": (10,), "pumpkin": (10,), "obake": (10,),          # 할로윈: 레이무·사나에·치르노
+               "santa": (12,), "reindeer": (12,), "gift": (12,)}           # 크리스마스: 사쿠야·플랑드르·마리사
 SEASON_BUY = 15          # 기간이 아닐 때 새전 값 = 한 번 뽑기 값 × 이만큼
 
 

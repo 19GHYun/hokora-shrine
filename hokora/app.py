@@ -18,7 +18,9 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import __version__, winutil
 from . import affection as aff
-from . import daily, omamori, photo, season, torii, wardrobe
+from . import daily, omamori, photo, season, torii, wardrobe, weather
+from .spellcard import MIN_GAP as CUTIN_GAP
+from .spellcard import CutIn
 from .bubble import _alive as bubble_alive
 from .bubble import say
 from .daily import StampCard
@@ -114,6 +116,8 @@ class Game(QObject):
         self._cards: list = []
         self._card_queue: list = []              # 일기·출석·신문·사진 카드는 하나씩 차례로
         self.fx = season.SeasonFx()
+        self.wfx = weather.WeatherFx()
+        self._cutin_at = -1e9
         self._night: bool | None = None
         self._update_bounds()
         self.pets: list[PetWindow] = []
@@ -239,7 +243,8 @@ class Game(QObject):
         """뒤 → 앞 순서 (맨 위로 다시 올릴 때 이 순서대로라 캐릭터가 가장 앞)."""
         hidden = self.visits.hidden_decor                 # 서니가 숨긴 장식도
         decors = [w for k, w in self.decors.items() if k != hidden] if self.state.show_decor else []
-        fx = [self.fx] if self.fx.kind and self.state.season_fx else []   # 흩날림은 맨 뒤
+        fx = [self.fx] if self.fx.kind and self.state.season_fx else []   # 흩날림·날씨는 맨 뒤
+        fx += [self.wfx] if self.wfx.kind and self.state.season_fx else []
         row = [self.torii_row] if self.state.torii else []
         return [*fx, *row, *decors, self.shrine, *self.pets, *self.guests]
 
@@ -291,10 +296,12 @@ class Game(QObject):
         for pet in everyone:
             pet.step(dt)
         self.shrine.step(dt)
-        if self.fx.isVisible() or self.torii_row.isVisible():
+        if self.fx.isVisible() or self.torii_row.isVisible() or self.wfx.isVisible():
             g = self.ground_under(self.shrine.pos_x)
             if self.fx.isVisible():
                 self.fx.follow(self.shrine.pos_x, g.y)
+            if self.wfx.isVisible():
+                self.wfx.follow(self.shrine.pos_x, g.y)
             if self.torii_row.isVisible():              # 도리이 줄은 신사 옆에 붙어 다님
                 self.torii_row.place(self.shrine.x() + 10, self.shrine.x() + self.shrine.width() - 10, g.y, g.x1, g.x2)
         self.events.tick()
@@ -530,6 +537,40 @@ class Game(QObject):
             if show:
                 self.fx.follow(self.shrine.pos_x, self.ground_under(self.shrine.pos_x).y)
             self.fx.setVisible(show)
+        # 天候
+        w = weather.current()
+        wkind = w.key if self.state.season_fx and weather.WeatherFx.wants(w.key) else ""
+        self.wfx.set_kind(wkind)
+        show = bool(wkind) and not self.hidden_for_fullscreen
+        if show != self.wfx.isVisible():
+            if show:
+                self.wfx.follow(self.shrine.pos_x, self.ground_under(self.shrine.pos_x).y)
+            self.wfx.setVisible(show)
+        sl = weather.slot()
+        if sl != self.state.weather_slot:                   # 날씨가 바뀌면 알림
+            self.state.weather_slot = sl
+            self.later(6.0, lambda: self._say_at_shrine(f"{w.icon} 天候: {w.name}({w.kanji}) — {w.desc}"))
+            log.info("날씨: %s", w.key)
+
+    # ── 스펠카드 컷인 ──
+    def cutin(self, pet: PetWindow) -> None:
+        now = time.monotonic()
+        if (not self.state.cutin or self.hidden_for_fullscreen or self.napping
+                or now - self._cutin_at < CUTIN_GAP or pet not in self.pets):
+            return
+        self._cutin_at = now
+        sprites = wardrobe.sprites_for(pet.ch.key, pet.skin)
+        pic = None
+        if sprites is not None:
+            pic = sprites.images[sprites.sequence("skill")[-1]]
+        g = self.ground_under(pet.pos_x)
+        w = CutIn(pet.ch.key, pet.ch.name, pic, pet.pos_x, g.y, g.x1, g.x2)
+        self.keep(w)
+        w.show()
+
+    def set_cutin(self, on: bool) -> None:
+        self.state.cutin = on
+        self.save()
 
     def set_season_fx(self, on: bool) -> None:
         self.state.season_fx = on
@@ -1075,7 +1116,11 @@ class Game(QObject):
         cur.setChecked(s.cursor_play)
         cur.toggled.connect(self.set_cursor_play)
         menu.addAction(cur)
-        fx = QAction("계절 연출  (벚꽃잎·단풍·눈·반딧불)", menu, checkable=True)
+        ci = QAction("스펠카드 컷인", menu, checkable=True)
+        ci.setChecked(s.cutin)
+        ci.toggled.connect(self.set_cutin)
+        menu.addAction(ci)
+        fx = QAction("계절·날씨 연출  (벚꽃잎·단풍·눈·반딧불·비·안개)", menu, checkable=True)
         fx.setChecked(s.season_fx)
         fx.toggled.connect(self.set_season_fx)
         menu.addAction(fx)

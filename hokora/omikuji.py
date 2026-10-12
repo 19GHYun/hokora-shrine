@@ -10,7 +10,7 @@ from PySide6.QtCore import QPoint, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
-from . import omamori
+from . import omamori, weather
 from .render import CHARACTERS
 from .state import GameState
 
@@ -59,7 +59,8 @@ def draw(s: GameState, rng: random.Random | None = None, today: date | None = No
     """오늘의 운세를 뽑고 새전을 준다 (하루 한 번 — 이미 뽑았으면 호출하지 말 것)."""
     rng = rng or random.Random()
     pool = FORTUNES[:2] if s.fate_boost else FORTUNES   # 레밀리아가 운명을 조작했으면 대길·중길만
-    fortune = rng.choices(pool, weights=[f.weight for f in pool])[0]
+    lucky = weather.current().lucky                     # 여우비: 대길·중길 2배
+    fortune = rng.choices(pool, weights=[f.weight * (2 if lucky and f in FORTUNES[:2] else 1) for f in pool])[0]
     s.fate_boost = False
     today_s = (today or date.today()).isoformat()
     if s.omikuji_date == today_s and s.omikuji_extra > 0:   # 참배로 산 "한 번 더"
