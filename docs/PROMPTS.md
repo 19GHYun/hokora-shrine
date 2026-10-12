@@ -313,3 +313,50 @@ Cozy early-evening sky with soft pink and orange clouds, a few cherry blossom pe
 Keep the left third of the image calm and mostly empty sky (space for a title).
 Do NOT write any text, letters, logos or watermarks anywhere.
 ```
+
+## 요우무 (8번째 친구) · 유유코 · 미스티아
+
+요우무는 시트 A·B·C·걷기 4장, 유유코·미스티아는 손님 시트 1장씩. 모두 먼저 **기준 그림**을 뽑고 그 그림을 첨부해서 시트를 뽑습니다.
+시트 프롬프트에는 위가 잘리지 않게 아래 단락을 꼭 넣습니다 (`[머리 장식]` 자리는 캐릭터에 맞게).
+
+```
+IMPORTANT - nothing may be cut off:
+- Draw each character a bit smaller, about 75% of its cell height.
+- Leave clear empty space ABOVE every head, at least as tall as [머리 장식] itself.
+- [머리 장식] must be completely visible in every frame, never touching or crossing the top edge
+  of the image or the row above.
+- Leave a wide empty margin around the whole sheet on all four sides.
+```
+
+| 캐릭터 | 배경 | `[머리 장식]` |
+| --- | --- | --- |
+| 요우무 | 자홍 | `the hairband bow and the ghost half` |
+| 유유코 | 초록 | `the hat` |
+| 미스티아 | 초록 | `the hat and the wings` |
+
+- 유유코: `Saigyouji Yuyuko from Touhou Project: chin-length wavy pink hair, a light blue triangular-ghost-cloth cap with a red spiral mark on the front, pink eyes, a light blue kimono-style dress with wavy white trim and wide sleeves, a closed folding fan in her hand, a gentle dreamy smile.`
+  손님 특기: `9. Happily eating a big rice ball with both hands. 10. Patting her full round belly with a satisfied smile.`
+- 미스티아: `Mystia Lorelei from Touhou Project: short pink hair, a brown mob cap with a small wing ornament, golden-brown eyes, small bird wings on her back (soft brown-purple with pale tips), a brown dress with a white apron front and puffy sleeves, white socks, brown shoes, a cheerful face.`
+  손님 특기: `9. Fanning a small charcoal grill of lamprey skewers with a paper fan, smiling. 10. Holding up a steaming grilled skewer proudly.`
+
+### 포장마차 소품 (미스티아)
+
+```
+Using the attached image ONLY as an art style reference (thick soft dark-brown outline,
+flat colors with gentle shading, cute chibi game-asset style), draw ONE small Japanese food stall (yatai)
+on two wooden wheels: a wooden counter with a small charcoal grill and lamprey skewers, a short dark blue
+noren curtain with NO letters, two round red paper lanterns hanging from the roof, a small slanted roof,
+seen from the front and slightly from the right, standing on the bottom of the image.
+No people, no animals, no ground.
+Background: solid flat pure green (#00FF00) everywhere. No text, no shadows.
+```
+
+```
+python tools/import_sheet.py 요우무A.png youmu --preset move
+python tools/import_sheet.py 요우무B.png youmu --preset react
+python tools/import_sheet.py 요우무C.png youmu --preset life
+python tools/import_sheet.py 요우무걷기.png youmu --preset walk
+python tools/import_sheet.py 유유코.png yuyuko --preset guest
+python tools/import_sheet.py 미스티아.png mystia --preset guest
+python tools/import_sheet.py 포장마차.png props --names yatai --append
+```
