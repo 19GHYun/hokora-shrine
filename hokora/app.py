@@ -542,7 +542,7 @@ class Game(QObject):
         handlers = {"look": self.set_look, "scale": self.set_scale, "out": lambda v: self.set_out(*v),
                     "torii": self.offer_torii, "pull": self.pull_omamori, "equip": self.equip_omamori,
                     "wpull": self.pull_wardrobe, "wear": lambda v: self.wear(*v), "wfx": lambda v: self.set_fx(*v),
-                    "exchange": self.exchange_cloth, "shrine_skin": self.shrine_skin}
+                    "exchange": self.exchange_cloth, "shrine_skin": self.shrine_skin, "wbuy": self.buy_outfit}
         return handlers[name](value)
 
     def set_look(self, stage: int) -> None:
@@ -713,6 +713,18 @@ class Game(QObject):
         pet = next((p for p in self.pets if p.ch.key == char), None)
         if pet is not None:
             pet.fx_kind = self.state.effects.get(char)
+        self.save()
+        return True
+
+    def buy_outfit(self, item_id: str) -> bool:
+        """기간 한정 의상을 (기간이 아닐 때) 새전으로."""
+        before = self.state.saisen
+        if not wardrobe.buy_with_saisen(self.state, item_id):
+            return False
+        self.shrine.set_saisen(self.state.saisen)
+        self.shrine.pop(f"-{before - self.state.saisen:,}")
+        self._say_at_shrine(f"👘 {wardrobe.ITEMS[item_id].name} 의상을 샀다!")
+        log.info("기간 한정 의상 구입: %s", item_id)
         self.save()
         return True
 

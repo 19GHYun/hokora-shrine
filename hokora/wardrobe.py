@@ -86,14 +86,36 @@ FOOTPRINTS = {"hearts", "petals", "stars", "rainbow"}
 # 전용 의상 그림 폴더(<캐릭터>@<스킨>)의 이름 — 폴더만 넣으면 전설 등급으로 뽑기에 들어감
 ART_NAMES = {"yukata": "유카타", "santa": "산타", "swimsuit": "수영복", "pajama": "잠옷", "school": "교복",
              "maid": "메이드", "kimono": "기모노", "witch": "마녀", "pumpkin": "호박", "obake": "유령 분장"}
-# 기간 한정 전용 의상: 옷 → 나오는 달 (그 달에만 뽑기에 나오고 교환할 수 있음, 확률 3배)
+# 기간 한정 전용 의상: 옷 → 뽑기에 나오는 달 (그 달엔 확률 3배). 그 밖의 달엔 옷감이나 새전으로 산다
 ART_SEASON = {"witch": (10,), "pumpkin": (10,), "obake": (10,)}
+SEASON_BUY = 15          # 기간이 아닐 때 새전 값 = 한 번 뽑기 값 × 이만큼
 
 
 def in_season(it: "Item", month: int | None = None) -> bool:
     if it.kind != "art" or it.skin not in ART_SEASON:
         return True
     return (month or date.today().month) in ART_SEASON[it.skin]
+
+
+def is_limited(it: "Item") -> bool:
+    return it.kind == "art" and it.skin in ART_SEASON
+
+
+def season_price(s: GameState) -> int:
+    return price(s) * SEASON_BUY
+
+
+def buy_with_saisen(s: GameState, item_id: str) -> bool:
+    """기간이 아닐 때 기간 한정 의상을 새전으로 산다."""
+    it = ITEMS.get(item_id)
+    if it is None or not is_limited(it) or in_season(it) or item_id in s.wardrobe or it.char not in s.unlocked:
+        return False
+    cost = season_price(s)
+    if s.saisen < cost:
+        return False
+    s.saisen -= cost
+    s.wardrobe.append(item_id)
+    return True
 
 
 def event_items(s: GameState) -> list["Item"]:
@@ -197,8 +219,6 @@ def exchange(s: GameState, item_id: str) -> bool:
     if it is None or item_id in s.wardrobe or s.cloth < CLOTH_COST[it.rarity]:
         return False
     if it.char is not None and it.char not in s.unlocked:
-        return False
-    if not in_season(it):
         return False
     s.cloth -= CLOTH_COST[it.rarity]
     s.wardrobe.append(item_id)

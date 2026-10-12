@@ -6,9 +6,9 @@ import time
 from typing import Callable
 
 from PySide6.QtCore import QPoint, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QProgressBar, QPushButton,
-                               QTabBar, QVBoxLayout, QWidget)
+from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QMenu, QProgressBar, QPushButton,
+                               QTabBar, QVBoxLayout, QWidget, QWidgetAction)
 
 from . import affection as aff
 from . import daily, omamori, season, torii, wardrobe
@@ -351,6 +351,7 @@ class _WTile(QWidget):
         self.pix, self.icon = pix, icon
         self.setCursor(Qt.ArrowCursor if mode == "locked" else Qt.PointingHandCursor)
         self.setToolTip({"worn": "입고 있어요", "own": "눌러서 입기", "trade": "눌러서 옷감으로 교환",
+                         "buy": "눌러서 옷감이나 새전으로 사기",
                          "locked": "옷감이 모자라요 — 뽑기로 얻거나 옷감을 모아요"}[mode])
         self.update()
 
@@ -374,7 +375,7 @@ class _WTile(QWidget):
             p.drawPixmap(art.toRect(), self.pix)
         elif self.icon:
             wardrobe.draw_icon(p, art, self.icon)
-        if self.mode in ("trade", "locked"):                  # 아직 없는 것: 흐리게
+        if self.mode in ("trade", "buy", "locked"):           # 아직 없는 것: 흐리게
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(250, 246, 247, 170))
             p.drawRoundedRect(art, 6, 6)
@@ -385,7 +386,7 @@ class _WTile(QWidget):
         p.drawText(QRectF(2, 68, self.W - 4, 16), Qt.AlignCenter, self.title)
         small = QFont("Malgun Gothic", 7)
         p.setFont(small)
-        p.setPen(QColor("#C8102E") if self.mode == "trade" else QColor("#8C7479"))
+        p.setPen(QColor("#C8102E") if self.mode in ("trade", "buy") else QColor("#8C7479"))
         p.drawText(QRectF(2, 85, self.W - 4, 16), Qt.AlignCenter, self.sub)
         if self.mode == "worn":
             badge = QRectF(5, 5, 30, 15)
@@ -397,7 +398,7 @@ class _WTile(QWidget):
         p.end()
 
     def mousePressEvent(self, e) -> None:
-        if e.button() == Qt.LeftButton and self.payload and self.mode in ("own", "trade"):
+        if e.button() == Qt.LeftButton and self.payload and self.mode in ("own", "trade", "buy"):
             self.on_click(self.payload)
 
 
@@ -1222,11 +1223,12 @@ class ShrinePanel(QWidget):
             cost = wardrobe.CLOTH_COST[it.rarity]
             mode = "worn" if worn == skin else "own" if owned else "trade" if s.cloth >= cost else "locked"
             sub = wardrobe.RARITY[it.rarity][0] if owned else f"옷감 {cost}"
-            if not owned and not wardrobe.in_season(it):          # 기간 한정 의상: 그 달에만
-                mode = "locked"
-                sub = "·".join(str(m) for m in wardrobe.ART_SEASON[it.skin]) + "월 한정"
-            tile.set(("wear", skin) if owned else ("exchange", it.id), it.name.split(" ", 1)[1],
-                     sub, it.rarity, mode, pix=portrait(ch, 120, False, skin))
+            payload = ("wear", skin) if owned else ("exchange", it.id)
+            if not owned and wardrobe.is_limited(it) and not wardrobe.in_season(it):   # 기간이 아니면 옷감·새전으로
+                mode = "buy" if s.cloth >= cost or s.saisen >= wardrobe.season_price(s) else "locked"
+                sub = "옷감·새전으로"
+                payload = ("season", it.id)
+            tile.set(payload, it.name.split(" ", 1)[1], sub, it.rarity, mode, pix=portrait(ch, 120, False, skin))
         cur = s.effects.get(ch)
         fx_list = [None] + list(wardrobe.EFFECTS)
         for tile, fx in zip(self.fx_tiles, fx_list):
@@ -1242,6 +1244,27 @@ class ShrinePanel(QWidget):
         total = len(wardrobe.pool(s))
         have = len([i for i in s.wardrobe if i in wardrobe.ITEMS])
         self.wstats.setText(f"모은 옷·이펙트 {have}/{total}   ·   뽑은 횟수 {s.wardrobe_pulls:,}")
+
+    def _season_menu(self, item_id: str) -> None:
+        """기간이 아닐 때 기간 한정 의상: 옷감으로 교환하거나 새전으로 사기."""
+        s, it = self.state, wardrobe.ITEMS[item_id]
+        cost, sp = wardrobe.CLOTH_COST[it.rarity], wardrobe.season_price(s)
+        months = "·".join(str(m) for m in wardrobe.ART_SEASON[it.skin])
+        menu = QMenu(self)
+        menu.setStyleSheet("QMenu { background: #FFFFFF; border: 1px solid rgba(200,16,46,70); padding: 4px; }"
+                           "QMenu::item { padding: 6px 18px; color: #2B1D21; }"
+                           "QMenu::item:selected { background: #FBE3E7; color: #9E1027; }"
+                           "QMenu::item:disabled { color: #B8A8AC; }")
+        title = QLabel(f"{it.name}  <span style='color:#8C7479; font-weight:400'>({months}월엔 뽑기에서도 나와요)</span>")
+        title.setStyleSheet("color: #9E1027; font-weight: 700; padding: 6px 18px; font-family: 'Malgun Gothic';")
+        head = QWidgetAction(menu)
+        head.setDefaultWidget(title)
+        menu.addAction(head)
+        a = menu.addAction(f"🧵 옷감 {cost}으로 교환   (가진 옷감 {s.cloth:,})", lambda: self._act("exchange", item_id))
+        a.setEnabled(s.cloth >= cost)
+        b = menu.addAction(f"💰 새전 {sp:,}으로 사기", lambda: self._act("wbuy", item_id))
+        b.setEnabled(s.saisen >= sp)
+        menu.exec(QCursor.pos())
 
     def _wview(self, key: str) -> None:
         self.w_view = key
@@ -1266,7 +1289,9 @@ class ShrinePanel(QWidget):
 
     def _wclick(self, payload: tuple) -> None:
         what, value = payload
-        if what == "exchange":
+        if what == "season":
+            self._season_menu(value)
+        elif what == "exchange":
             self._act("exchange", value)
         else:
             self._act(what, (self.w_char, value))

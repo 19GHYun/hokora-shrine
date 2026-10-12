@@ -393,6 +393,16 @@ def t_meiling():
           [it.id for it in ev_items])
     s.wardrobe.append("reimu:witch")
     check("마녀 레이무 입기", game.on_action("wear", ("reimu", "witch")) and P["reimu"].skin == "witch")
+    real = dict(wardrobe.ART_SEASON)                 # 기간이 아닐 때: 뽑기엔 없고 새전으로 살 수 있음
+    month = time.localtime().tm_mon
+    wardrobe.ART_SEASON.update({k: ((month % 12) + 1,) for k in real})
+    check("기간 아니면 뽑기에 없음", not any(it.kind == "art" and it.skin in real for it in wardrobe.pool(s)))
+    s.saisen = 10 ** 7
+    check("기간 아니면 새전으로 사기", game.on_action("wbuy", "sanae:pumpkin") and "sanae:pumpkin" in s.wardrobe)
+    s.cloth = 300
+    check("기간 아니어도 옷감 교환", game.on_action("exchange", "cirno:obake") and s.cloth == 0)
+    wardrobe.ART_SEASON.clear()
+    wardrobe.ART_SEASON.update(real)
     calm()
     check("레이센 방문", game.visits.start("reisen"))
 
