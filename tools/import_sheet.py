@@ -45,6 +45,8 @@ PRESETS = {
     "walk": [],            # 장수 자유: 찾은 만큼 walk_0, walk_1 … (8·12·16장 등)
     "guest": ["idle_0", "idle_1", "blink", "bow", "walk_0", "walk_1", "walk_2", "walk_3",
               "skill_0", "skill_1", "caught", "happy"],   # 손님 시트 한 장
+    "outfit": ["idle_0", "idle_1", "blink", "sit", "walk_0", "walk_1", "walk_2", "walk_3",
+               "skill_0", "skill_1", "caught", "happy"],  # 전용 의상 한 장 (없는 동작은 비슷한 컷으로)
 }
 REPLACE_PREFIX = {"walk": "walk_"}     # 이 프리셋은 같은 동작의 옛 그림을 먼저 지움
 
@@ -379,7 +381,7 @@ def main() -> int:
     ap.add_argument("character", help="캐릭터 키 (reimu, marisa, ...)")
     ap.add_argument("--names", help="찾은 순서대로 붙일 프레임 이름, 쉼표로 구분")
     ap.add_argument("--preset", choices=sorted(PRESETS),
-                    help="표준 세트 시트의 이름을 자동으로 (move / react / life / walk / guest). --append 도 자동으로 켜짐")
+                    help="표준 세트 시트의 이름을 자동으로 (move / react / life / walk / guest / outfit). --append 도 자동으로 켜짐")
     ap.add_argument("--walk-cycles", type=int, help="걷기 한 벌에 걸음이 몇 바퀴인지 직접 (자동으로 못 셀 때)")
     ap.add_argument("--grid", help="행x열 (예: 3x4). 캐릭터끼리 붙어 있으면 칸으로 똑같이 잘라서 나눔")
     ap.add_argument("--append", action="store_true",

@@ -360,3 +360,51 @@ python tools/import_sheet.py 유유코.png yuyuko --preset guest
 python tools/import_sheet.py 미스티아.png mystia --preset guest
 python tools/import_sheet.py 포장마차.png props --names yatai --append
 ```
+
+## 전용 의상 — 간편판 (1벌 2장)
+
+시트 4장 대신 **12컷 시트 1장**으로 의상을 만듭니다. 없는 동작(잠자기·잡히기·뛰기 등)은 비슷한 컷으로 대신합니다.
+1. 기준 그림: 캐릭터의 `idle_0.png` 를 첨부하고 위 "전용 의상" 기준 그림 프롬프트로 그 옷을 입은 모습을 뽑습니다.
+2. 시트: 그 그림을 첨부하고 아래로 12컷을 뽑습니다 (`[특기]` 는 의상에 맞게).
+
+```
+Layout: 3 rows x 4 columns, 12 frames, all rows the same height.
+Row 1: 1. Standing still, arms relaxed. 2. Same, tiny change of expression. 3. Same as 1 with eyes closed (blink). 4. Sitting on the ground, legs stretched forward, hands on the lap.
+Row 2 (walking to the right): 5. Right foot forward. 6. Feet passing, body highest. 7. Left foot forward. 8. Feet passing, body highest.
+Row 3: 9. [특기] (start). 10. [특기] (end). 11. Surprised: shocked face with a sweat drop, hands up. 12. Very happy, eyes closed in ^^ shape, one hand raised.
+```
+
+```
+python tools/import_sheet.py 의상.png reimu@witch --preset outfit
+```
+
+| 의상 | 폴더 | `[옷 설명]` | `[특기]` |
+| --- | --- | --- | --- |
+| 🎃 마녀 레이무 (10월) | `reimu@witch` | `a Halloween witch costume: a big black pointed witch hat with her big red hair bow pinned on it, a short black cape with orange lining over her red-and-white shrine maiden outfit, orange-and-purple striped stockings, holding a small broom` | `Waving the broom like a magic wand, sending out a small pumpkin-shaped sparkle` |
+| 🎃 호박 사나에 (10월, 자홍 배경) | `sanae@pumpkin` | `a cute pumpkin costume: a round puffy orange pumpkin dress with a green leaf collar, a small green pumpkin-stem cap on her head, keeping her frog hair clip and snake hair ornament, orange shoes` | `Holding up a small glowing jack-o'-lantern lamp with a big grin, then holding out a basket of candy (trick or treat!)` |
+| 🎃 유령 분장 치르노 (10월) | `cirno@obake` | `a cute white bedsheet ghost costume draped over her body, her face showing through a round opening, her blue hair bow on top of the sheet, her ice wings poking out from the sides` | `Raising both arms under the sheet in a spooky "boo!" pose, then giggling with a mischievous face` |
+
+## 장식 2탄 (9개, 자홍 배경)
+
+`hokora/sprites/props/_preview.png` 를 그림체 참고용으로 첨부합니다.
+
+```
+python tools/import_sheet.py 장식2.png props --names pond,taiko,bamboo_fence,maneki_neko,yukimi_lantern,maple,suzu,mini_torii,incense --append
+```
+
+## 새 친구 메이링 · 손님 레이센
+
+메이링은 요우무와 같은 순서(기준 그림 → 시트 A·B·C·걷기)로, 배경은 자홍입니다. 레이센은 손님 시트(초록 배경)입니다.
+
+- 메이링: `Hong Meiling from Touhou Project: long straight red hair with a thin braid on each side tied with black ribbons, a green beret-style cap with a small gold star badge (no letters), blue-gray eyes, a green Chinese-style long dress (qipao) with side slits over white pants, a calm cheerful face, black shoes.`
+  시트 C 특기: `5. Taking a kung-fu stance with one palm forward. 6. A strong palm strike with a small rainbow-colored sparkle.`
+- 레이센: `Reisen Udongein Inaba from Touhou Project: very long straight light purple hair reaching her knees, long white rabbit ears slightly crumpled, red eyes, a white blouse with a red necktie, a black blazer, a short pink skirt, brown loafers.`
+  손님 특기: `9. Holding out a small medicine bottle from a medicine box on her back, smiling politely. 10. Pointing her finger like a pistol with a small red sparkle at the fingertip.`
+
+```
+python tools/import_sheet.py 메이링A.png meiling --preset move
+python tools/import_sheet.py 메이링B.png meiling --preset react
+python tools/import_sheet.py 메이링C.png meiling --preset life
+python tools/import_sheet.py 메이링걷기.png meiling --preset walk
+python tools/import_sheet.py 레이센.png reisen --preset guest
+```
