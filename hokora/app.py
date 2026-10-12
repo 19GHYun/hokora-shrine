@@ -37,7 +37,7 @@ from .progress import UNLOCKS, newly_unlocked
 from .render import CHARACTERS, Pose, draw_character
 from .shrine import ShrineWindow
 from .torii import ToriiRow
-from .state import APP_NAME, DECOR, LOG_DIR, PAT_REWARD, SAISEN_BOX, SaveStore
+from .state import APP_NAME, DECOR, LOG_DIR, PAT_REWARD, SAISEN_BOX, SHRINE_SKINS, SaveStore
 
 log = logging.getLogger("Hokora")
 ENTRY_SCRIPT = Path(sys.argv[0]).resolve()
@@ -121,6 +121,8 @@ class Game(QObject):
         prim = self.app.primaryScreen().availableGeometry()
         self.shrine = ShrineWindow(self, prim.x() + self.state.shrine_x * prim.width(),
                                    self.state.look_stage)
+        if self.state.shrine_skin in SHRINE_SKINS:
+            self.shrine.set_skin(self.state.shrine_skin)
         self.torii_row = ToriiRow(self)
         self.shrine.set_saisen(self.state.saisen)
         self.decors: dict[str, DecorWindow] = {
@@ -539,16 +541,46 @@ class Game(QObject):
         handlers = {"look": self.set_look, "scale": self.set_scale, "out": lambda v: self.set_out(*v),
                     "torii": self.offer_torii, "pull": self.pull_omamori, "equip": self.equip_omamori,
                     "wpull": self.pull_wardrobe, "wear": lambda v: self.wear(*v), "wfx": lambda v: self.set_fx(*v),
-                    "exchange": self.exchange_cloth}
+                    "exchange": self.exchange_cloth, "shrine_skin": self.shrine_skin}
         return handlers[name](value)
 
     def set_look(self, stage: int) -> None:
         """신사 모양만 바꿈 (수입은 가장 높이 올린 단계 그대로)."""
         s = self.state
         s.shrine_look = 0 if stage >= s.shrine_level else max(1, stage)
+        s.shrine_skin = ""                             # 단계 모양을 고르면 스킨은 벗음
+        self.shrine.set_skin(None)
         self.shrine.set_level(s.look_stage)
         log.info("신사 모양: %d단계", s.look_stage)
         self.save()
+
+    def shrine_skin(self, key: str) -> bool:
+        """신사 스킨: 없으면 사서 입히고, 있으면 입히기 (입고 있는 걸 다시 누르면 원래 모양)."""
+        s = self.state
+        if key not in SHRINE_SKINS:
+            return False
+        name, price = SHRINE_SKINS[key]
+        if key not in s.shrine_skins:
+            if s.saisen < price:
+                return False
+            s.saisen -= price
+            s.shrine_skins.append(key)
+            s.shrine_skin = key
+            self.shrine.set_saisen(s.saisen)
+            self.shrine.pop(f"-{price:,}")
+            self._say_at_shrine(f"🏯 {name} 완성!  (다시 누르면 원래 모양)")
+            for p in self.pets:
+                p.react(True)
+            log.info("신사 스킨 구입: %s", key)
+        else:
+            s.shrine_skin = "" if s.shrine_skin == key else key
+        self.shrine.set_skin(s.shrine_skin or None)
+        if s.shrine_skin and not self.hidden_for_fullscreen:
+            burst = PetalBurst(self.shrine.pos_x, self.shrine.y() + self.shrine.height())
+            self.keep(burst)
+            burst.show()
+        self.save()
+        return True
 
     def set_scale(self, k: float) -> None:
         self.state.size_scale = k

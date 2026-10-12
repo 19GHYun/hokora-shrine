@@ -45,7 +45,31 @@ DECOR = {
     "temizuya": ("손 씻는 물", 600, 2, 48),
     "sakura": ("벚꽃나무", 800, 2, 112),
     "saisen_box": ("큰 새전함", 1000, 3, 46),
+    # 계절 한정 (SEASONAL 의 달에만 살 수 있음, 산 뒤에는 언제든 놓을 수 있음)
+    "kadomatsu": ("카도마츠", 5000, 2, 84),
+    "snowman": ("눈사람", 5000, 2, 74),
+    "xmas_tree": ("크리스마스 트리", 6000, 2, 100),
+    "hina": ("히나 인형", 5000, 2, 50),
+    "koinobori": ("코이노보리", 6000, 2, 116),
+    "tanabata": ("칠석 대나무", 5000, 2, 100),
+    "sunflower": ("해바라기", 4000, 2, 70),
+    "tsukimi": ("츠키미 경단", 4000, 2, 62),
+    "pumpkin": ("할로윈 호박", 5000, 2, 60),
 }
+SEASONAL = {  # 계절 한정 장식 → 파는 달
+    "kadomatsu": (12, 1), "snowman": (12, 1, 2), "xmas_tree": (11, 12), "hina": (2, 3), "koinobori": (4, 5),
+    "tanabata": (6, 7), "sunflower": (7, 8), "tsukimi": (9, 10), "pumpkin": (10,),
+}
+# 신사 스킨: 키 → (이름, 값). 그림은 hokora/sprites/shrines/<키>.png
+SHRINE_SKINS = {
+    "moriya": ("모리야 신사", 15000), "snowy": ("눈 덮인 신사", 15000),
+    "sakura": ("벚꽃 신사", 15000), "scarlet": ("홍마관", 20000),
+}
+
+
+def in_season(key: str, month: int | None = None) -> bool:
+    """계절 한정 장식이면 지금 파는 달인지 (일반 장식은 늘 True)."""
+    return key not in SEASONAL or (month or datetime.now().month) in SEASONAL[key]
 PAT_REWARD = 1           # 쓰다듬기 한 번에 새전
 PAT_COOLDOWN = 1.5       # 같은 캐릭터를 연타해도 보상은 이 간격(초)마다
 
@@ -116,6 +140,12 @@ class GameState:
     cloth: int = 0                   # 옷감 (중복으로 모임 → 원하는 것 교환)
     wardrobe_pulls: int = 0
     wardrobe_pity: int = 0
+    # 신사 스킨·새 손님
+    shrine_skin: str = ""            # 지금 쓰는 신사 스킨 ("" = 코드로 그린 단계 모양)
+    shrine_skins: list[str] = field(default_factory=list)
+    nitori_until: float = 0.0        # 니토리의 증기 선풍기: 이때까지 수입 ×1.5
+    koishi_found: int = 0
+    tewi_luck: int = 0
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
     @property
@@ -131,7 +161,7 @@ class GameState:
         return SHRINE_STAGES[self.shrine_level][1] + self.decor_bonus + self.torii // 2   # 도리이 2개마다 +1
 
     def buy_decor(self, key: str) -> bool:
-        if key not in DECOR or key in self.decor_owned or self.saisen < DECOR[key][1]:
+        if key not in DECOR or key in self.decor_owned or self.saisen < DECOR[key][1] or not in_season(key):
             return False
         self.saisen -= DECOR[key][1]
         self.decor_owned.append(key)

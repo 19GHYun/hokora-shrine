@@ -25,7 +25,7 @@ from PySide6.QtGui import QColor, QPainter, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
 from . import affection as aff
-from . import omamori
+from . import omamori, wardrobe
 from .bubble import say
 from .news import NewsCard, answer_for, make_article
 from .pet import RUN_SPEED, PetWindow
@@ -44,6 +44,9 @@ VISITS = {
     "fairies": (("sunny", "luna", "star"), 1),
     "aya": (("aya",), 2),
     "suika": (("suika",), 3),
+    "tewi": (("tewi",), 1),
+    "koishi": (("koishi",), 2),
+    "nitori": (("nitori",), 3),
 }
 VISIT_CHECK = 60.0        # 이 간격으로 손님이 올지 주사위
 VISIT_CHANCE = 0.15
@@ -60,6 +63,29 @@ SUNNY_ALPHA = 0.35        # 서니가 숨었을 때 보이는 정도
 NEWS_DELAY = 3.0          # 아야가 떠나고 호외가 나오기까지
 SUIKA_STAY = (55.0, 80.0)
 SAKE_PRICE = aff.GIFTS["sake"][2]
+TEWI_STAY = 40.0
+KOISHI_STAY = 60.0
+KOISHI_ALPHA = 0.22       # 코이시가 보이는 정도 (무의식 — 거의 투명)
+NITORI_STAY = 70.0
+NITORI_GOODS = {  # 니토리 노점: 키 → (아이콘, 이름, 설명). 들를 때마다 셋을 골라 펼침
+    "fan": ("⚡", "증기 선풍기", "30분 동안 새전 수입 ×1.5"),
+    "cloth": ("🧵", "옷감 묶음", "옷감 +30"),
+    "charm": ("🎴", "부적 뽑기 1번", "20% 할인"),
+    "outfit": ("👘", "의상실 뽑기 1번", "20% 할인"),
+    "cucumber": ("🥒", "오이", "니토리가 좋아해요 — 나머지 물건 반값!"),
+}
+
+
+def nitori_price(s, key: str) -> int:
+    if key == "fan":
+        return max(200, s.income_per_min * 60)
+    if key == "cloth":
+        return 3000 * s.shrine_level
+    if key == "charm":
+        return int(omamori.price(s) * 0.8)
+    if key == "outfit":
+        return int(wardrobe.price(s) * 0.8)
+    return 100
 
 GUEST_TALK = {
     "sunny": ["우린 장난 안 쳤어! …아마도.", "서니 밀크! 빛의 요정이야!", "안 보였지? 헤헤."],
@@ -67,6 +93,9 @@ GUEST_TALK = {
     "star": ["스타 사파이어야. 다 느껴진다구.", "너 방금 이쪽으로 오고 있었지?", "도망가는 건 내가 제일 빨라!"],
     "aya": ["붕붕마루 신문, 한 부 어떠세요?", "특종 냄새가 나요!", "이 신사, 기사거리가 많네요."],
     "suika": ["한 잔 할래~?", "오니는 거짓말 안 해!", "여기 술맛 좋다~ 딸꾹!"],
+    "tewi": ["행운이 필요해? 대가는 당근이야~", "함정? 무슨 함정~?", "이나바 테위, 오래 산 토끼야!"],
+    "koishi": ["……어라, 나 보여?", "무의식이 이끄는 대로~", "언니한테는 비밀이야."],
+    "nitori": ["맹우! 뭐 필요한 거 있어?", "갓파의 기술은 세계 제일!", "오이 있으면 줘~"],
 }
 APOLOGY = {
     "sunny": "들켰다~ 미안해, 돌려줄게!",
@@ -79,6 +108,9 @@ GUEST_ABOUT = {  # 도감: (아직 못 만났을 때 힌트, 만난 뒤 설명)
     "star": ("무엇이든 알아채는 별의 요정", "커서가 다가오면 제일 먼저 도망가요"),
     "aya": ("특종을 찾아다니는 까마귀 텐구", "취재하고 붕붕마루 신문 호외를 내요"),
     "suika": ("술을 좋아하는 작은 오니", "술을 대접하면 새전 두 배"),
+    "tewi": ("행운을 나눠 주는 장난꾸러기 토끼", "함정을 파요. 쓰다듬으면 오미쿠지 행운"),
+    "koishi": ("무의식으로 다니는 사토리 요괴", "거의 투명하게 숨어 있어요 — 찾아서 클릭!"),
+    "nitori": ("발명품을 파는 갓파 엔지니어", "노점에서 선풍기·옷감·뽑기를 팔아요"),
 }
 INTERVIEW_Q = ["최근 새전 사정은 어떤가요?", "독자들께 한 말씀 부탁드려요!", "요즘 신사에 무슨 일이 있었나요?"]
 DRINK_WITH = {  # 스이카가 한 잔 권했을 때
@@ -161,6 +193,26 @@ class Mist(_Overlay):
             rr = r * (0.6 + t * 0.7)
             p.setBrush(QColor(214, 200, 232, int(170 * a)))
             p.drawEllipse(QPointF(x, y - t * 14), rr, rr)
+        p.end()
+
+
+class Pit(_Overlay):
+    """테위가 판 함정 구멍."""
+
+    def __init__(self, cx: float, ground: float, seconds: float):
+        super().__init__(46, 16, seconds)
+        self.timer.setInterval(400)                        # 거의 안 변하니 드물게
+        self.move(round(cx - 23), round(ground - 10))
+
+    def paintEvent(self, _e) -> None:
+        a = 1.0 if self.age < 0.92 else max(0.0, (1 - self.age) / 0.08)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(140, 98, 58, int(230 * a)))     # 파낸 흙
+        p.drawEllipse(QPointF(23, 9), 22, 6)
+        p.setBrush(QColor(42, 28, 20, int(240 * a)))      # 구멍
+        p.drawEllipse(QPointF(23, 9.5), 15, 3.8)
         p.end()
 
 
@@ -795,7 +847,322 @@ class SuikaVisit(Visit):
         self.game.save()
 
 
-VISIT_CLASSES = {"fairies": FairyVisit, "aya": AyaVisit, "suika": SuikaVisit}
+# ── 테위: 함정을 파고, 쓰다듬으면 행운 ──
+class TewiVisit(Visit):
+    kind = "tewi"
+
+    def __init__(self, visits: "Visits"):
+        super().__init__(visits)
+        g, sx = self.ground, self.game.shrine.pos_x
+        self.side = random.choice((-1, 1))
+        clamp = lambda x: min(max(x, g.x1 + 30), g.x2 - 30)   # noqa: E731
+        self.tewi = self.spawn("tewi", clamp(sx + self.side * 400))
+        self.tewi.fade(1.0, 0.6)
+        self.tewi.go(clamp(sx + self.side * 150), 90, run=True)
+        now = time.monotonic()
+        self.phase, self.until, self.leave_at = "enter", now + 8, now + TEWI_STAY
+        self.pit_x: float | None = None
+        self.trapped = False
+        self.lucky = False
+        self._held = False
+        self._lure_at = 0.0
+        self.at(0.6, lambda: self.say(self.tewi, "행운의 토끼님 납셨다~"))
+
+    def _idle_after(self, seconds: float) -> None:
+        p = self.tewi.pet
+        self.at(seconds, lambda: self.phase != "bye" and p.state not in ("held", "fall") and p.act("idle", 99))
+
+    def update(self, now: float) -> None:
+        t = self.tewi
+        if t.gone:
+            return
+        p = t.pet
+        if p.state == "held":
+            self._held = True
+        if not t.ready:
+            return
+        if self._held:
+            self._held = False
+            p.act("caught", 1.2)
+            self.say(t, "놓아줘~ 행운 안 준다!")
+            self._idle_after(1.2)
+        if now >= self.leave_at and self.phase != "bye":
+            return self._bye()
+        if self.phase == "enter" and (t.arrived() or now >= self.until):
+            t.goal = None
+            t.face(self.game.shrine.pos_x)
+            p.act("skill", 2.6)                               # 삽을 들고 → 땅을 팜
+            self.say(t, "여기에 구멍을 파 볼까~")
+            self.phase, self.until = "dig", now + 2.6
+        elif self.phase == "dig" and now >= self.until:
+            self.pit_x = p.pos_x + p.facing * 30
+            self.effect(Pit(self.pit_x, self.ground.y, self.leave_at - now + 1.0))
+            p.act("happy", 1.0)
+            self.say(t, "헤헤, 함정 완성!")
+            self._idle_after(1.0)
+            self.phase, self._lure_at = "wait", now + 8
+        elif self.phase == "wait" and not self.trapped:
+            self._check_pit(now)
+
+    def _check_pit(self, now: float) -> None:
+        g = self.ground
+        for o in self.game.pets:
+            if o.grounded and o.on == g.hwnd and abs(o.pos_x - self.pit_x) < 12:
+                self.trapped = True                           # 걸렸다!
+                o.pos_x = self.pit_x
+                o.act("caught", 1.8)
+                o.squash = 0.3
+                self.game.events._say(o, "으앗! 함정이다!")
+                self.tewi.face(o.pos_x)
+                self.tewi.pet.act("happy", 1.2)
+                self.at(0.9, lambda: self.say(self.tewi, "헤헤~ 걸렸다 걸렸어!"))
+                self._idle_after(1.2)
+                return
+        if now >= self._lure_at:                              # 아무도 안 오면 가까운 친구를 꾐
+            self._lure_at = now + 9
+            near = [o for o in self.game.pets if o.grounded and o.on == g.hwnd]
+            if near:
+                o = min(near, key=lambda o: abs(o.pos_x - self.pit_x))
+                d = 1 if self.pit_x > o.pos_x else -1
+                o.act("walk", min(8.0, abs(self.pit_x - o.pos_x) / 30 + 1), vx=d * 30)
+                self.say(self.tewi, "저기 당근이 떨어져 있네~?")
+
+    def _bye(self) -> None:
+        self.phase = "bye"
+        t, g = self.tewi, self.ground
+        self.say(t, "그럼 안녕~ 깡총!")
+        t.go(g.x2 - 20 if self.side > 0 else g.x1 + 20, 110, run=True)
+        self.at(3.5, lambda: self.leave(t, 0.6))
+
+    def on_click(self, gu: Guest) -> None:
+        if self.lucky:
+            self.say(gu, random.choice(["행운은 한 번만~", "헤헤, 또 만지면 함정 판다?"]))
+            return
+        self.lucky = True
+        g, s = self.game, self.game.state
+        s.tewi_luck += 1
+        if not s.fate_boost:
+            s.fate_boost = True
+            line = "행운을 나눠 줄게! 다음 오미쿠지는 대길 쪽으로~"
+        else:
+            amount = max(30, s.income_per_min * 10)
+            s.add_saisen(amount)
+            g.shrine.set_saisen(s.saisen)
+            g.shrine.pop(f"+{amount:,}")
+            line = f"행운 듬뿍! 새전 +{amount:,}"
+        gu.pet.act("happy", 1.2)
+        self._idle_after(1.2)
+        self.say(gu, line, 3.0)
+        g.save()
+
+
+# ── 코이시: 거의 투명하게 숨어 다님, 찾아서 클릭하면 선물 ──
+class KoishiVisit(Visit):
+    kind = "koishi"
+
+    def __init__(self, visits: "Visits"):
+        super().__init__(visits)
+        g, sx = self.ground, self.game.shrine.pos_x
+        spots = [x for x in (random.uniform(g.x1 + 60, g.x2 - 60) for _ in range(12)) if abs(x - sx) > 220]
+        self.koishi = self.spawn("koishi", spots[0] if spots else random.uniform(g.x1 + 60, g.x2 - 60))
+        self.koishi.fade(KOISHI_ALPHA, 2.0)
+        now = time.monotonic()
+        self.found = False
+        self.leave_at = now + KOISHI_STAY
+        self.next_at = now + 2.0
+        self.peek_at = now + random.uniform(6, 10)
+        self.hint_at = now + random.uniform(12, 20)
+
+    def update(self, now: float) -> None:
+        k = self.koishi
+        if k.gone or self.found:
+            return
+        p = k.pet
+        if p.state == "held":                                 # 붙잡아도 찾은 것
+            return self._found()
+        if not k.ready:
+            return
+        if now >= self.leave_at:                              # 아무도 못 찾음 → 조용히
+            self.leave(k, 1.5)
+            return
+        if now >= self.peek_at:                               # 깜빡 보였다가 다시 사라짐
+            self.peek_at = now + random.uniform(7, 12)
+            k.fade(0.5, 0.5, lambda: not self.found and not k.gone and k.fade(KOISHI_ALPHA, 1.2))
+        if now >= self.hint_at:                               # 친구가 낌새를 챔
+            self.hint_at = now + random.uniform(15, 22)
+            near = [o for o in self.game.pets if o.grounded and abs(o.pos_x - p.pos_x) < 300]
+            if near:
+                o = random.choice(near)
+                o.facing = 1 if p.pos_x > o.pos_x else -1
+                self.game.events._say(o, random.choice(["……? 방금 누가 있었는데", "어라, 기분 탓인가?", "누구 있어?"]))
+        if now >= self.next_at:
+            r = random.random()
+            if r < 0.45:
+                secs = random.uniform(2.5, 4)
+                p.act("walk", 99, vx=random.choice((-1, 1)) * random.uniform(16, 22))
+            elif r < 0.7 and self.game.pets:
+                o = random.choice(self.game.pets)
+                k.go(o.pos_x - o.facing * 30, 24)             # 친구 바로 뒤에 슬쩍
+                secs = 5.0
+            else:
+                p.act("idle", 99)
+                secs = random.uniform(2, 4)
+            self.next_at = now + secs
+
+    def _found(self) -> None:
+        if self.found:
+            return
+        self.found = True
+        k, g, s = self.koishi, self.game, self.game.state
+        k.goal = None
+        k.fade(1.0, 0.25)
+        if k.pet.state != "held":
+            k.pet.act("skill", 1.4)                           # 쉿 → "까꿍!"
+        s.koishi_found += 1
+        r = random.random()
+        if r < 0.5:
+            n = 10 * s.shrine_level
+            s.cloth += n
+            prize = f"옷감 +{n}"
+        elif r < 0.8:
+            s.saisen += omamori.price(s)                      # 부적 한 번 공짜
+            res = omamori.pull(s, 1)
+            prize = omamori.CHARMS[res[0][0]].name
+        else:
+            amount = max(50, s.income_per_min * 30)
+            s.add_saisen(amount)
+            prize = f"새전 +{amount:,}"
+        g.shrine.set_saisen(s.saisen)
+        self.say(k, "들켰다~! 대단해!", 2.2)
+        self.at(2.3, lambda: self.say(k, f"찾아낸 선물: {prize}", 3.0))
+        self.at(1.4, lambda: k.pet.state != "held" and k.pet.act("happy", 99))
+        self.at(5.5, lambda: self.leave(k, 1.0))
+        log.info("코이시 찾음: %s", prize)
+        g.save()
+
+    def on_click(self, gu: Guest) -> None:
+        self._found()
+
+
+# ── 니토리: 갓파 노점 ──
+class NitoriVisit(Visit):
+    kind = "nitori"
+
+    def __init__(self, visits: "Visits"):
+        super().__init__(visits)
+        g, sx = self.ground, self.game.shrine.pos_x
+        self.side = 1 if (g.x2 - sx) > (sx - g.x1) else -1
+        clamp = lambda x: min(max(x, g.x1 + 30), g.x2 - 30)   # noqa: E731
+        self.nitori = self.spawn("nitori", clamp(sx + self.side * 420))
+        self.nitori.fade(1.0, 0.6)
+        self.nitori.go(clamp(sx + self.side * 120), 60)
+        self.goods = random.sample(sorted(NITORI_GOODS), 3)
+        self.sold: set[str] = set()
+        self.half = False
+        self._held = False
+        now = time.monotonic()
+        self.phase, self.until, self.leave_at, self.shout_at = "enter", now + 10, now + NITORI_STAY, 0.0
+
+    def _pose(self, seconds: float = 1.6) -> None:
+        p = self.nitori.pet
+        p.act("skill", seconds)                               # 렌치 → 발명품 자랑
+        self.at(seconds, lambda: self.phase != "bye" and p.state not in ("held", "fall") and p.act("idle", 99))
+
+    def update(self, now: float) -> None:
+        n = self.nitori
+        if n.gone:
+            return
+        p = n.pet
+        if p.state == "held":
+            self._held = True
+        if not n.ready:
+            return
+        if self._held:
+            self._held = False
+            p.act("caught", 1.2)
+            self.say(n, "으앗, 물건 쏟아진다~!")
+            self.at(1.2, lambda: self.phase != "bye" and p.act("idle", 99))
+        if self.phase == "enter" and (n.arrived() or now >= self.until):
+            n.goal = None
+            n.face(self.game.shrine.pos_x)
+            self._pose()
+            self.say(n, "갓파 노점 개업! 우클릭해서 구경해~", 3.5)
+            self.phase, self.shout_at = "shop", now + 14
+        elif self.phase == "shop":
+            if now >= self.leave_at or len(self.sold) == len(self.goods):
+                self._bye()
+            elif now >= self.shout_at:
+                self.shout_at = now + random.uniform(12, 18)
+                self._pose()
+                self.say(n, random.choice(["싸다 싸~! 맹우 특가!", "갓파 기술의 결정체!", "오늘만 이 가격이야~"]))
+
+    def _bye(self) -> None:
+        self.phase = "bye"
+        n, g = self.nitori, self.ground
+        self.say(n, "또 올게, 맹우~!" if self.sold else "다음엔 꼭 사 줘~")
+        self.at(1.2, lambda: n.go(g.x2 - 20 if self.side > 0 else g.x1 + 20, 70))
+        self.at(5.0, lambda: self.leave(n, 0.8))
+
+    def price(self, key: str) -> int:
+        base = nitori_price(self.game.state, key)
+        return base // 2 if self.half and key != "cucumber" else base
+
+    def fill_menu(self, gu: Guest, menu: "QMenu") -> None:
+        if self.phase != "shop":
+            return
+        menu.addSeparator()
+        head = menu.addAction("🛒 갓파 노점")
+        head.setEnabled(False)
+        for key in self.goods:
+            icon, name, desc = NITORI_GOODS[key]
+            price = self.price(key)
+            sold = key in self.sold
+            a = menu.addAction(f"{icon} {name} — 다 팔림" if sold else f"{icon} {name}  ({desc})   새전 {price:,}",
+                               lambda key=key: self.buy(key))
+            a.setEnabled(not sold and self.game.state.saisen >= price)
+
+    def buy(self, key: str) -> bool:
+        g, s = self.game, self.game.state
+        price = self.price(key)
+        if key in self.sold or self.phase != "shop" or s.saisen < price:
+            return False
+        s.saisen -= price
+        self.sold.add(key)
+        if key == "fan":
+            s.nitori_until = time.time() + 1800
+            line = "증기 선풍기 가동! 30분 동안 수입 ×1.5"
+        elif key == "cloth":
+            s.cloth += 30
+            line = "옷감 30장, 잘 써~"
+        elif key == "charm":
+            s.saisen += omamori.price(s)
+            res = omamori.pull(s, 1)
+            line = f"🎴 {aff.josa(omamori.CHARMS[res[0][0]].name, '이', '가')} 나왔어!"
+        elif key == "outfit":
+            s.saisen += wardrobe.price(s)
+            res = wardrobe.pull(s, 1)
+            it = wardrobe.ITEMS[res[0][0]]
+            line = f"👘 {it.name}" + (" — 새 옷이다!" if res[0][1] == "new" else " — 옷감으로 바꿨어")
+        else:
+            self.half = True
+            line = "오이다~! 고마워 맹우! 나머지는 반값!"
+        g.shrine.set_saisen(s.saisen)
+        g.shrine.pop(f"-{price:,}")
+        p = self.nitori.pet
+        p.act("happy", 1.0)
+        self.at(1.0, lambda: self.phase != "bye" and p.act("idle", 99))
+        self.say(self.nitori, line, 3.2)
+        log.info("니토리 노점: %s (%d)", key, price)
+        g.save()
+        return True
+
+    def on_click(self, gu: Guest) -> None:
+        self._pose(1.4)
+        self.say(gu, "우클릭하면 물건을 볼 수 있어!" if self.phase == "shop" else "갓파 노점이야~")
+
+
+VISIT_CLASSES = {"fairies": FairyVisit, "aya": AyaVisit, "suika": SuikaVisit,
+                 "tewi": TewiVisit, "koishi": KoishiVisit, "nitori": NitoriVisit}
 
 
 class Visits:

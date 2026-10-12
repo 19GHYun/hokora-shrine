@@ -66,6 +66,12 @@ def diary_lines(s: GameState, seconds: float, start: float, rng: random.Random |
         guests.append("아야가 신사 사진을 몇 장 찍어 갔다.")
     if s.guest_visits.get("suika"):
         guests.append("스이카가 신사 뒤에서 술판을 벌이다 잠들었다.")
+    if s.guest_visits.get("tewi"):
+        guests.append("마당에 웬 구멍이… 테위의 짓이 틀림없다.")
+    if s.guest_visits.get("koishi"):
+        guests.append("누군가 다녀간 것 같은데… 아무도 기억하지 못한다.")
+    if s.guest_visits.get("nitori"):
+        guests.append("니토리가 신사 앞에 노점을 폈다가 접고 갔다.")
     if guests and rng.random() < 0.5:
         lines.append(rng.choice(guests))
     rng.shuffle(lines)

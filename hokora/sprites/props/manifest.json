@@ -38,9 +38,46 @@
     "saisen_box": [
       85,
       154
+    ],
+    "kadomatsu": [
+      68,
+      205
+    ],
+    "snowman": [
+      81,
+      197
+    ],
+    "xmas_tree": [
+      72,
+      206
+    ],
+    "hina": [
+      112,
+      165
+    ],
+    "koinobori": [
+      82,
+      205
+    ],
+    "tanabata": [
+      77,
+      202
+    ],
+    "sunflower": [
+      78,
+      206
+    ],
+    "tsukimi": [
+      91,
+      191
+    ],
+    "pumpkin": [
+      84,
+      174
     ]
   },
   "sources": [
-    "item1.png"
+    "item1.png",
+    "1.png"
   ]
 }

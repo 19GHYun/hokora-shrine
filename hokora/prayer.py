@@ -17,6 +17,7 @@ INCOME_BOOST = 2        # 번영 기원: 수입 배수
 PAT_BOOST = 5           # 인연 기원: 쓰다듬기 보상 배수
 NEWS_BOOST = 1.5        # 붕붕마루 신문 기사 효과: 수입 배수 (news.py)
 NEWS_SECONDS = 30 * 60
+FAN_BOOST = 1.5         # 니토리의 증기 선풍기
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,13 @@ def income_multiplier(s: GameState) -> float:
         m *= NEWS_BOOST
     if season.is_new_year():
         m *= season.NEW_YEAR_BOOST
+    if fan_active(s):
+        m *= FAN_BOOST
     return m * (1 + omamori.bonus(s, "income"))
+
+
+def fan_active(s: GameState) -> bool:
+    return s.nitori_until > time.time()
 
 
 def news_active(s: GameState) -> bool:

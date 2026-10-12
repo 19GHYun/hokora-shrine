@@ -15,12 +15,13 @@ from . import daily, omamori, season, torii, wardrobe
 from .decor import decor_image
 from .guests import GUEST_ABOUT, VISITS, guest_stage
 from .omikuji import can_draw
-from .prayer import NEWS_BOOST, WISHES, blocked, fmt_left, income_multiplier, left, news_active
+from .prayer import (FAN_BOOST, NEWS_BOOST, WISHES, blocked, fan_active, fmt_left, income_multiplier, left,
+                     news_active)
 from .progress import UNLOCKS
 from .render import CHARACTERS, GUESTS, Pose, draw_character
 from .shrine import DRAW_STAGE, STAGE_SIZE
 from .sprites import image_sprites
-from .state import DECOR, SAISEN_BOX, SHRINE_STAGES, GameState
+from .state import DECOR, SAISEN_BOX, SEASONAL, SHRINE_SKINS, SHRINE_STAGES, GameState, in_season
 
 PORTRAIT = 76
 GUEST_KEYS = [k for keys, _ in VISITS.values() for k in keys]
@@ -170,6 +171,59 @@ class _LookButton(QWidget):
     def mousePressEvent(self, e) -> None:
         if e.button() == Qt.LeftButton and not self.locked:
             self.on_pick(self.stage)
+
+
+class _ShrineSkinButton(QWidget):
+    """신사 스킨: 그림 + 이름(가졌으면) 또는 값. 누르면 사거나 바꿔 입음."""
+
+    W, H = 104, 70
+
+    def __init__(self, key: str, on_click: Callable[[str], None]):
+        super().__init__()
+        self.key, self.on_click = key, on_click
+        self.state_ = None
+        self.setFixedSize(self.W, self.H + 18)
+        self.setCursor(Qt.PointingHandCursor)
+
+    def set_state(self, selected: bool, owned: bool, affordable: bool) -> None:
+        st = (selected, owned, affordable)
+        if st != self.state_:
+            self.state_ = st
+            name, price = SHRINE_SKINS[self.key]
+            self.setToolTip(f"{name} — " + ("다시 누르면 원래 모양" if selected else "눌러서 바꾸기" if owned
+                                             else f"새전 {price:,}에 사기" if affordable else "새전이 모자라요"))
+            self.update()
+
+    def paintEvent(self, _e) -> None:
+        selected, owned, affordable = self.state_ or (False, False, False)
+        name, price = SHRINE_SKINS[self.key]
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
+        r = QRectF(1, 1, self.W - 2, self.H - 2)
+        p.setPen(QPen(QColor("#C8102E"), 2) if selected else QPen(QColor(200, 16, 46, 50), 1))
+        p.setBrush(QColor(255, 255, 255, 230))
+        p.drawRoundedRect(r, 8, 8)
+        sprites = image_sprites("shrines")
+        if sprites is not None and self.key in sprites.images:
+            img, _ = sprites.images[self.key]
+            k = min((r.width() - 8) / img.width(), (r.height() - 6) / img.height())
+            p.drawImage(QRectF(r.center().x() - img.width() * k / 2, r.bottom() - 3 - img.height() * k,
+                               img.width() * k, img.height() * k), img)
+        if not owned:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(246, 240, 242, 120))
+            p.drawRoundedRect(r, 8, 8)
+        f = QFont("Malgun Gothic", 8)
+        f.setBold(selected)
+        p.setFont(f)
+        p.setPen(QColor("#B3122C") if selected or owned else QColor("#C8102E") if affordable else QColor("#8C7479"))
+        p.drawText(QRectF(0, self.H, self.W, 18), Qt.AlignCenter, name if owned else f"새전 {price:,}")
+        p.end()
+
+    def mousePressEvent(self, e) -> None:
+        if e.button() == Qt.LeftButton:
+            self.on_click(self.key)
 
 
 class _CharmTile(QWidget):
@@ -760,17 +814,25 @@ class ShrinePanel(QWidget):
             p4.addWidget(card)
             self.wish_rows[key] = (btn, status)
 
-        # ── 꾸미기: 신사 모양·크기 ──
-        p3.addWidget(QLabel("신사 모양", objectName="section"))
+        # ── 신사 탭 아래: 신사 모양·스킨·크기 ──
+        p1.addWidget(QLabel("신사 모양", objectName="section"))
         lrow = QHBoxLayout()
         lrow.setSpacing(6)
         self.look_btns = [_LookButton(st, lambda st: self._act("look", st)) for st in SHRINE_STAGES]
         for b in self.look_btns:
             lrow.addWidget(b)
         lrow.addStretch(1)
-        p3.addLayout(lrow)
+        p1.addLayout(lrow)
         look_tip = QLabel("모양만 바뀌고, 수입은 가장 높이 올린 단계 그대로예요.", objectName="goal")
-        p3.addWidget(look_tip)
+        p1.addWidget(look_tip)
+        p1.addWidget(QLabel("신사 스킨", objectName="section"))
+        krow = QHBoxLayout()
+        krow.setSpacing(6)
+        self.shrine_skin_btns = [_ShrineSkinButton(k, lambda k: self._act("shrine_skin", k)) for k in SHRINE_SKINS]
+        for b in self.shrine_skin_btns:
+            krow.addWidget(b)
+        krow.addStretch(1)
+        p1.addLayout(krow)
         srow = QHBoxLayout()
         srow.addWidget(QLabel("크기", objectName="section"))
         self.size_btns: dict[float, QPushButton] = {}
@@ -781,7 +843,7 @@ class ShrinePanel(QWidget):
             srow.addWidget(b)
             self.size_btns[k] = b
         srow.addStretch(1)
-        p3.addLayout(srow)
+        p1.addLayout(srow)
 
         # ── 꾸미기 ──
         tip = QLabel("장식을 사서 신사 옆에 놓으면 분당 새전이 늘어요. 놓은 장식은 좌우로 끌어서 옮길 수 있어요.",
@@ -796,28 +858,24 @@ class ShrinePanel(QWidget):
         dgrid = QGridLayout()
         dgrid.setSpacing(6)
         self.decor_rows: dict[str, tuple] = {}
-        for i, key in enumerate(DECOR):
-            name, price, bonus, _ = DECOR[key]
-            card = QWidget(objectName="card")
-            card.setAttribute(Qt.WA_StyledBackground, True)
-            cv = QVBoxLayout(card)
-            cv.setContentsMargins(6, 6, 6, 6)
-            cv.setSpacing(2)
-            pic = QLabel()
-            pic.setAlignment(Qt.AlignCenter)
-            pic.setPixmap(_decor_icon(key, 52))
-            title = QLabel(name, objectName="name")
-            title.setAlignment(Qt.AlignCenter)
-            info = QLabel(f"분당 +{bonus}", objectName="goal")
-            info.setAlignment(Qt.AlignCenter)
-            btn = QPushButton()
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(lambda _=False, k=key: self._decor_clicked(k))
-            for w in (pic, title, info, btn):
-                cv.addWidget(w)
+        for i, key in enumerate(k for k in DECOR if k not in SEASONAL):
+            card = self._decor_card(key, f"분당 +{DECOR[key][2]}")
             dgrid.addWidget(card, i // 3, i % 3)
-            self.decor_rows[key] = (btn, price)
         p3.addLayout(dgrid)
+        # 계절 한정: 지금 파는 것과 이미 산 것만 보임
+        self.season_title = QLabel("🎍 계절 한정 장식", objectName="section")
+        p3.addWidget(self.season_title)
+        season_tip = QLabel("이번 달에만 파는 장식이에요. 사 두면 계절이 지나도 언제든 놓을 수 있어요.", objectName="goal")
+        season_tip.setWordWrap(True)
+        p3.addWidget(season_tip)
+        self.season_grid = QGridLayout()
+        self.season_grid.setSpacing(6)
+        self.season_cards = {}
+        for key in SEASONAL:
+            months = "·".join(str(m) for m in SEASONAL[key])
+            self.season_cards[key] = self._decor_card(key, f"{months}월 · 분당 +{DECOR[key][2]}")
+        p3.addLayout(self.season_grid)
+        self._season_shown: list[str] | None = None
         self._anchor = None
         self._top: float | None = None
         self._roles: dict[int, str] = {}
@@ -844,6 +902,8 @@ class ShrinePanel(QWidget):
         tags = (["번영 기원 ×2"] if left(s, "prosper") else []) + ([f"신문 ×{NEWS_BOOST:g}"] if news_active(s) else [])
         if season.is_new_year():
             tags.append(f"설날 ×{season.NEW_YEAR_BOOST}")
+        if fan_active(s):
+            tags.append(f"선풍기 ×{FAN_BOOST:g}")
         self.sub.setText(f"새전 {s.saisen:,}   ·   분당 새전 {s.income_per_min * boost:g}"
                          + (f"  ({', '.join(tags)})" if tags else ""))
         drawable = can_draw(s)
@@ -952,7 +1012,9 @@ class ShrinePanel(QWidget):
 
         # 신사 모양·크기
         for b in self.look_btns:
-            b.set_state(b.stage == s.look_stage, b.stage > s.shrine_level)
+            b.set_state(not s.shrine_skin and b.stage == s.look_stage, b.stage > s.shrine_level)
+        for b in self.shrine_skin_btns:
+            b.set_state(s.shrine_skin == b.key, b.key in s.shrine_skins, s.saisen >= SHRINE_SKINS[b.key][1])
         for k, b in self.size_btns.items():
             self._role(b, "small" if abs(s.size_scale - k) < 0.01 else "ghost")
 
@@ -1010,14 +1072,21 @@ class ShrinePanel(QWidget):
         self.news_boost.setVisible(news_active(s))
         self.news_label.setText("\n".join(f"· {h}" for h in reversed(s.news[-3:]))
                                 or "아직 기사가 없어요. 신사가 2단계가 되면 기자가 취재하러 와요.")
-        self.guest_stats.setText(f"붙잡은 요정 {s.fairies_caught}번   ·   스이카가 두고 간 새전 {s.suika_saisen:,}")
+        self.guest_stats.setText(f"붙잡은 요정 {s.fairies_caught}번   ·   찾아낸 코이시 {s.koishi_found}번   ·   "
+                                 f"스이카가 두고 간 새전 {s.suika_saisen:,}")
+        self.guest_stats.setWordWrap(True)
         hours = s.runtime_sec / 3600
         self.stats.setText(f"모은 새전 {s.saisen_total:,}   ·   쓰다듬기 {s.pats:,}번   ·   함께한 시간 {hours:.1f}시간"
                            f"   ·   붙잡은 새전 도둑 {s.thief_caught}번"
                            + (f"\n장식 보너스 분당 +{s.decor_bonus}" if s.decor_bonus else ""))
 
+        self._refresh_season_cards()
         for key, (btn, price) in self.decor_rows.items():
-            if key not in s.decor_owned:
+            if key not in s.decor_owned and not in_season(key):
+                btn.setText(f"{SEASONAL[key][0]}월에 팔아요")
+                self._role(btn, "ghost")
+                btn.setEnabled(False)
+            elif key not in s.decor_owned:
                 btn.setText(f"구입  {price:,}")
                 self._role(btn, "small")
                 btn.setEnabled(s.saisen >= price)
@@ -1033,6 +1102,39 @@ class ShrinePanel(QWidget):
     def _omikuji(self) -> None:
         self.close()             # 오미쿠지 종이를 띄우려고 창은 닫음
         self.on_omikuji()
+
+    def _decor_card(self, key: str, info_text: str) -> QWidget:
+        name, price, _bonus, _ = DECOR[key]
+        card = QWidget(objectName="card")
+        card.setAttribute(Qt.WA_StyledBackground, True)
+        cv = QVBoxLayout(card)
+        cv.setContentsMargins(6, 6, 6, 6)
+        cv.setSpacing(2)
+        pic = QLabel()
+        pic.setAlignment(Qt.AlignCenter)
+        pic.setPixmap(_decor_icon(key, 52))
+        title = QLabel(name, objectName="name")
+        title.setAlignment(Qt.AlignCenter)
+        info = QLabel(info_text, objectName="goal")
+        info.setAlignment(Qt.AlignCenter)
+        btn = QPushButton()
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.clicked.connect(lambda _=False, k=key: self._decor_clicked(k))
+        for w in (pic, title, info, btn):
+            cv.addWidget(w)
+        self.decor_rows[key] = (btn, price)
+        return card
+
+    def _refresh_season_cards(self) -> None:
+        s = self.state
+        shown = [k for k in SEASONAL if k in s.decor_owned or in_season(k)]
+        if shown != self._season_shown:                # 보이는 칸이 바뀔 때만 다시 배치
+            self._season_shown = shown
+            for k, card in self.season_cards.items():
+                self.season_grid.removeWidget(card)
+                card.setVisible(k in shown)
+            for i, k in enumerate(shown):
+                self.season_grid.addWidget(self.season_cards[k], i // 3, i % 3)
 
     def _act(self, name: str, value=None):
         result = self.on_action(name, value) if self.on_action is not None else None

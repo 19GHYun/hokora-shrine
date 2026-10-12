@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "standing_height": 200,
+  "facing": 1,
+  "frames": {
+    "moriya": [
+      139,
+      194
+    ],
+    "snowy": [
+      137,
+      206
+    ],
+    "sakura": [
+      186,
+      193
+    ],
+    "scarlet": [
+      142,
+      204
+    ]
+  },
+  "sources": [
+    "2.png"
+  ]
+}

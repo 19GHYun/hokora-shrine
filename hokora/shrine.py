@@ -9,6 +9,9 @@ from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath
 from PySide6.QtWidgets import QWidget
 
 from .season import night_glow
+from .sprites import image_sprites
+
+SKIN_H = 125   # 신사 스킨 그림의 높이 (보통 크기, 발까지)
 
 GROUND_MARGIN = 2
 LABEL_SPACE = 32          # 건물 위 말풍선(새전 수·+N) 자리
@@ -42,9 +45,24 @@ class ShrineWindow(QWidget):
         self.pops: list[list] = []      # [나이, 글자]
         self.hover = False
         self.night = False
+        self.skin: str | None = None     # 신사 스킨 (그림) — 있으면 단계 모양 대신
         self._press = None
         self._dragging = False
         self.set_level(level)
+
+    def set_skin(self, key: str | None) -> None:
+        self.skin = key or None
+        self.set_level(self.level)
+
+    def _skin_image(self):
+        """(그림, 발 위치, 배율) — 스킨이 없거나 그림을 못 읽으면 None."""
+        if not self.skin:
+            return None
+        sprites = image_sprites("shrines")
+        if sprites is None or self.skin not in sprites.images:
+            return None
+        img, anchor = sprites.images[self.skin]
+        return img, anchor, SKIN_H * self._k / max(1.0, anchor.y())
 
     def set_night(self, on: bool) -> None:
         """밤엔 푸르스름하게, 등불이 켜진 듯이."""
@@ -58,8 +76,13 @@ class ShrineWindow(QWidget):
     def set_level(self, level: int) -> None:
         """신사 모양(단계)이나 크기가 바뀌면 창 크기도 건물에 맞게."""
         self.level = level
-        w, h = STAGE_SIZE[level]
-        self.setFixedSize(round(w * self._k) + 20, round(h * self._k) + LABEL_SPACE)
+        sk = self._skin_image()
+        if sk is not None:
+            img, anchor, sc = sk
+            self.setFixedSize(round(img.width() * sc) + 20, round(anchor.y() * sc) + LABEL_SPACE)
+        else:
+            w, h = STAGE_SIZE[level]
+            self.setFixedSize(round(w * self._k) + 20, round(h * self._k) + LABEL_SPACE)
         self.pos_x = self._clamp(self.pos_x)
         self._place()
         self.update()
@@ -94,14 +117,24 @@ class ShrineWindow(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         # 건물은 창 아래쪽에 (바닥 = 창 아래)
-        bw, bh = STAGE_SIZE[self.level]
-        k = self._k
+        sk = self._skin_image()
         p.save()
-        p.translate((self.width() - bw * k) / 2, self.height() - GROUND_MARGIN - bh * k)
-        p.scale(k, k)
-        DRAW_STAGE[self.level](p)
-        if self.night:
-            night_glow(p, bw, bh)
+        if sk is not None:                                   # 신사 스킨 그림
+            img, anchor, sc = sk
+            p.setRenderHint(QPainter.SmoothPixmapTransform)
+            p.translate((self.width() - img.width() * sc) / 2, self.height() - GROUND_MARGIN - anchor.y() * sc)
+            p.scale(sc, sc)
+            p.drawImage(0, 0, img)
+            if self.night:
+                night_glow(p, img.width(), img.height())
+        else:
+            bw, bh = STAGE_SIZE[self.level]
+            k = self._k
+            p.translate((self.width() - bw * k) / 2, self.height() - GROUND_MARGIN - bh * k)
+            p.scale(k, k)
+            DRAW_STAGE[self.level](p)
+            if self.night:
+                night_glow(p, bw, bh)
         p.restore()
         f = QFont("Malgun Gothic", 9)
         f.setBold(True)

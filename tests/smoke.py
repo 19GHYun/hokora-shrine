@@ -262,13 +262,64 @@ def t_shop():
     check("신사 관리 창 탭 8개 열기", True)
 
 
+def t_season_shop():
+    from hokora.state import SEASONAL, in_season
+    now_key = next(k for k in SEASONAL if in_season(k))
+    off_key = next(k for k in SEASONAL if not in_season(k))
+    s.saisen = 10 ** 7
+    game.on_decor(off_key, "buy")
+    check("철 지난 계절 장식은 못 삼", off_key not in s.decor_owned, off_key)
+    game.on_decor(now_key, "buy")
+    check("이번 달 계절 장식", now_key in s.decor_owned and now_key in game.decors, now_key)
+    check("신사 스킨 사기", game.on_action("shrine_skin", "moriya") and game.shrine.skin == "moriya")
+    check("신사 스킨 벗기", game.on_action("shrine_skin", "moriya") and game.shrine.skin is None)
+    calm()
+    check("테위 방문", game.visits.start("tewi"))
+
+
+def t_tewi():
+    v = game.visits.visit
+    check("테위가 함정 팜", v is not None and v.pit_x is not None, v.phase if v else None)
+    s.fate_boost = False
+    if v is not None:
+        game.on_pat(v.tewi.pet)
+    check("테위 쓰다듬기 → 오미쿠지 행운", s.fate_boost and s.tewi_luck >= 1)
+    if game.visits.visit:
+        game.visits.visit.cancel()
+
+
+def t_koishi():
+    check("코이시 방문", game.visits.start("koishi"))
+    v = game.visits.visit
+    check("코이시는 거의 투명", v is not None and v.koishi.pet.windowOpacity() < 0.3)
+    if v is not None:
+        game.on_pat(v.koishi.pet)
+    check("코이시 찾기", s.koishi_found == 1)
+
+
+def t_nitori():
+    check("코이시 돌아감", game.visits.visit is None)
+    calm()
+    check("니토리 방문", game.visits.start("nitori"))
+
+
+def t_nitori2():
+    v = game.visits.visit
+    check("니토리 노점", v is not None and v.phase == "shop", v.phase if v else None)
+    if v is not None:
+        key = v.goods[0]
+        check(f"니토리 물건 사기 ({key})", v.buy(key) and key in v.sold)
+        v.cancel()
+
+
 def t_end():
     app.quit()
 
 
 STEPS = [(t_core, 3000), (t_core2, 2500), (t_thief, 1600), (t_skill, 1800), (t_aff, 6000), (t_tag, 6000),
          (t_duel, 8500), (t_fairies, 8000), (t_fairies2, 17000), (t_aya, 20000), (t_suika, 2000),
-         (t_shop, 1000), (t_end, 0)]
+         (t_shop, 1000), (t_season_shop, 12000), (t_tewi, 1500), (t_koishi, 7500), (t_nitori, 11000),
+         (t_nitori2, 1500), (t_end, 0)]
 
 
 def run(i: int = 0) -> None:
