@@ -20,7 +20,8 @@ MIN_AWAY = 10 * 60        # 이보다 짧게 비우면 일기는 쓰지 않음
 def offline_income(s: GameState, seconds: float) -> int:
     """꺼져 있던 동안 새전함에 쌓인 새전 (새전함 단계만큼만, 최대 시간까지)."""
     cap_h, rate, _ = SAISEN_BOX[s.box_level]
-    return int(s.income_per_min * min(seconds, cap_h * 3600) / 60 * rate * (1 + omamori.bonus(s, "offline")))
+    pill = 2 if s.dream_pill else 1                          # 레이센의 꿈나라 약
+    return int(s.income_per_min * min(seconds, cap_h * 3600) / 60 * rate * (1 + omamori.bonus(s, "offline")) * pill)
 
 
 def _hm(seconds: float) -> str:
@@ -56,6 +57,7 @@ def diary_lines(s: GameState, seconds: float, start: float, rng: random.Random |
         "remilia": ["레밀리아가 양산을 쓰고 신사를 둘러봤다."],
         "flandre": ["플랑드르가 뭔가를 부쉈다… 다행히 신사는 멀쩡하다.", "플랑드르가 언니를 졸졸 따라다녔다."],
         "youmu": ["요우무가 신사 정원수를 반듯하게 다듬었다.", "요우무가 반령과 함께 툇마루에서 수행했다."],
+        "meiling": ["메이링이 신사 앞을 지키다… 꾸벅꾸벅 졸았다.", "메이링이 마당에서 태극권을 연습했다."],
     }
     if "remilia" in s.unlocked and _night_overlap(start, start + seconds):
         pool["remilia"].append("레밀리아가 밤새 신사 지붕 위에서 달을 봤다.")
@@ -71,6 +73,10 @@ def diary_lines(s: GameState, seconds: float, start: float, rng: random.Random |
         guests.append("마당에 웬 구멍이… 테위의 짓이 틀림없다.")
     if s.guest_visits.get("koishi"):
         guests.append("누군가 다녀간 것 같은데… 아무도 기억하지 못한다.")
+    if "meiling" in s.unlocked and s.meiling_blocks:
+        guests.append("메이링이 새전 도둑을 문 앞에서 막아냈다!")
+    if s.guest_visits.get("reisen"):
+        guests.append("레이센이 약상자를 메고 다녀갔다. 테위를 찾는 눈치였다.")
     if s.guest_visits.get("yuyuko"):
         guests.append("유유코가 공양물 냄새를 맡고 기웃거렸다.")
     if s.guest_visits.get("mystia"):

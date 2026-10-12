@@ -107,6 +107,7 @@ class Game(QObject):
         self._away_earned = offline_income(self.state, self._away) if self._away > 60 else 0
         if self._away_earned:
             self.state.add_saisen(self._away_earned)
+            self.state.dream_pill = False            # 꿈나라 약은 한 번 쓰면 끝
             log.info("꺼져 있던 %.0f분 동안 새전 +%d", self._away / 60, self._away_earned)
         self._nap_start = 0.0
         self._nap_total = 0

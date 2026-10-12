@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 
 # 콤비: (a, b) → (a 동작, b 동작, a 대사, b 대사, 초)
 COMBOS = {
+    ("sakuya", "meiling"): ("idle", "startled", "메이링, 근무 중이죠?", "무, 물론이에요! 깨어 있었어요!", 3.0),
+    ("meiling", "cirno"): ("skill", "happy", "자, 태극권 같이 해요!", "최강의 태극권이다!", 3.0),
     ("youmu", "sakuya"): ("wave", "wave", "사쿠야 씨, 오늘도 바쁘시죠?", "메이드 일은 끝이 없답니다.", 3.0),
     ("marisa", "youmu"): ("happy", "startled", "오, 반령 좀 만져 봐도 돼?", "아, 안 돼요!", 2.0),
     ("reimu", "marisa"): ("sit", "sit", "차 한잔 할래?", "좋지! 과자도 있냐?", 9.0),
@@ -35,7 +37,7 @@ DUEL_TIME = 6.0
 SHOT_COLORS = {
     "reimu": ("#E23C52", "#FFFFFF"), "marisa": ("#F4D35E", "#FFF6C8"), "cirno": ("#7FD3F7", "#E6F7FF"),
     "sakuya": ("#C8CCD8", "#FFFFFF"), "sanae": ("#5FB84E", "#E4F5DD"), "remilia": ("#C0303A", "#FFB3BC"),
-    "flandre": ("#F08A2E", "#FFE08A"), "youmu": ("#8FD08A", "#FFFFFF"), "aya": ("#333333", "#DDDDDD"), "suika": ("#9C6ADE", "#E9DDFB"),
+    "flandre": ("#F08A2E", "#FFE08A"), "youmu": ("#8FD08A", "#FFFFFF"), "meiling": ("#FF9A3D", "#FFF0A0"), "aya": ("#333333", "#DDDDDD"), "suika": ("#9C6ADE", "#E9DDFB"),
 }
 
 

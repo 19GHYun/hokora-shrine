@@ -37,7 +37,7 @@ PICKUP_WEIGHT = 3
 CLOTH_GAIN = {"N": 1, "R": 3, "SR": 10, "SSR": 40}       # 중복 → 옷감
 CLOTH_COST = {"N": 10, "R": 30, "SR": 100, "SSR": 300}   # 옷감 → 원하는 것 교환
 SHORT = {"reimu": "레이무", "marisa": "마리사", "sakuya": "사쿠야", "cirno": "치르노", "sanae": "사나에",
-         "remilia": "레밀리아", "flandre": "플랑드르", "youmu": "요우무"}
+         "remilia": "레밀리아", "flandre": "플랑드르", "youmu": "요우무", "meiling": "메이링"}
 
 # 캐릭터 → 옷 색 범위: (색상 범위(도) 또는 "dark", 최소 채도, 최소 밝기, 최대 채도, 최대 밝기)
 OUTFIT = {
@@ -49,6 +49,7 @@ OUTFIT = {
     "remilia": ((330, 358), 0.10, 0.55, 1.0, 1.0),    # 분홍 드레스·빨간 리본 (살색 10~20도는 빼고)
     "flandre": ((335, 20), 0.40, 0.30, 1.0, 1.0),     # 빨간 옷
     "youmu": ((110, 170), 0.20, 0.15, 1.0, 1.0),      # 초록 조끼·치마
+    "meiling": ((90, 160), 0.20, 0.15, 1.0, 1.0),     # 초록 치파오·모자
 }
 # 색 스킨: id → (이름, 바꿀 색상(도, None 이면 무채색), 채도 배수, 밝기 배수, 등급)
 COLORS = {
@@ -72,6 +73,7 @@ CHAR_COLORS = {
     "remilia": ["sky", "mint", "purple", "black"],
     "flandre": ["blue", "green", "purple", "black"],
     "youmu": ["blue", "purple", "red", "black"],
+    "meiling": ["blue", "purple", "pink", "black"],
 }
 FILTERS = {"mono": ("흑백", "R"), "ghost": ("유령", "SR"), "silver": ("은빛", "SR"), "gold": ("금빛", "SSR")}
 # 그림체: 지금 그림을 코드로 다른 그림체처럼 (도트·수채화·연필 스케치·네온)
@@ -83,7 +85,21 @@ EFFECTS = {
 FOOTPRINTS = {"hearts", "petals", "stars", "rainbow"}
 # 전용 의상 그림 폴더(<캐릭터>@<스킨>)의 이름 — 폴더만 넣으면 전설 등급으로 뽑기에 들어감
 ART_NAMES = {"yukata": "유카타", "santa": "산타", "swimsuit": "수영복", "pajama": "잠옷", "school": "교복",
-             "maid": "메이드", "kimono": "기모노", "witch": "마녀"}
+             "maid": "메이드", "kimono": "기모노", "witch": "마녀", "pumpkin": "호박", "obake": "유령 분장"}
+# 기간 한정 전용 의상: 옷 → 나오는 달 (그 달에만 뽑기에 나오고 교환할 수 있음, 확률 3배)
+ART_SEASON = {"witch": (10,), "pumpkin": (10,), "obake": (10,)}
+
+
+def in_season(it: "Item", month: int | None = None) -> bool:
+    if it.kind != "art" or it.skin not in ART_SEASON:
+        return True
+    return (month or date.today().month) in ART_SEASON[it.skin]
+
+
+def event_items(s: GameState) -> list["Item"]:
+    """지금 기간 한정으로 나오는 전용 의상 (만난 친구 것만)."""
+    return [it for it in ITEMS.values() if it.kind == "art" and it.skin in ART_SEASON
+            and it.char in s.unlocked and in_season(it)]
 
 
 @dataclass(frozen=True)
@@ -138,8 +154,8 @@ def pickup(s: GameState, today: date | None = None) -> str | None:
 
 
 def pool(s: GameState) -> list[Item]:
-    """만난 친구의 옷 + 이펙트."""
-    return [it for it in ITEMS.values() if it.char is None or it.char in s.unlocked]
+    """만난 친구의 옷 + 이펙트 (기간 한정 의상은 그 기간에만)."""
+    return [it for it in ITEMS.values() if (it.char is None or it.char in s.unlocked) and in_season(it)]
 
 
 def pull(s: GameState, n: int, rng: random.Random | None = None) -> list[tuple[str, str]] | None:
@@ -163,7 +179,9 @@ def pull(s: GameState, n: int, rng: random.Random | None = None) -> list[tuple[s
         if rank == "SSR":
             s.wardrobe_pity = 0
         cands = [it for it in items if it.rarity == rank]
-        it = rng.choices(cands, weights=[PICKUP_WEIGHT if it.char == pick else 1 for it in cands])[0]
+        weights = [PICKUP_WEIGHT if it.char == pick or (it.kind == "art" and it.skin in ART_SEASON) else 1
+                   for it in cands]
+        it = rng.choices(cands, weights=weights)[0]
         if it.id in s.wardrobe:
             s.cloth += CLOTH_GAIN[it.rarity]
             results.append((it.id, "dup"))
@@ -179,6 +197,8 @@ def exchange(s: GameState, item_id: str) -> bool:
     if it is None or item_id in s.wardrobe or s.cloth < CLOTH_COST[it.rarity]:
         return False
     if it.char is not None and it.char not in s.unlocked:
+        return False
+    if not in_season(it):
         return False
     s.cloth -= CLOTH_COST[it.rarity]
     s.wardrobe.append(item_id)

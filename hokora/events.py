@@ -30,7 +30,7 @@ log = logging.getLogger("Hokora.events")
 MEET_DIST = 36           # 이만큼 가까이 스치면 인사
 MEET_COOLDOWN = 45.0     # 같은 둘은 이 시간(초) 동안 다시 인사하지 않음
 SKILL_COOLDOWN = {"reimu": 90.0, "cirno": 120.0, "sakuya": 300.0,
-                  "sanae": 240.0, "flandre": 180.0, "remilia": 600.0, "youmu": 150.0}
+                  "sanae": 240.0, "flandre": 180.0, "remilia": 600.0, "youmu": 150.0, "meiling": 200.0}
 MIRACLE_SAISEN = 10
 TIME_STOP = 3.0
 THIEF_CHECK = 60.0       # 이 간격으로 도둑질할지 주사위
@@ -41,6 +41,9 @@ FLEE_TIME = 7.0
 BUBBLE_UP = 76           # 캐릭터 발에서 말풍선 꼬리까지
 PLAY_CHECK = 60.0        # 이 간격으로 놀이(술래잡기·탄막)를 할지 주사위
 PLAY_CHANCE = 0.12       # → 평균 8분쯤에 한 번
+GUARD_CHANCE = 0.7       # 깨어 있는 메이링이 새전 도둑을 막을 확률
+DOZE_EVERY = (120.0, 240.0)   # 메이링이 조는 간격
+DOZE_FOR = (20.0, 40.0)
 
 
 class Events:
@@ -57,6 +60,10 @@ class Events:
         self.tag: Tag | None = None
         self.duel: Duel | None = None
         self._play_next = time.monotonic() + PLAY_CHECK * 2
+        self._doze_at = time.monotonic() + random.uniform(*DOZE_EVERY)
+        self._doze_until = 0.0
+        self._doze_scolded = False
+        self._guard_checked = False
 
     # ── 공통 ──
     def _say(self, pet: "PetWindow", text: str, seconds: float = 2.5) -> None:
@@ -72,6 +79,64 @@ class Events:
         self._meetings()
         self._thief_tick()
         self._play_tick()
+        self._meiling_tick()
+
+    # ── 메이링: 문 앞에서 꾸벅꾸벅 ──
+    def _meiling(self):
+        return next((p for p in self.game.pets if p.ch.key == "meiling"), None)
+
+    def _meiling_tick(self) -> None:
+        m = self._meiling()
+        if m is None:
+            return
+        now = time.monotonic()
+        if self._doze_until:
+            if m.state != "sleep":                       # 쓰다듬거나 들어 올려서 깸
+                self._doze_until = 0.0
+                self._doze_at = now + random.uniform(*DOZE_EVERY)
+                self._say(m, random.choice(["앗! 안 잤어요!", "기, 기를 느끼고 있었어요!"]))
+            elif now >= self._doze_until:
+                self._doze_until = 0.0
+                self._doze_at = now + random.uniform(*DOZE_EVERY)
+                m.act("idle", 2.0)
+            elif not self._doze_scolded:
+                sak = next((p for p in self.game.pets if p.ch.key == "sakuya" and p.grounded
+                            and p.on == m.on and abs(p.pos_x - m.pos_x) < 320), None)
+                if sak is not None:
+                    self._doze_scolded = True
+                    sak.facing = 1 if m.pos_x > sak.pos_x else -1
+                    self._say(sak, "메이링! 또 자?")
+                    self.game.later(1.4, lambda: m.state == "sleep" and m.react(False))
+            return
+        if (now >= self._doze_at and m.grounded and m.state in ("idle", "sit")
+                and not self.game.napping and self.thief is not m):
+            m.state, m.vx = "sleep", 0.0                 # 서서 졸기 (메이링의 잠 그림은 서 있음)
+            m.state_until = float("inf")
+            self._doze_until = now + random.uniform(*DOZE_FOR)
+            self._doze_scolded = False
+            if random.random() < 0.4:
+                self._say(m, "zZ… 문은… 지키고… 있어요…")
+
+    def _guard(self, thief: "PetWindow") -> bool:
+        """메이링이 깨어 있으면 새전함으로 가는 마리사를 막는다."""
+        me = self._meiling()
+        if me is None:
+            return False
+        if me.state == "sleep":
+            self._say(thief, "문지기가 자고 있네~ 헤헤")
+            return False
+        if not me.grounded or me.on != thief.on or random.random() > GUARD_CHANCE:
+            return False
+        me.facing = 1 if thief.pos_x > me.pos_x else -1
+        me.act("skill", 1.4)
+        self._say(me, random.choice(["여기는 지나갈 수 없어요!", "새전함은 제가 지켜요!", "하앗! 문지기를 얕보지 마세요!"]))
+        thief.act("caught", 1.6)
+        thief.facing = -me.facing
+        self.game.later(1.4, lambda: self._say(thief, "쳇, 오늘은 문지기가 깨어 있잖아…"))
+        self.game.state.meiling_blocks += 1
+        log.info("메이링이 새전 도둑을 막음")
+        self._end_thief("막힘")
+        return True
 
     # ── 놀이: 술래잡기·탄막놀이 ──
     def _play_tick(self) -> None:
@@ -176,6 +241,12 @@ class Events:
         elif key == "youmu":
             pet.act("skill", 1.4)
             self.game.later(0.9, lambda: self._garden(pet))
+        elif key == "meiling":
+            pet.act("skill", 1.6)
+            self._say(pet, random.choice(["하앗! 태극권 연습!", "기를 모아서… 하!", "오늘도 수련~"]))
+            fans = [o for o in self.game.pets if o is not pet and o.grounded and o.on == pet.on
+                    and abs(o.pos_x - pet.pos_x) < 220]
+            self.game.later(1.2, lambda: [o.react(True) for o in fans if o.grounded])
         elif key == "remilia":
             if not can_draw(self.game.state) or self.game.state.fate_boost:
                 self._skill_at[key] = now - cool + 60    # 조작할 운명이 없으면 1분 뒤 다시
@@ -241,6 +312,10 @@ class Events:
         if self.thief_phase == "approach":
             if not m.scripted or m.on is None:          # 도중에 잡혀서 던져짐 → 취소
                 return self._end_thief("취소")
+            if not self._guard_checked:
+                self._guard_checked = True
+                if self._guard(m):
+                    return
             if abs(m.pos_x - shrine.pos_x) < 18 or m.vx == 0:
                 self._steal()
         elif self.thief_phase == "steal":
@@ -274,6 +349,7 @@ class Events:
         if m.on != g.ground_under(g.shrine.pos_x).hwnd:   # 신사와 같은 바닥에 있을 때만
             return False
         self.thief, self.thief_phase = m, "approach"
+        self._guard_checked = False
         self._thief_last = time.monotonic()
         m.scripted = True
         d = 1 if g.shrine.pos_x > m.pos_x else -1

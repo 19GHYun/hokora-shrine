@@ -21,9 +21,10 @@ from .progress import UNLOCKS
 from .render import CHARACTERS, GUESTS, Pose, draw_character
 from .shrine import DRAW_STAGE, STAGE_SIZE
 from .sprites import image_sprites
-from .state import DECOR, SAISEN_BOX, SEASONAL, SHRINE_SKINS, SHRINE_STAGES, GameState, in_season
+from .state import DECOR, GARDEN, SAISEN_BOX, SEASONAL, SHRINE_SKINS, SHRINE_STAGES, GameState, in_season
 
 PORTRAIT = 76
+G_PORTRAIT = 58          # 손님 카드 (손님이 많아서 작게)
 GUEST_KEYS = [k for keys, _ in VISITS.values() for k in keys]
 
 STYLE = """
@@ -759,9 +760,9 @@ class ShrinePanel(QWidget):
             card = QWidget(objectName="card")
             card.setAttribute(Qt.WA_StyledBackground, True)
             h = QHBoxLayout(card)
-            h.setContentsMargins(8, 8, 10, 8)
+            h.setContentsMargins(6, 5, 8, 5)
             pic = QLabel()
-            pic.setFixedSize(PORTRAIT, PORTRAIT)
+            pic.setFixedSize(G_PORTRAIT, G_PORTRAIT)
             info = QVBoxLayout()
             info.setSpacing(3)
             name, line1, line2 = QLabel(), QLabel(objectName="goal"), QLabel(objectName="goal")
@@ -855,26 +856,46 @@ class ShrinePanel(QWidget):
         self.view_box.setChecked(state.show_decor)
         self.view_box.toggled.connect(lambda on: self.on_decor("", "show" if on else "hide"))
         p3.addWidget(self.view_box)
-        dgrid = QGridLayout()
-        dgrid.setSpacing(6)
         self.decor_rows: dict[str, tuple] = {}
-        for i, key in enumerate(k for k in DECOR if k not in SEASONAL):
-            card = self._decor_card(key, f"분당 +{DECOR[key][2]}")
-            dgrid.addWidget(card, i // 3, i % 3)
-        p3.addLayout(dgrid)
+        drow = QHBoxLayout()
+        self.decor_view = "base"
+        self.decor_view_btns = {}
+        for key, label in (("base", "🏮 기본"), ("garden", "🎋 정원"), ("season", "🎍 계절 한정")):
+            b = QPushButton(label, objectName="ghost")
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, key=key: self._decor_view(key))
+            drow.addWidget(b)
+            self.decor_view_btns[key] = b
+        drow.addStretch(1)
+        p3.addLayout(drow)
+        self.decor_boxes = {}
+        for view, keys in (("base", [k for k in DECOR if k not in SEASONAL and k not in GARDEN]), ("garden", list(GARDEN))):
+            box = QWidget()
+            grid_ = QGridLayout(box)
+            grid_.setContentsMargins(0, 0, 0, 0)
+            grid_.setSpacing(6)
+            for i, key in enumerate(keys):
+                grid_.addWidget(self._decor_card(key, f"분당 +{DECOR[key][2]}"), i // 3, i % 3)
+            p3.addWidget(box)
+            self.decor_boxes[view] = box
         # 계절 한정: 지금 파는 것과 이미 산 것만 보임
-        self.season_title = QLabel("🎍 계절 한정 장식", objectName="section")
-        p3.addWidget(self.season_title)
+        sbox = QWidget()
+        sv = QVBoxLayout(sbox)
+        sv.setContentsMargins(0, 0, 0, 0)
         season_tip = QLabel("이번 달에만 파는 장식이에요. 사 두면 계절이 지나도 언제든 놓을 수 있어요.", objectName="goal")
         season_tip.setWordWrap(True)
-        p3.addWidget(season_tip)
+        sv.addWidget(season_tip)
         self.season_grid = QGridLayout()
         self.season_grid.setSpacing(6)
         self.season_cards = {}
         for key in SEASONAL:
             months = "·".join(str(m) for m in SEASONAL[key])
             self.season_cards[key] = self._decor_card(key, f"{months}월 · 분당 +{DECOR[key][2]}")
-        p3.addLayout(self.season_grid)
+        sv.addLayout(self.season_grid)
+        p3.addWidget(sbox)
+        self.decor_boxes["season"] = sbox
+        for view, box in self.decor_boxes.items():
+            box.setVisible(view == "base")
         self._season_shown: list[str] | None = None
         self._anchor = None
         self._top: float | None = None
@@ -1053,7 +1074,7 @@ class ShrinePanel(QWidget):
             visits = s.guest_visits.get(key, 0)
             met = visits > 0
             if pic.property("met") != met:
-                pic.setPixmap(portrait(key, PORTRAIT, silhouette=not met))
+                pic.setPixmap(portrait(key, G_PORTRAIT, silhouette=not met))
                 pic.setProperty("met", met)
             name.setText(GUESTS[key].name if met else "???")
             self._role(name, "name" if met else "locked")
@@ -1083,6 +1104,8 @@ class ShrinePanel(QWidget):
                            + (f"\n장식 보너스 분당 +{s.decor_bonus}" if s.decor_bonus else ""))
 
         self._refresh_season_cards()
+        for key, b in self.decor_view_btns.items():
+            self._role(b, "small" if key == self.decor_view else "ghost")
         for key, (btn, price) in self.decor_rows.items():
             if key not in s.decor_owned and not in_season(key):
                 btn.setText(f"{SEASONAL[key][0]}월에 팔아요")
@@ -1127,6 +1150,18 @@ class ShrinePanel(QWidget):
         self.decor_rows[key] = (btn, price)
         return card
 
+    def _decor_view(self, key: str) -> None:
+        self.decor_view = key
+        for view, box in self.decor_boxes.items():
+            box.setVisible(view == key)
+        self.refresh()
+        for box in self.decor_boxes.values():
+            box.layout().invalidate()
+            box.layout().activate()
+            box.adjustSize()
+        self.decor_boxes[key].parentWidget().layout().activate()
+        self._fit_tab(self.tabs.currentIndex())
+
     def _refresh_season_cards(self) -> None:
         s = self.state
         shown = [k for k in SEASONAL if k in s.decor_owned or in_season(k)]
@@ -1153,8 +1188,10 @@ class ShrinePanel(QWidget):
     def _refresh_wardrobe(self) -> None:
         s = self.state
         pick = wardrobe.pickup(s)
-        self.pickup_label.setText(f"이번 주 픽업: {CHARACTERS[pick].name}의 옷 (확률 {wardrobe.PICKUP_WEIGHT}배)"
-                                  if pick else "")
+        event = wardrobe.event_items(s)
+        self.pickup_label.setText((f"이번 주 픽업: {CHARACTERS[pick].name}의 옷 (확률 {wardrobe.PICKUP_WEIGHT}배)" if pick else "")
+                                  + (f"\n🎃 10월 한정: 할로윈 의상 {len(event)}벌 (전설 확률 {wardrobe.PICKUP_WEIGHT}배)"
+                                     if event else ""))
         price = wardrobe.price(s)
         self.wpull1.setText(f"1번 뽑기   새전 {price:,}")
         self.wpull1.setEnabled(s.saisen >= price)
@@ -1184,9 +1221,12 @@ class ShrinePanel(QWidget):
             owned = it.id in s.wardrobe
             cost = wardrobe.CLOTH_COST[it.rarity]
             mode = "worn" if worn == skin else "own" if owned else "trade" if s.cloth >= cost else "locked"
+            sub = wardrobe.RARITY[it.rarity][0] if owned else f"옷감 {cost}"
+            if not owned and not wardrobe.in_season(it):          # 기간 한정 의상: 그 달에만
+                mode = "locked"
+                sub = "·".join(str(m) for m in wardrobe.ART_SEASON[it.skin]) + "월 한정"
             tile.set(("wear", skin) if owned else ("exchange", it.id), it.name.split(" ", 1)[1],
-                     wardrobe.RARITY[it.rarity][0] if owned else f"옷감 {cost}", it.rarity, mode,
-                     pix=portrait(ch, 120, False, skin))
+                     sub, it.rarity, mode, pix=portrait(ch, 120, False, skin))
         cur = s.effects.get(ch)
         fx_list = [None] + list(wardrobe.EFFECTS)
         for tile, fx in zip(self.fx_tiles, fx_list):

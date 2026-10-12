@@ -63,6 +63,61 @@ def key_color(img: QImage) -> str:
     return "magenta" if min(r, b) > g else "green"
 
 
+STAR = Path(__file__).resolve().parent / "gemini_star.png"   # Gemini ✦ 워터마크의 모양·투명도 (흰색, 알파 = 진하기)
+
+
+def remove_star(src: QImage, force: bool = False) -> QImage:
+    """큰 시트(가로 1800px 이상) 오른쪽 아래의 반투명 흰 ✦ 를 빼서 원래 색으로.
+
+    out = in·(1-α) + 255·α 를 거꾸로 풀고, 그 결과가 실제로 더 매끈해질 때만 (별이 정말 있을 때만) 바꾼다.
+    별은 그림 위에 얹혀 있어서(옷·소품 위) 배경 지우기로는 안 지워진다."""
+    if src.width() < 1800 or src.height() < 1200 or not STAR.exists():
+        return src
+    mask = QImage(str(STAR)).convertToFormat(QImage.Format_ARGB32)
+    r = mask.width() // 2
+    img = src.convertToFormat(QImage.Format_ARGB32)
+    w, h = img.width(), img.height()
+    cx, cy = w - 241, h - 243
+    if cx - r < 0 or cy - r < 0 or cx + r >= w or cy + r >= h:
+        return src
+    mb, ms = bytes(mask.constBits()), mask.bytesPerLine()
+    data = bytearray(bytes(img.constBits()))
+    st = img.bytesPerLine()
+    alpha = {}
+    for dy in range(-r, r + 1):
+        for dx in range(-r, r + 1):
+            a = mb[(dy + r) * ms + (dx + r) * 4 + 3] / 255.0
+            if a > 0:
+                alpha[(dx, dy)] = a
+    fixed = {}
+    for (dx, dy), a in alpha.items():
+        i = (cy + dy) * st + (cx + dx) * 4
+        fixed[(dx, dy)] = [max(0, min(255, round((data[i + c] - 255 * a) / (1 - a)))) for c in range(3)]
+
+    def roughness(get) -> int:
+        tv = 0
+        for (dx, dy) in alpha:
+            p = get(dx, dy)
+            for nx, ny in ((dx + 1, dy), (dx, dy + 1)):
+                q = get(nx, ny)
+                tv += abs(p[0] - q[0]) + abs(p[1] - q[1]) + abs(p[2] - q[2])
+        return tv
+
+    def raw(dx, dy):
+        i = (cy + dy) * st + (cx + dx) * 4
+        return data[i], data[i + 1], data[i + 2]
+
+    before = roughness(raw)
+    after = roughness(lambda dx, dy: fixed.get((dx, dy)) or raw(dx, dy))
+    if after > before * 0.95 and not force:   # 별이 없는 그림에 빼면 오히려 거칠어짐 (윤곽선이 많은 곳은 --star 로)
+        return src
+    for (dx, dy), px in fixed.items():
+        i = (cy + dy) * st + (cx + dx) * 4
+        data[i], data[i + 1], data[i + 2] = px
+    print(f"워터마크(✦) 지움  (거칠기 {before:,} → {after:,})")
+    return QImage(bytes(data), w, h, st, QImage.Format_ARGB32).copy()
+
+
 def chroma_key(src: QImage, key: str | None = None) -> QImage:
     """초록(또는 자홍) 배경을 투명하게. 캐릭터 안의 같은 계열 색(사쿠야의 초록 리본 등)은 남긴다.
 
@@ -260,7 +315,7 @@ def _valleys(profile: list[int], parts: int) -> list[int]:
     return cuts + [n]
 
 
-def grid_blobs(img: QImage, rows: int, cols: int):
+def grid_blobs(img: QImage, rows: int, cols: int, keep: float = 0.1):
     """캐릭터끼리 붙어 있어 덩어리로 못 나눌 때: rows×cols 칸으로 나눈다.
     칸 경계는 똑같이 나누지 않고 줄·칸 사이에서 가장 빈 곳으로 잡고, 칸마다 가장 큰 덩어리만 남긴다
     (경계를 넘어온 옆 캐릭터 조각은 '다른 것'으로 표시해서 tight() 가 지운다)."""
@@ -284,7 +339,7 @@ def grid_blobs(img: QImage, rows: int, cols: int):
         for c in range(cols):
             xa, xb = col_cuts[c], col_cuts[c + 1]
             lab += 1
-            # 칸 안의 덩어리들 → 가장 큰 것(과 그 10% 이상인 것)만 이 캐릭터
+            # 칸 안의 덩어리들 → 가장 큰 것(과 그 keep 배 이상인 것)만 이 캐릭터 (기본 10%)
             comps, seen = [], set()
             for gy in range(ya, yb):
                 for gx in range(xa, xb):
@@ -309,7 +364,7 @@ def grid_blobs(img: QImage, rows: int, cols: int):
             big = max(len(cp) for cp in comps)
             box = [gw, gh, -1, -1]
             for comp in comps:
-                mine = len(comp) >= big * 0.1
+                mine = len(comp) >= big * keep
                 for k in comp:
                     labels[k] = lab if mine else -1
                     if mine:
@@ -384,6 +439,10 @@ def main() -> int:
                     help="표준 세트 시트의 이름을 자동으로 (move / react / life / walk / guest / outfit). --append 도 자동으로 켜짐")
     ap.add_argument("--walk-cycles", type=int, help="걷기 한 벌에 걸음이 몇 바퀴인지 직접 (자동으로 못 셀 때)")
     ap.add_argument("--grid", help="행x열 (예: 3x4). 캐릭터끼리 붙어 있으면 칸으로 똑같이 잘라서 나눔")
+    ap.add_argument("--star", action="store_true",
+                    help="오른쪽 아래 Gemini ✦ 워터마크를 무조건 지움 (자동 판단이 놓칠 때)")
+    ap.add_argument("--keep", type=float, default=0.1,
+                    help="--grid 에서 칸마다 가장 큰 덩어리의 이 비율 이상인 조각도 남김 (기본 0.1, 떨어진 이펙트를 살리려면 0.02)")
     ap.add_argument("--append", action="store_true",
                     help="기존 그림을 지우지 않고 추가 (같은 이름은 덮어씀) — 시트 여러 장을 합칠 때")
     args = ap.parse_args()
@@ -394,6 +453,7 @@ def main() -> int:
     if src.isNull():
         print(f"그림을 읽지 못했습니다: {args.sheet}")
         return 1
+    src = remove_star(src, args.star)
     keyed = chroma_key(src)
     if args.preset:
         args.names = args.names or ",".join(PRESETS[args.preset])
@@ -401,7 +461,7 @@ def main() -> int:
     wanted = [n.strip() for n in args.names.split(",")] if args.names else None
     if args.grid:
         rows, cols = (int(v) for v in args.grid.lower().split("x"))
-        blobs, labels, gw = grid_blobs(keyed, rows, cols)
+        blobs, labels, gw = grid_blobs(keyed, rows, cols, args.keep)
     else:
         blobs, labels, gw = find_blobs(keyed, expected=len(wanted) if wanted else None)
     print(f"캐릭터 {len(blobs)}개 찾음")

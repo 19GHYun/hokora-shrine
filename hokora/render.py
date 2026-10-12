@@ -471,6 +471,10 @@ CHARACTERS: dict[str, Character] = {
         hair="#78CCF4", hair_dark="#56AEE0", eyes="#3478E0",
         dress="#4188EA", dress_dark="#2C63B8", sleeves="#FFFFFF", shoes="#3C4C70",
         side_locks=False, accessory_back=_cirno_bow, extra_body=_cirno_wings),
+    "meiling": Character(
+        key="meiling", name="홍 메이링",
+        hair="#D9412E", hair_dark="#B02E20", eyes="#5A6E8A",
+        dress="#4E8A4A", dress_dark="#386A36", sleeves="#FFFFFF", shoes="#2A2226"),
     "youmu": Character(
         key="youmu", name="콘파쿠 요우무",
         hair="#E3E7F0", hair_dark="#BCC3D2", eyes="#5A6E8A",
@@ -498,6 +502,8 @@ GUESTS: dict[str, Character] = {
                         dress="#A8C4E8", dress_dark="#86A6D0", sleeves="#A8C4E8", shoes="#F4D0C0"),
     "mystia": Character(key="mystia", name="미스티아 로렐라이", hair="#F08AA8", hair_dark="#D46A8A", eyes="#C89030",
                         dress="#7A5040", dress_dark="#5A3A2E", sleeves="#7A5040", shoes="#5A3A2E"),
+    "reisen": Character(key="reisen", name="레이센 우동게인 이나바", hair="#B9A2E0", hair_dark="#9A82C8",
+                        eyes="#C0303A", dress="#2A2226", dress_dark="#161014", sleeves="#2A2226", shoes="#7A4E36"),
     "nitori": Character(key="nitori", name="카와시로 니토리", hair="#4A7EC8", hair_dark="#3460A0", eyes="#3478E0",
                         dress="#4A86B8", dress_dark="#346890", sleeves="#4A86B8", shoes="#3C6A9A"),
 }

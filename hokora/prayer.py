@@ -81,7 +81,8 @@ def news_active(s: GameState) -> bool:
 
 
 def pat_multiplier(s: GameState) -> int:
-    return PAT_BOOST if left(s, "bond") else 1
+    """인연 기원 ×5, 레이센의 피로회복약 ×2 (겹치면 곱함)."""
+    return (PAT_BOOST if left(s, "bond") else 1) * (2 if s.reisen_until > time.time() else 1)
 
 
 def charm_active(s: GameState) -> bool:

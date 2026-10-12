@@ -45,6 +45,16 @@ DECOR = {
     "temizuya": ("손 씻는 물", 600, 2, 48),
     "sakura": ("벚꽃나무", 800, 2, 112),
     "saisen_box": ("큰 새전함", 1000, 3, 46),
+    # 정원 장식 (2탄)
+    "pond": ("연못", 3000, 3, 40),
+    "taiko": ("큰 북", 2500, 2, 60),
+    "bamboo_fence": ("대나무 울타리", 1500, 2, 54),
+    "maneki_neko": ("마네키네코", 4000, 4, 62),
+    "yukimi_lantern": ("유키미 석등", 2000, 2, 58),
+    "maple": ("단풍나무", 3500, 3, 104),
+    "suzu": ("신사 방울", 2500, 2, 76),
+    "mini_torii": ("작은 도리이", 2000, 2, 66),
+    "incense": ("향로", 1800, 2, 50),
     # 계절 한정 (SEASONAL 의 달에만 살 수 있음, 산 뒤에는 언제든 놓을 수 있음)
     "kadomatsu": ("카도마츠", 5000, 2, 84),
     "snowman": ("눈사람", 5000, 2, 74),
@@ -56,6 +66,7 @@ DECOR = {
     "tsukimi": ("츠키미 경단", 4000, 2, 62),
     "pumpkin": ("할로윈 호박", 5000, 2, 60),
 }
+GARDEN = ("pond", "taiko", "bamboo_fence", "maneki_neko", "yukimi_lantern", "maple", "suzu", "mini_torii", "incense")
 SEASONAL = {  # 계절 한정 장식 → 파는 달
     "kadomatsu": (12, 1), "snowman": (12, 1, 2), "xmas_tree": (11, 12), "hina": (2, 3), "koinobori": (4, 5),
     "tanabata": (6, 7), "sunflower": (7, 8), "tsukimi": (9, 10), "pumpkin": (10,),
@@ -148,6 +159,9 @@ class GameState:
     tewi_luck: int = 0
     yuyuko_fed: int = 0              # 유유코를 배불리 먹인 횟수 → 3번이면 요우무
     mystia_until: float = 0.0        # 미스티아의 장어구이: 이때까지 수입 ×1.3
+    meiling_blocks: int = 0          # 메이링이 새전 도둑을 막은 횟수
+    reisen_until: float = 0.0        # 레이센의 피로회복약: 이때까지 쓰다듬기 새전 ×2
+    dream_pill: bool = False         # 레이센의 꿈나라 약: 다음에 꺼져 있는 동안 새전함 2배
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
     @property

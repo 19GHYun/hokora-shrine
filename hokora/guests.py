@@ -50,6 +50,7 @@ VISITS = {
     "nitori": (("nitori",), 3),
     "yuyuko": (("yuyuko",), 2),
     "mystia": (("mystia",), 1),        # 밤에만
+    "reisen": (("reisen",), 2),
 }
 VISIT_CHECK = 60.0        # 이 간격으로 손님이 올지 주사위
 VISIT_CHANCE = 0.15
@@ -82,6 +83,20 @@ MYSTIA_MENU = {  # 키 → (아이콘, 이름, 설명)
     "oden": ("🍢", "오뎅", "친구 모두 호감도 +2"),
     "song": ("🎵", "미스티아의 노래", "옷감 +10, 다들 신나게"),
 }
+
+
+REISEN_STAY = 70.0
+REISEN_MEDS = {  # 키 → (아이콘, 이름, 설명)
+    "energy": ("💊", "피로회복약", "1시간 동안 쓰다듬기 새전 ×2"),
+    "dream": ("🌙", "꿈나라 약", "다음에 꺼져 있는 동안 새전함 2배"),
+    "luck": ("🍀", "행운의 약", "다음 오미쿠지가 대길 쪽으로"),
+}
+
+
+def reisen_price(s, key: str) -> int:
+    if key == "energy":
+        return max(100, s.income_per_min * 15)
+    return (300 if key == "dream" else 200) * s.shrine_level
 
 
 def mystia_price(s, key: str) -> int:
@@ -119,6 +134,7 @@ GUEST_TALK = {
     "nitori": ["맹우! 뭐 필요한 거 있어?", "갓파의 기술은 세계 제일!", "오이 있으면 줘~"],
     "yuyuko": ["배고파~ 뭐 먹을 거 없어?", "요우무는 잘 지내려나~", "꽃구경엔 경단이지~"],
     "mystia": ["어서 와요~ 오늘은 장어가 맛있어요!", "♪ 밤참은 포장마차에서~", "참새는 굽지 않아요!"],
+    "reisen": ["영원정 약 배달 왔어요.", "테위 못 봤어요? 또 땡땡이를…", "스승님 약은 잘 들어요!"],
 }
 APOLOGY = {
     "sunny": "들켰다~ 미안해, 돌려줄게!",
@@ -136,6 +152,7 @@ GUEST_ABOUT = {  # 도감: (아직 못 만났을 때 힌트, 만난 뒤 설명)
     "nitori": ("발명품을 파는 갓파 엔지니어", "노점에서 선풍기·옷감·뽑기를 팔아요"),
     "yuyuko": ("배고픈 명계의 아가씨", "먹을 걸 대접하면 새전을 두고 가요 (3번이면 요우무가)"),
     "mystia": ("밤에만 여는 포장마차 주인", "장어구이·오뎅·노래를 팔아요"),
+    "reisen": ("영원정의 약 행상 토끼", "피로회복약·꿈나라 약·행운의 약을 팔아요"),
 }
 INTERVIEW_Q = ["최근 새전 사정은 어떤가요?", "독자들께 한 말씀 부탁드려요!", "요즘 신사에 무슨 일이 있었나요?"]
 DRINK_WITH = {  # 스이카가 한 잔 권했을 때
@@ -1326,13 +1343,19 @@ class MystiaVisit(Visit):
 
     def __init__(self, visits: "Visits"):
         super().__init__(visits)
-        g, sx = self.ground, self.game.shrine.pos_x
-        self.side = 1 if (g.x2 - sx) > (sx - g.x1) else -1
-        stall_x = min(max(sx + self.side * 200, g.x1 + 80), g.x2 - 80)
-        self.stall = Stall(stall_x, g.y, self.game.scale)
+        g, sx, game = self.ground, self.game.shrine.pos_x, self.game
+        row = game.torii_row
+        if row.isVisible():                                   # 도리이 줄과 겹치지 않게 반대편
+            self.side = 1 if row.x() + row.width() / 2 < sx else -1
+        else:
+            self.side = 1 if (g.x2 - sx) > (sx - g.x1) else -1
+        k = game.scale
+        stall_x = min(max(sx + self.side * (game.shrine.width() / 2 + 70 * k), g.x1 + 80), g.x2 - 80)
+        self.stall = Stall(stall_x, g.y, k)
         self.effect(self.stall)
         fade(self.stall, 1.0, 1.2)
-        self.mystia = self.spawn("mystia", stall_x - self.side * 70)
+        mx = min(max(stall_x + self.side * 75 * k, g.x1 + 30), g.x2 - 30)
+        self.mystia = self.spawn("mystia", mx)
         self.mystia.fade(1.0, 1.2)
         self.mystia.face(stall_x)
         now = time.monotonic()
@@ -1429,9 +1452,112 @@ class MystiaVisit(Visit):
         self.say(gu, "어서 와요~ 우클릭해서 주문해요!" if self.phase == "open" else "또 와요~")
 
 
+# ── 레이센: 영원정 약 행상 ──
+class ReisenVisit(Visit):
+    kind = "reisen"
+
+    def __init__(self, visits: "Visits"):
+        super().__init__(visits)
+        g, sx = self.ground, self.game.shrine.pos_x
+        self.side = 1 if (g.x2 - sx) > (sx - g.x1) else -1
+        clamp = lambda x: min(max(x, g.x1 + 30), g.x2 - 30)   # noqa: E731
+        self.reisen = self.spawn("reisen", clamp(sx + self.side * 420))
+        self.reisen.fade(1.0, 0.6)
+        self.reisen.go(clamp(sx + self.side * (self.game.shrine.width() / 2 + 60)), 55)
+        self.sold: set[str] = set()
+        self._held = False
+        now = time.monotonic()
+        self.phase, self.until, self.leave_at, self.shout_at = "enter", now + 10, now + REISEN_STAY, 0.0
+
+    def _pose(self, seconds: float = 1.6) -> None:
+        p = self.reisen.pet
+        p.act("skill", seconds)                               # 약병 → 손가락 총
+        self.at(seconds, lambda: self.phase == "shop" and p.state not in ("held", "fall") and p.act("idle", 99))
+
+    def update(self, now: float) -> None:
+        r = self.reisen
+        if r.gone:
+            return
+        p = r.pet
+        if p.state == "held":
+            self._held = True
+        if not r.ready:
+            return
+        if self._held:
+            self._held = False
+            p.act("caught", 1.2)
+            self.say(r, "꺅! 약병 깨져요~!")
+            self.at(1.2, lambda: self.phase == "shop" and p.act("idle", 99))
+        if self.phase == "enter" and (r.arrived() or now >= self.until):
+            r.goal = None
+            r.face(self.game.shrine.pos_x)
+            p.act("bow", 1.2)
+            self.say(r, "영원정 약 배달 왔어요. 우클릭해서 골라 주세요!", 3.5)
+            self.at(1.2, lambda: self.phase == "shop" and p.act("idle", 99))
+            self.phase, self.shout_at = "shop", now + 15
+        elif self.phase == "shop":
+            if now >= self.leave_at or len(self.sold) == len(REISEN_MEDS):
+                self._bye()
+            elif now >= self.shout_at:
+                self.shout_at = now + random.uniform(14, 20)
+                self._pose()
+                self.say(r, random.choice(["스승님 특제 약이에요~", "피곤할 땐 피로회복약!", "테위 보면 알려 주세요…"]))
+
+    def _bye(self) -> None:
+        self.phase = "bye"
+        r, g = self.reisen, self.ground
+        self.say(r, "약은 용법·용량을 지켜서~ 그럼!")
+        self.at(1.2, lambda: r.go(g.x2 - 20 if self.side > 0 else g.x1 + 20, 70))
+        self.at(5.0, lambda: self.leave(r, 0.8))
+
+    def fill_menu(self, gu: Guest, menu: "QMenu") -> None:
+        if self.phase != "shop":
+            return
+        menu.addSeparator()
+        head = menu.addAction("💊 영원정 약 행상")
+        head.setEnabled(False)
+        for key, (icon, name, desc) in REISEN_MEDS.items():
+            price = reisen_price(self.game.state, key)
+            sold = key in self.sold
+            a = menu.addAction(f"{icon} {name} — 다 팔림" if sold else f"{icon} {name}  ({desc})   새전 {price:,}",
+                               lambda key=key: self.buy(key))
+            a.setEnabled(not sold and self.game.state.saisen >= price)
+
+    def buy(self, key: str) -> bool:
+        g, s = self.game, self.game.state
+        price = reisen_price(s, key)
+        if self.phase != "shop" or key in self.sold or s.saisen < price:
+            return False
+        s.saisen -= price
+        self.sold.add(key)
+        g.shrine.set_saisen(s.saisen)
+        g.shrine.pop(f"-{price:,}")
+        if key == "energy":
+            s.reisen_until = time.time() + 3600
+            line = "💊 피로회복약! 1시간 동안 쓰다듬기 새전 ×2예요"
+            for o in g.pets:
+                o.react(True)
+        elif key == "dream":
+            s.dream_pill = True
+            line = "🌙 꿈나라 약! 다음에 꺼져 있는 동안 새전함이 2배예요"
+        else:
+            s.fate_boost = True
+            line = "🍀 행운의 약! 다음 오미쿠지는 대길 쪽으로~"
+        self._pose(1.4)
+        self.say(self.reisen, line, 3.2)
+        log.info("레이센 약: %s (%d)", key, price)
+        g.save()
+        return True
+
+    def on_click(self, gu: Guest) -> None:
+        self._pose(1.4)
+        self.say(gu, random.choice(["광기의 눈동자… 는 농담이에요.", "우클릭하면 약을 볼 수 있어요!"]) if self.phase == "shop"
+                 else "영원정에서 왔어요.")
+
+
 VISIT_CLASSES = {"fairies": FairyVisit, "aya": AyaVisit, "suika": SuikaVisit,
                  "tewi": TewiVisit, "koishi": KoishiVisit, "nitori": NitoriVisit,
-                 "yuyuko": YuyukoVisit, "mystia": MystiaVisit}
+                 "yuyuko": YuyukoVisit, "mystia": MystiaVisit, "reisen": ReisenVisit}
 
 
 class Visits:

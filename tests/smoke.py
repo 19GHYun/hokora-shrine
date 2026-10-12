@@ -30,6 +30,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from hokora import app as hk  # noqa: E402
 from hokora import affection as aff  # noqa: E402
 from hokora import daily, guests, omamori, photo, play, prayer, torii, wardrobe  # noqa: E402
+from hokora import events as hk_events  # noqa: E402
 from hokora.events import SKILL_COOLDOWN  # noqa: E402
 
 app = QApplication(sys.argv)
@@ -110,6 +111,7 @@ def t_core2():
     check("저장 파일", (TMP / "appdata" / "Hokora" / "save.json").exists())
     calm()
     s.saisen = 1000
+    hk_events.GUARD_CHANCE = 0.0                    # 메이링 문지기는 따로 시험
     place(P["marisa"], game.shrine.pos_x + 60)
     check("새전 도둑 출발", ev.start_thief(force=True))
 
@@ -356,6 +358,56 @@ def t_youmu():
     check("요우무 정원 손질 새전", s.saisen > G["s_y"], s.saisen - G["s_y"])
 
 
+def t_meiling():
+    calm()
+    s.saisen = 5000
+    hk_events.GUARD_CHANCE = 1.0
+    me = P["meiling"]
+    place(P["marisa"], game.shrine.pos_x + 200)
+    place(me, game.shrine.pos_x + 120)
+    blocks = s.meiling_blocks
+    ev.start_thief(force=True)
+    ev._thief_tick()
+    check("메이링이 새전 도둑 막기", ev.thief is None and s.meiling_blocks == blocks + 1)
+    # 졸고 있으면 못 막음
+    calm()
+    ev._doze_at = 0.0
+    ev._meiling_tick()
+    check("메이링 졸기", P["meiling"].state == "sleep")
+    place(P["marisa"], game.shrine.pos_x + 200)
+    P["meiling"].state, P["meiling"].state_until = "sleep", float("inf")
+    ev.start_thief(force=True)
+    ev._thief_tick()
+    check("졸면 도둑을 못 막음", ev.thief is not None and ev.thief_phase == "approach")
+    ev.cancel_thief()
+    game.on_pat(P["meiling"])
+    ev._meiling_tick()
+    check("쓰다듬으면 깸", P["meiling"].state != "sleep" and not ev._doze_until)
+    hk_events.GUARD_CHANCE = 0.7
+    # 정원 장식·할로윈 의상
+    s.saisen = 10 ** 7
+    game.on_decor("maneki_neko", "buy")
+    check("정원 장식 (마네키네코)", "maneki_neko" in game.decors)
+    ev_items = wardrobe.event_items(s)
+    check("10월 한정 할로윈 의상", len(ev_items) == 3 if time.localtime().tm_mon == 10 else len(ev_items) == 0,
+          [it.id for it in ev_items])
+    s.wardrobe.append("reimu:witch")
+    check("마녀 레이무 입기", game.on_action("wear", ("reimu", "witch")) and P["reimu"].skin == "witch")
+    calm()
+    check("레이센 방문", game.visits.start("reisen"))
+
+
+def t_reisen():
+    v = game.visits.visit
+    check("레이센 약 행상", v is not None and v.phase == "shop", v.phase if v else None)
+    if v is not None:
+        before = prayer.pat_multiplier(s)
+        check("피로회복약 → 쓰다듬기 ×2", v.buy("energy") and prayer.pat_multiplier(s) == before * 2)
+        check("꿈나라 약", v.buy("dream") and s.dream_pill)
+        v.cancel()
+    s.reisen_until = 0.0
+
+
 def t_end():
     app.quit()
 
@@ -364,7 +416,7 @@ STEPS = [(t_core, 3000), (t_core2, 2500), (t_thief, 1600), (t_skill, 1800), (t_a
          (t_duel, 8500), (t_fairies, 8000), (t_fairies2, 17000), (t_aya, 20000), (t_suika, 2000),
          (t_shop, 1000), (t_season_shop, 12000), (t_tewi, 1500), (t_koishi, 7500), (t_nitori, 11000),
          (t_nitori2, 1500), (t_yuyuko, 9000), (t_yuyuko2, 1500), (t_mystia, 2500), (t_mystia2, 1500),
-         (t_youmu, 0), (t_end, 0)]
+         (t_youmu, 0), (t_meiling, 11000), (t_reisen, 1000), (t_end, 0)]
 
 
 def run(i: int = 0) -> None:

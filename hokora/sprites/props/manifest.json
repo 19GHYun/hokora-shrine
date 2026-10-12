@@ -78,11 +78,50 @@
     "yatai": [
       124,
       206
+    ],
+    "pond": [
+      114,
+      159
+    ],
+    "taiko": [
+      84,
+      188
+    ],
+    "bamboo_fence": [
+      96,
+      178
+    ],
+    "maneki_neko": [
+      60,
+      191
+    ],
+    "yukimi_lantern": [
+      69,
+      173
+    ],
+    "maple": [
+      99,
+      187
+    ],
+    "suzu": [
+      75,
+      206
+    ],
+    "mini_torii": [
+      82,
+      200
+    ],
+    "incense": [
+      77,
+      166
     ]
   },
   "sources": [
     "item1.png",
     "1.png",
-    "mistia_item.png"
+    "mistia_item.png",
+    "item.png",
+    "item.png",
+    "1.png"
   ]
 }
