@@ -67,19 +67,22 @@ STAR = Path(__file__).resolve().parent / "gemini_star.png"   # Gemini ✦ 워터
 
 
 def remove_star(src: QImage, force: bool = False) -> QImage:
-    """큰 시트(가로 1800px 이상) 오른쪽 아래의 반투명 흰 ✦ 를 빼서 원래 색으로.
+    """오른쪽 아래의 반투명 흰 ✦ (Gemini 워터마크) 를 빼서 원래 색으로.
 
+    큰 시트(가로 1800px 이상)는 원래 크기, 작은 시트(1000~1800px)는 절반 크기의 별이 찍혀 있다 (작은 건 --star 로만).
     out = in·(1-α) + 255·α 를 거꾸로 풀고, 그 결과가 실제로 더 매끈해질 때만 (별이 정말 있을 때만) 바꾼다.
     별은 그림 위에 얹혀 있어서(옷·소품 위) 배경 지우기로는 안 지워진다."""
-    if src.width() < 1800 or src.height() < 1200 or not STAR.exists():
-        return src
+    big = src.width() >= 1800 and src.height() >= 1200
+    if not STAR.exists() or src.width() < 1000 or (not big and not force):
+        return src                               # 작은 시트의 별은 희미하고 자리가 들쭉날쭉해서 --star 일 때만 찾음
+    k = 1.0 if big else 0.5
     mask = QImage(str(STAR)).convertToFormat(QImage.Format_ARGB32)
+    if k != 1.0:
+        mask = mask.scaled(round(mask.width() * k) | 1, round(mask.height() * k) | 1,
+                           Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
     r = mask.width() // 2
     img = src.convertToFormat(QImage.Format_ARGB32)
     w, h = img.width(), img.height()
-    cx, cy = w - 241, h - 243
-    if cx - r < 0 or cy - r < 0 or cx + r >= w or cy + r >= h:
-        return src
     mb, ms = bytes(mask.constBits()), mask.bytesPerLine()
     data = bytearray(bytes(img.constBits()))
     st = img.bytesPerLine()
@@ -87,34 +90,87 @@ def remove_star(src: QImage, force: bool = False) -> QImage:
     for dy in range(-r, r + 1):
         for dx in range(-r, r + 1):
             a = mb[(dy + r) * ms + (dx + r) * 4 + 3] / 255.0
-            if a > 0:
+            if a > 0.02:
                 alpha[(dx, dy)] = a
-    fixed = {}
-    for (dx, dy), a in alpha.items():
-        i = (cy + dy) * st + (cx + dx) * 4
-        fixed[(dx, dy)] = [max(0, min(255, round((data[i + c] - 255 * a) / (1 - a)))) for c in range(3)]
 
-    def roughness(get) -> int:
-        tv = 0
-        for (dx, dy) in alpha:
-            p = get(dx, dy)
-            for nx, ny in ((dx + 1, dy), (dx, dy + 1)):
-                q = get(nx, ny)
-                tv += abs(p[0] - q[0]) + abs(p[1] - q[1]) + abs(p[2] - q[2])
-        return tv
+    def attempt(cx: int, cy: int):
+        if cx - r - 1 < 0 or cy - r - 1 < 0 or cx + r + 1 >= w or cy + r + 1 >= h:
+            return None
+        fixed = {}
+        for (dx, dy), a in alpha.items():
+            i = (cy + dy) * st + (cx + dx) * 4
+            fixed[(dx, dy)] = [max(0, min(255, round((data[i + c] - 255 * a) / (1 - a)))) for c in range(3)]
 
-    def raw(dx, dy):
-        i = (cy + dy) * st + (cx + dx) * 4
-        return data[i], data[i + 1], data[i + 2]
+        def raw(dx, dy):
+            i = (cy + dy) * st + (cx + dx) * 4
+            return data[i], data[i + 1], data[i + 2]
 
-    before = roughness(raw)
-    after = roughness(lambda dx, dy: fixed.get((dx, dy)) or raw(dx, dy))
+        def roughness(get) -> int:
+            tv = 0
+            for (dx, dy) in alpha:
+                p = get(dx, dy)
+                for nx, ny in ((dx + 1, dy), (dx, dy + 1)):
+                    q = get(nx, ny)
+                    tv += abs(p[0] - q[0]) + abs(p[1] - q[1]) + abs(p[2] - q[2])
+            return tv
+        return roughness(raw), roughness(lambda dx, dy: fixed.get((dx, dy)) or raw(dx, dy)), fixed, cx, cy
+
+    bx, by = round(w - 241 * k), round(h - 243 * k)
+
+    def best_of(spots):
+        tries = [t for t in (attempt(x, y) for x, y in spots) if t is not None]
+        return min(tries, key=lambda t: t[1] / max(1, t[0])) if tries else None
+
+    if big:
+        found = best_of([(bx, by)])
+    else:                                        # 작은 시트는 자리가 조금씩 달라서 둘레를 찾아봄
+        coarse = best_of([(bx + ox, by + oy) for ox in range(-36, 37, 3) for oy in range(-36, 37, 3)])
+        found = coarse and best_of([(coarse[3] + ox, coarse[4] + oy) for ox in range(-2, 3) for oy in range(-2, 3)])
+    if found is None:
+        return src
+    before, after, fixed, cx, cy = found
     if after > before * 0.95 and not force:   # 별이 없는 그림에 빼면 오히려 거칠어짐 (윤곽선이 많은 곳은 --star 로)
         return src
     for (dx, dy), px in fixed.items():
         i = (cy + dy) * st + (cx + dx) * 4
         data[i], data[i + 1], data[i + 2] = px
     print(f"워터마크(✦) 지움  (거칠기 {before:,} → {after:,})")
+    return QImage(bytes(data), w, h, st, QImage.Format_ARGB32).copy()
+
+
+def remove_grid_lines(src: QImage) -> QImage:
+    """칸 사이에 그어진 밝은 회색·흰 줄(그림 전체를 가로지르는 가는 선)을 배경색으로 칠함."""
+    img = src.convertToFormat(QImage.Format_ARGB32)
+    w, h = img.width(), img.height()
+    data = bytearray(bytes(img.constBits()))
+    st = img.bytesPerLine()
+
+    def light(x, y) -> bool:
+        i = y * st + x * 4
+        b, g, r = data[i], data[i + 1], data[i + 2]
+        return min(r, g, b) > 150 and max(r, g, b) - min(r, g, b) < 60
+
+    cols = [x for x in range(w) if sum(light(x, y) for y in range(0, h, 2)) > h / 2 * 0.6]
+    rows = [y for y in range(h) if sum(light(x, y) for x in range(0, w, 2)) > w / 2 * 0.6]
+    if not cols and not rows:
+        return src
+    bg = (0, 255, 0) if key_color(src) != "magenta" else (255, 0, 255)
+    marks = set()
+    for x in cols:
+        for xx in range(x - 2, x + 3):
+            if 0 <= xx < w:
+                marks.update((xx, y) for y in range(h))
+    for y in rows:
+        for yy in range(y - 2, y + 3):
+            if 0 <= yy < h:
+                marks.update((x, yy) for x in range(w))
+    for x, y in marks:
+        i = y * st + x * 4
+        b, g, r = data[i], data[i + 1], data[i + 2]
+        greenish = g > r + 40 and g > b + 40 if bg == (0, 255, 0) else (r > g + 40 and b > g + 40)
+        if light(x, y) or greenish:                      # 줄과 그 번진 가장자리만 (캐릭터는 그대로)
+            data[i], data[i + 1], data[i + 2] = bg[2], bg[1], bg[0]
+    print(f"칸 줄 지움  (세로 {len(cols)}줄, 가로 {len(rows)}줄)")
     return QImage(bytes(data), w, h, st, QImage.Format_ARGB32).copy()
 
 
@@ -453,7 +509,7 @@ def main() -> int:
     if src.isNull():
         print(f"그림을 읽지 못했습니다: {args.sheet}")
         return 1
-    src = remove_star(src, args.star)
+    src = remove_star(remove_grid_lines(src), args.star)
     keyed = chroma_key(src)
     if args.preset:
         args.names = args.names or ",".join(PRESETS[args.preset])

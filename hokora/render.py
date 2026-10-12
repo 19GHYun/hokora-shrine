@@ -504,6 +504,10 @@ GUESTS: dict[str, Character] = {
                         dress="#7A5040", dress_dark="#5A3A2E", sleeves="#7A5040", shoes="#5A3A2E"),
     "reisen": Character(key="reisen", name="레이센 우동게인 이나바", hair="#B9A2E0", hair_dark="#9A82C8",
                         eyes="#C0303A", dress="#2A2226", dress_dark="#161014", sleeves="#2A2226", shoes="#7A4E36"),
+    "yukari": Character(key="yukari", name="야쿠모 유카리", hair="#F4D35E", hair_dark="#D9B23C", eyes="#C89030",
+                        dress="#6B4FA0", dress_dark="#4E3880", sleeves="#FFFFFF", shoes="#5A3E2E"),
+    "patchouli": Character(key="patchouli", name="파츄리 널릿지", hair="#A884D0", hair_dark="#8A66B4", eyes="#8A66B4",
+                           dress="#E0BCE8", dress_dark="#C89CD4", sleeves="#E0BCE8", shoes="#C89CD4"),
     "nitori": Character(key="nitori", name="카와시로 니토리", hair="#4A7EC8", hair_dark="#3460A0", eyes="#3478E0",
                         dress="#4A86B8", dress_dark="#346890", sleeves="#4A86B8", shoes="#3C6A9A"),
 }

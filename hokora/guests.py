@@ -21,7 +21,7 @@ import time
 from typing import TYPE_CHECKING, Callable
 
 from PySide6.QtCore import QAbstractAnimation, QPointF, QPropertyAnimation, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QRadialGradient
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
 from . import affection as aff
@@ -51,6 +51,8 @@ VISITS = {
     "yuyuko": (("yuyuko",), 2),
     "mystia": (("mystia",), 1),        # 밤에만
     "reisen": (("reisen",), 2),
+    "patchouli": (("patchouli",), 2),
+    "yukari": (("yukari",), 3),
 }
 VISIT_CHECK = 60.0        # 이 간격으로 손님이 올지 주사위
 VISIT_CHANCE = 0.15
@@ -83,6 +85,23 @@ MYSTIA_MENU = {  # 키 → (아이콘, 이름, 설명)
     "oden": ("🍢", "오뎅", "친구 모두 호감도 +2"),
     "song": ("🎵", "미스티아의 노래", "옷감 +10, 다들 신나게"),
 }
+
+
+PATCHY_STAY = 80.0
+PATCHY_SPELLS = {  # 키 → (날씨, 아이콘, 이름, 설명, 시간(초))
+    "clear": ("clear", "☀", "쾌청 마법", "1시간 동안 쾌청 (수입 ×1.2)", 3600),
+    "sunshower": ("sunshower", "🌈", "여우비 마법", "1시간 동안 여우비 (오미쿠지 행운)", 3600),
+    "fog": ("fog", "🌫", "안개 마법", "1시간 동안 짙은 안개 (손님 ×2)", 3600),
+    "aurora": ("aurora", "✨", "오로라 마법", "30분 동안 오로라 (수입 ×2)", 1800),
+}
+YUKARI_STAY = 60.0
+YUKARI_TRICKS = 3
+
+
+def patchy_price(s, key: str) -> int:
+    per = max(5, s.income_per_min)
+    return {"clear": per * 10, "sunshower": 150 * s.shrine_level, "fog": 120 * s.shrine_level,
+            "aurora": per * 25}[key]
 
 
 REISEN_STAY = 70.0
@@ -135,6 +154,8 @@ GUEST_TALK = {
     "yuyuko": ["배고파~ 뭐 먹을 거 없어?", "요우무는 잘 지내려나~", "꽃구경엔 경단이지~"],
     "mystia": ["어서 와요~ 오늘은 장어가 맛있어요!", "♪ 밤참은 포장마차에서~", "참새는 굽지 않아요!"],
     "reisen": ["영원정 약 배달 왔어요.", "테위 못 봤어요? 또 땡땡이를…", "스승님 약은 잘 들어요!"],
+    "patchouli": ["…책 읽는 중이야.", "도서관 밖은 공기가 안 좋아… 콜록.", "마리사가 빌려 간 책, 못 봤어?"],
+    "yukari": ["어머, 경계 너머에서 실례할게요.", "환상향은 모든 것을 받아들이죠.", "레이무는 잘 지내나요? 후후."],
 }
 APOLOGY = {
     "sunny": "들켰다~ 미안해, 돌려줄게!",
@@ -153,6 +174,8 @@ GUEST_ABOUT = {  # 도감: (아직 못 만났을 때 힌트, 만난 뒤 설명)
     "yuyuko": ("배고픈 명계의 아가씨", "먹을 걸 대접하면 새전을 두고 가요 (3번이면 요우무가)"),
     "mystia": ("밤에만 여는 포장마차 주인", "장어구이·오뎅·노래를 팔아요"),
     "reisen": ("영원정의 약 행상 토끼", "피로회복약·꿈나라 약·행운의 약을 팔아요"),
+    "patchouli": ("도서관에서 나온 마법사", "새전을 받고 날씨를 바꾸는 마법을 걸어 줘요"),
+    "yukari": ("경계를 다루는 요괴", "틈(스키마)으로 친구들을 엉뚱한 곳에 옮겨요"),
 }
 INTERVIEW_Q = ["최근 새전 사정은 어떤가요?", "독자들께 한 말씀 부탁드려요!", "요즘 신사에 무슨 일이 있었나요?"]
 DRINK_WITH = {  # 스이카가 한 잔 권했을 때
@@ -292,6 +315,45 @@ class Stall(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         p.drawImage(QRectF(0, 0, self.width(), self.height() - 2), self.img)
+        p.end()
+
+
+class Gap(_Overlay):
+    """유카리의 틈(스키마): 보라색 틈이 열렸다 닫힘, 양끝에 빨간 리본, 안에서 눈이 내다봄."""
+
+    def __init__(self, cx: float, ground: float, seconds: float = 2.2, h: float = 86):
+        super().__init__(70, int(h) + 24, seconds)
+        self.move(round(cx - 35), round(ground - h - 12))
+        self.h = h
+        self.eyes = [(random.uniform(-6, 6), random.uniform(0.25, 0.75)) for _ in range(3)]
+
+    def paintEvent(self, _e) -> None:
+        a = self.age
+        open_ = min(1.0, a / 0.15) if a < 0.8 else max(0.0, (1 - a) / 0.2)
+        cx, top, h = 35.0, 12.0, self.h
+        wd = 13 * open_
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        if wd > 0.5:
+            path = QPainterPath()
+            path.moveTo(cx, top)
+            path.quadTo(cx + wd * 2, top + h / 2, cx, top + h)
+            path.quadTo(cx - wd * 2, top + h / 2, cx, top)
+            p.setPen(QPen(QColor(120, 70, 170), 1.6))
+            p.setBrush(QColor(40, 14, 60, 235))
+            p.drawPath(path)
+            for ex, ey in self.eyes:                          # 안에서 내다보는 눈
+                y = top + h * ey
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(250, 236, 200, int(230 * open_)))
+                p.drawEllipse(QPointF(cx + ex * open_, y), 4.2 * open_, 2.4 * open_)
+                p.setBrush(QColor(170, 30, 50, int(240 * open_)))
+                p.drawEllipse(QPointF(cx + ex * open_, y), 1.5 * open_, 1.5 * open_)
+        p.setPen(Qt.NoPen)                                    # 양끝 리본
+        p.setBrush(QColor(200, 30, 50, int(255 * max(open_, 0.0))))
+        for y in (top, top + h):
+            p.drawEllipse(QPointF(cx - 5, y), 5, 3.4)
+            p.drawEllipse(QPointF(cx + 5, y), 5, 3.4)
         p.end()
 
 
@@ -1555,9 +1617,209 @@ class ReisenVisit(Visit):
                  else "영원정에서 왔어요.")
 
 
+# ── 파츄리: 날씨 마법 ──
+class PatchouliVisit(Visit):
+    kind = "patchouli"
+
+    def __init__(self, visits: "Visits"):
+        super().__init__(visits)
+        g, sx = self.ground, self.game.shrine.pos_x
+        self.side = 1 if (g.x2 - sx) > (sx - g.x1) else -1
+        clamp = lambda x: min(max(x, g.x1 + 30), g.x2 - 30)   # noqa: E731
+        self.patchy = self.spawn("patchouli", clamp(sx + self.side * 380))
+        self.patchy.fade(1.0, 0.8)
+        self.patchy.go(clamp(sx + self.side * (self.game.shrine.width() / 2 + 60)), 22)   # 천천히 (운동 부족)
+        self.cast = False
+        self._held = False
+        now = time.monotonic()
+        self.phase, self.until, self.leave_at, self.mutter_at = "enter", now + 16, now + PATCHY_STAY, 0.0
+
+    def update(self, now: float) -> None:
+        pc = self.patchy
+        if pc.gone:
+            return
+        p = pc.pet
+        if p.state == "held":
+            self._held = True
+        if not pc.ready:
+            return
+        if self._held:
+            self._held = False
+            p.act("caught", 1.2)
+            self.say(pc, "콜록, 콜록… 흔들지 마…")
+            self.at(1.2, lambda: self.phase == "shop" and p.act("idle", 99))
+        if self.phase == "enter" and (pc.arrived() or now >= self.until):
+            pc.goal = None
+            pc.face(self.game.shrine.pos_x)
+            p.act("idle", 99)
+            self.say(pc, "…날씨가 마음에 안 들면 바꿔 줄 수 있어. 우클릭.", 3.5)
+            self.phase, self.mutter_at = "shop", now + 14
+        elif self.phase == "shop":
+            if now >= self.leave_at:
+                self._bye()
+            elif now >= self.mutter_at and not self.cast:
+                self.mutter_at = now + random.uniform(14, 20)
+                p.act("skill", 2.0)                           # 책 읽기
+                self.at(2.0, lambda: self.phase == "shop" and p.act("idle", 99))
+                self.say(pc, random.choice(["…", "이 책, 꽤 재밌네.", "콜록… 먼지가…", "일월화수목금토…"]))
+
+    def _bye(self) -> None:
+        self.phase = "bye"
+        pc, g = self.patchy, self.ground
+        self.say(pc, "…도서관으로 돌아갈게.")
+        self.at(1.2, lambda: pc.go(g.x2 - 20 if self.side > 0 else g.x1 + 20, 30))
+        self.at(6.0, lambda: self.leave(pc, 1.0))
+
+    def fill_menu(self, gu: Guest, menu: "QMenu") -> None:
+        if self.phase != "shop" or self.cast:
+            return
+        menu.addSeparator()
+        head = menu.addAction("📚 날씨 마법 (한 번만)")
+        head.setEnabled(False)
+        for key, (_w, icon, name, desc, _secs) in PATCHY_SPELLS.items():
+            price = patchy_price(self.game.state, key)
+            a = menu.addAction(f"{icon} {name}  ({desc})   새전 {price:,}", lambda key=key: self.buy(key))
+            a.setEnabled(self.game.state.saisen >= price)
+
+    def buy(self, key: str) -> bool:
+        g, s = self.game, self.game.state
+        price = patchy_price(s, key)
+        if self.phase != "shop" or self.cast or s.saisen < price:
+            return False
+        wkey, icon, name, _desc, secs = PATCHY_SPELLS[key]
+        s.saisen -= price
+        self.cast = True
+        g.shrine.set_saisen(s.saisen)
+        g.shrine.pop(f"-{price:,}")
+        s.weather_magic, s.weather_magic_until = wkey, time.time() + secs
+        weather.set_magic(wkey, s.weather_magic_until)
+        p = self.patchy.pet
+        p.act("skill", 2.4)                                   # 오색 구슬
+        self.say(self.patchy, f"{icon} {name}… 일월화수목금토, 날씨여 바뀌어라.", 3.2)
+        self.at(2.0, g._refresh_season)
+        self.at(2.6, lambda: g._say_at_shrine(f"{icon} 파츄리의 마법으로 날씨가 {weather.WEATHERS[wkey].name}(으)로!"))
+        self.at(2.4, lambda: self.phase == "shop" and p.act("idle", 99))
+        self.at(8.0, self._bye)
+        log.info("파츄리 날씨 마법: %s (%d)", wkey, price)
+        g.save()
+        return True
+
+    def on_click(self, gu: Guest) -> None:
+        self.say(gu, random.choice(["…방해하지 마.", "우클릭하면 날씨 마법을 걸어 줄게."]) if self.phase == "shop"
+                 else "…")
+
+
+# ── 유카리: 틈(스키마)으로 친구들을 엉뚱한 곳에 ──
+class YukariVisit(Visit):
+    kind = "yukari"
+
+    def __init__(self, visits: "Visits"):
+        super().__init__(visits)
+        g, sx = self.ground, self.game.shrine.pos_x
+        side = random.choice((-1, 1))
+        x = min(max(sx + side * (self.game.shrine.width() / 2 + 90), g.x1 + 40), g.x2 - 40)
+        self.effect(Gap(x - side * 10, g.y, 2.4))
+        self.yukari = self.spawn("yukari", x)
+        self.yukari.fade(1.0, 1.0)
+        self.yukari.face(sx)
+        now = time.monotonic()
+        self.tricks = 0
+        self.moved: list = []
+        self._held = False
+        self.phase, self.next_at, self.leave_at = "hello", now + 1.2, now + YUKARI_STAY
+        self.at(0.8, lambda: self.say(self.yukari, "어머, 경계 너머에서 실례할게요. 후후."))
+
+    def update(self, now: float) -> None:
+        yk = self.yukari
+        if yk.gone:
+            return
+        p = yk.pet
+        if p.state == "held":
+            self._held = True
+        if not yk.ready:
+            return
+        if self._held:
+            self._held = False
+            p.act("caught", 1.2)
+            self.say(yk, "어머나, 숙녀를 들어 올리다니~")
+            self.next_at = now + 1.5
+        if self.phase == "hello" and now >= self.next_at:
+            p.act("bow", 1.2)
+            self.phase, self.next_at = "tricks", now + 2.5
+        elif self.phase == "tricks" and now >= self.next_at:
+            if self.tricks >= YUKARI_TRICKS or now >= self.leave_at:
+                self._gift()
+            else:
+                self._trick()
+                self.next_at = now + random.uniform(7, 10)
+
+    def _trick(self) -> None:
+        g = self.game
+        cands = [o for o in g.pets if o.grounded and o.on is not None and o.isVisible() and o not in self.moved[-2:]]
+        if not cands:
+            self.tricks += 1
+            return
+        o = random.choice(cands)
+        self.tricks += 1
+        self.moved.append(o)
+        yk = self.yukari
+        yk.face(o.pos_x)
+        yk.pet.act("skill", 2.2)                              # 틈 열기 → 부채
+        self.at(2.2, lambda: self.phase == "tricks" and yk.pet.state not in ("held", "fall") and yk.pet.act("idle", 99))
+        self.effect(Gap(o.pos_x, o.pos_y, 1.6))
+        o.act("startled", 1.0)
+        fade(o, 0.0, 0.5)
+        self.at(0.6, lambda: self._drop_somewhere(o))
+        self.say(yk, random.choice(["저 아이, 잠깐 빌릴게요.", "경계를 살짝 바꿔 볼까요.", "후후, 어디로 보낼까~"]))
+
+    def _drop_somewhere(self, o) -> None:
+        """다른 바닥·창 위·하늘에서 툭."""
+        g = self.game
+        spots = [(gr.x1 + 60, gr.x2 - 60, gr.y) for gr in g.grounds if gr.x2 - gr.x1 > 160]
+        spots += [(pl.x1 + 30, pl.x2 - 30, pl.y) for pl in g.window_platforms if pl.x2 - pl.x1 > 120]
+        x1, x2, y = random.choice(spots) if spots else (g.left + 80, g.right - 80, g.bottom)
+        x = random.uniform(x1, max(x1 + 1, x2))
+        drop = random.uniform(60, 220)
+        o.pos_x, o.pos_y, o.vx, o.vy, o.state, o.on = x, y - drop, 0.0, 0.0, "fall", None
+        o._startle_on_land = True
+        o._place()
+        self.effect(Gap(x, y - drop + 20, 1.4, h=70))
+        fade(o, 1.0, 0.4)
+        self.game.events._say(o, random.choice(["여, 여긴 어디야?!", "으앗! 틈이다!", "유카리 씨~!"]))
+
+    def _gift(self) -> None:
+        self.phase = "bye"
+        g, s, yk = self.game, self.game.state, self.yukari
+        yk.pet.act("happy", 1.4)
+        if random.random() < 0.5:
+            n = 10 * s.shrine_level
+            s.cloth += n
+            prize = f"옷감 +{n}"
+        else:
+            amount = max(80, s.income_per_min * 20)
+            s.add_saisen(amount)
+            g.shrine.set_saisen(s.saisen)
+            g.shrine.pop(f"+{amount:,}")
+            prize = f"새전 +{amount:,}"
+        self.say(yk, f"즐거웠어요. 경계의 선물이에요 — {prize}", 3.2)
+        log.info("유카리 선물: %s", prize)
+        self.at(3.4, lambda: self.effect(Gap(yk.pet.pos_x, yk.pet.pos_y, 1.6)))
+        self.at(3.6, lambda: self.leave(yk, 0.6))
+        g.save()
+
+    def cancel(self) -> None:
+        for o in self.moved:                                  # 사라지던 중이면 다시 보이게
+            o.setWindowOpacity(1.0)
+        super().cancel()
+
+    def on_click(self, gu: Guest) -> None:
+        self.say(gu, random.choice(["후후, 무슨 일이죠?", "틈 안이 궁금한가요?", "레이무에게 안부 전해 줘요."]))
+
+
 VISIT_CLASSES = {"fairies": FairyVisit, "aya": AyaVisit, "suika": SuikaVisit,
                  "tewi": TewiVisit, "koishi": KoishiVisit, "nitori": NitoriVisit,
-                 "yuyuko": YuyukoVisit, "mystia": MystiaVisit, "reisen": ReisenVisit}
+                 "yuyuko": YuyukoVisit, "mystia": MystiaVisit, "reisen": ReisenVisit,
+                 "patchouli": PatchouliVisit, "yukari": YukariVisit}
 
 
 class Visits:

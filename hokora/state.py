@@ -163,6 +163,8 @@ class GameState:
     reisen_until: float = 0.0        # 레이센의 피로회복약: 이때까지 쓰다듬기 새전 ×2
     dream_pill: bool = False         # 레이센의 꿈나라 약: 다음에 꺼져 있는 동안 새전함 2배
     weather_slot: str = ""           # 마지막으로 알린 날씨 시간대 (weather.slot)
+    weather_magic: str = ""          # 파츄리의 날씨 마법
+    weather_magic_until: float = 0.0
     cutin: bool = True               # 스펠카드 컷인
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 

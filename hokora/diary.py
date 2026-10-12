@@ -75,6 +75,10 @@ def diary_lines(s: GameState, seconds: float, start: float, rng: random.Random |
         guests.append("누군가 다녀간 것 같은데… 아무도 기억하지 못한다.")
     if "meiling" in s.unlocked and s.meiling_blocks:
         guests.append("메이링이 새전 도둑을 문 앞에서 막아냈다!")
+    if s.guest_visits.get("yukari"):
+        guests.append("자고 일어나니 친구 하나가 엉뚱한 곳에 있었다. 유카리의 짓이다.")
+    if s.guest_visits.get("patchouli"):
+        guests.append("파츄리가 툇마루에서 책을 읽다 갔다. 콜록 소리가 들렸다.")
     if s.guest_visits.get("reisen"):
         guests.append("레이센이 약상자를 메고 다녀갔다. 테위를 찾는 눈치였다.")
     if s.guest_visits.get("yuyuko"):

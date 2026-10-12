@@ -23,8 +23,8 @@ from .shrine import DRAW_STAGE, STAGE_SIZE
 from .sprites import image_sprites
 from .state import DECOR, GARDEN, SAISEN_BOX, SEASONAL, SHRINE_SKINS, SHRINE_STAGES, GameState, in_season
 
-PORTRAIT = 76
-G_PORTRAIT = 58          # 손님 카드 (손님이 많아서 작게)
+PORTRAIT = 64            # 도감 카드 (친구가 많아서 작게)
+G_PORTRAIT = 48          # 손님 카드
 GUEST_KEYS = [k for keys, _ in VISITS.values() for k in keys]
 
 STYLE = """
@@ -754,7 +754,8 @@ class ShrinePanel(QWidget):
         p6.addWidget(self.daily_foot)
 
         # ── 손님 ──
-        tip = QLabel("가끔 신사에 손님이 찾아와요. 신사가 커질수록 찾아오는 손님이 늘어요.", objectName="goal")
+        tip = QLabel("가끔 신사에 손님이 찾아와요. 신사가 커질수록 찾아오는 손님이 늘어요. "
+                     "카드에 마우스를 올리면 하는 일이 보여요.", objectName="goal")
         tip.setWordWrap(True)
         p5.addWidget(tip)
         ggrid = QGridLayout()
@@ -934,8 +935,9 @@ class ShrinePanel(QWidget):
         wt = weather.current()
         if wt.income != 1:
             tags.append(f"{wt.name} ×{wt.income:g}")
-        self.weather_label.setText(f"{wt.icon} 지금 天候: {wt.name}({wt.kanji}) — {wt.desc}"
-                                   f"   ·   {weather.next_change()}에 바뀌어요")
+        magic = weather.magic_left()
+        self.weather_label.setText(f"{wt.icon} 지금 天候: {wt.name}({wt.kanji}) — {wt.desc}   ·   "
+                                   + (f"파츄리의 마법 {fmt_left(magic)}" if magic else f"{weather.next_change()}에 바뀌어요"))
         self.sub.setText(f"새전 {s.saisen:,}   ·   분당 새전 {s.income_per_min * boost:g}"
                          + (f"  ({', '.join(tags)})" if tags else ""))
         drawable = can_draw(s)
@@ -1098,7 +1100,8 @@ class ShrinePanel(QWidget):
             else:
                 line1.setText(f"신사 {stage}단계부터 찾아와요")
                 self._role(line1, "goal")
-            line2.setText(about if met else hint)
+            line2.hide()                                      # 설명은 카드 툴팁으로 (손님이 많아서)
+            pic.parentWidget().setToolTip(about if met else hint)
         self.news_boost.setText(f"기사 효과 중: 새전 수입 ×{NEWS_BOOST:g}  ({fmt_left(s.news_until - time.time())})"
                                 if news_active(s) else "")
         self.news_boost.setVisible(news_active(s))

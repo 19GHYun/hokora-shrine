@@ -75,6 +75,12 @@ PLAN = {
     "reimu@witch": [("1-b.png", "preset:outfit --grid 3x4", True)],
     "sanae@pumpkin": [("2-b.png", "preset:outfit --grid 3x4 --keep 0.03", True)],
     "cirno@obake": [("3-b.png", "preset:outfit --grid 3x4", True)],
+    # 크리스마스 의상·손님 유카리·파츄리 (1-b 는 칸 줄이 있는 시트 — 연두색이라 배경 지우기로 같이 지워짐)
+    "sakuya@santa": [("1-b.png", "preset:outfit --grid 3x4 --keep 0.03", True)],
+    "flandre@reindeer": [("2-b.png", "preset:outfit --grid 3x4 --keep 0.02", True)],
+    "marisa@gift": [("3-b.png", "preset:outfit --grid 3x4 --keep 0.03", True)],
+    "yukari": [("4-b.png", "preset:guest --grid 3x4 --keep 0.02", True)],
+    "patchouli": [("5-b.png", "preset:guest --grid 3x4 --keep 0.01", True)],
     "yuyuko": [("yuyuko_1.png", GUEST + " --grid 3x4", True)],
     "mystia": [("mistia_1.png", GUEST + " --grid 3x4", True)],
     "koishi": [("3_2_1.png", "idle_0,idle_1,blink,bow,-,walk_0,walk_1,walk_2,walk_3,skill_0,skill_1,caught,happy", True)],

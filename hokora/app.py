@@ -117,6 +117,7 @@ class Game(QObject):
         self._card_queue: list = []              # 일기·출석·신문·사진 카드는 하나씩 차례로
         self.fx = season.SeasonFx()
         self.wfx = weather.WeatherFx()
+        weather.set_magic(self.state.weather_magic, self.state.weather_magic_until)
         self._cutin_at = -1e9
         self._night: bool | None = None
         self._update_bounds()

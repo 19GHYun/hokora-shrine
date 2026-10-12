@@ -56,10 +56,25 @@ def slot(now: datetime | None = None) -> str:
     return f"{now:%Y-%m-%d}-{now.hour // SLOT_HOURS}"
 
 
+_magic: tuple[str, float] = ("", 0.0)       # 파츄리의 날씨 마법: (날씨, 끝나는 시각 time.time)
+
+
+def set_magic(key: str, until: float) -> None:
+    global _magic
+    _magic = (key, until) if key in WEATHERS else ("", 0.0)
+
+
+def magic_left() -> float:
+    """날씨 마법이 남은 초 (없으면 0)."""
+    return max(0.0, _magic[1] - time.time()) if _magic[0] else 0.0
+
+
 def current(now: datetime | None = None) -> Weather:
     forced = os.environ.get("HOKORA_WEATHER", "")
     if forced in WEATHERS:
         return WEATHERS[forced]
+    if magic_left() > 0:
+        return WEATHERS[_magic[0]]
     rng = random.Random(slot(now))
     ws = list(WEATHERS.values())
     return rng.choices(ws, weights=[w.weight for w in ws])[0]

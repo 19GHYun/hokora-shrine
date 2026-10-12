@@ -471,6 +471,48 @@ def t_cutin():
         p.frozen_until = 0.0
 
 
+def t_yukari():
+    calm()
+    xmas = [k for k in ("sakuya:santa", "flandre:reindeer", "marisa:gift") if k in wardrobe.ITEMS]
+    check("크리스마스 의상 3벌", len(xmas) == 3 and all(wardrobe.is_limited(wardrobe.ITEMS[k]) for k in xmas), xmas)
+    s.saisen = 10 ** 7
+    if time.localtime().tm_mon != 12:
+        check("12월이 아니면 새전으로 사기", game.on_action("wbuy", "flandre:reindeer") and "flandre:reindeer" in s.wardrobe)
+    check("루돌프 플랑드르 입기", "flandre:reindeer" not in s.wardrobe
+          or (game.on_action("wear", ("flandre", "reindeer")) and P["flandre"].skin == "reindeer"))
+    check("유카리 방문", game.visits.start("yukari"))
+    G["pos"] = {p.ch.key: round(p.pos_x) for p in game.pets}
+    v = game.visits.visit
+    if v is not None:
+        v.next_at = 0.0
+        v.phase = "tricks"
+
+
+def t_yukari2():
+    moved = [p.ch.key for p in game.pets if abs(round(p.pos_x) - G["pos"][p.ch.key]) > 30]
+    check("유카리 틈으로 친구 옮기기", len(moved) >= 1, moved)
+    check("옮겨진 친구가 다시 보임", all(p.windowOpacity() > 0.9 for p in game.pets if p.ch.key in moved))
+    if game.visits.visit:
+        game.visits.visit.cancel()
+
+
+def t_patchouli():
+    calm()
+    check("파츄리 방문", game.visits.start("patchouli"))
+    v = game.visits.visit
+    if v is not None:
+        v.phase = "shop"
+        os.environ.pop("HOKORA_WEATHER", None)
+        check("날씨 마법 (오로라)", v.buy("aurora") and game.state.weather_magic == "aurora")
+        from hokora import weather as hk_weather
+        check("마법 날씨가 지금 날씨", hk_weather.current().key == "aurora" and hk_weather.magic_left() > 1700)
+        check("마법은 한 번만", not v.buy("clear"))
+        hk_weather.set_magic("", 0.0)
+        s.weather_magic, s.weather_magic_until = "", 0.0
+        os.environ["HOKORA_WEATHER"] = "cloudy"
+        v.cancel()
+
+
 def t_end():
     app.quit()
 
@@ -479,7 +521,8 @@ STEPS = [(t_core, 3000), (t_core2, 2500), (t_thief, 1600), (t_skill, 1800), (t_a
          (t_duel, 8500), (t_fairies, 8000), (t_fairies2, 17000), (t_aya, 20000), (t_suika, 2000),
          (t_shop, 1000), (t_season_shop, 12000), (t_tewi, 1500), (t_koishi, 7500), (t_nitori, 11000),
          (t_nitori2, 1500), (t_yuyuko, 9000), (t_yuyuko2, 1500), (t_mystia, 2500), (t_mystia2, 1500),
-         (t_youmu, 0), (t_meiling, 11000), (t_reisen, 1000), (t_weather, 1500), (t_cutin, 500), (t_end, 0)]
+         (t_youmu, 0), (t_meiling, 11000), (t_reisen, 1000), (t_weather, 1500), (t_cutin, 500), (t_yukari, 6000),
+         (t_yukari2, 1000), (t_patchouli, 1500), (t_end, 0)]
 
 
 def run(i: int = 0) -> None:
