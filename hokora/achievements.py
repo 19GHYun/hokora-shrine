@@ -88,6 +88,8 @@ ACHIEVEMENTS = {a.key: a for a in [
     A("decorall", "🏮", "환상향 정원사", "장식 모두 사기", lambda s: len(s.decor_owned) >= len(DECOR), 4),
     A("expedition10", "🗺", "모험의 시작", "원정 10번 다녀오기", lambda s: s.expedition_done >= 10, 2),
     A("expedition50", "🗺", "환상향 탐험가", "원정 50번 다녀오기", lambda s: s.expedition_done >= 50, 3),
+    A("festival1", "🎆", "축제의 시작", "예대제 열기", lambda s: s.festivals >= 1, 1),
+    A("festival5", "🎆", "축제의 신사", "예대제 5번 열기", lambda s: s.festivals >= 5, 3),
     A("fish50", "🎣", "낚시꾼", "물고기 50마리 낚기", lambda s: s.fish_caught >= 50, 2),
     A("fishall", "🎣", "연못의 주인", "낚을거리 12종 모두 낚기", lambda s: len(s.fish) >= 12, 3),
 ]}

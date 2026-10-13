@@ -66,6 +66,8 @@ def income_multiplier(s: GameState) -> float:
     if eel_active(s):
         m *= EEL_BOOST
     m *= weather.current().income            # 쾌청 ×1.2, 오로라 ×2
+    if s.festival_until > time.time():       # 예대제
+        m *= 2.0
     return m * (1 + omamori.bonus(s, "income"))
 
 

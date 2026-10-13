@@ -11,14 +11,15 @@ import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from PySide6.QtCore import QElapsedTimer, QObject, QPoint, QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QAction, QCursor, QFont, QIcon, QImage, QPainter, QPixmap
+from PySide6.QtCore import QElapsedTimer, QObject, QPoint, QPointF, QProcess, QRectF, Qt, QTimer
+from PySide6.QtGui import QCursor, QFont, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import __version__, winutil
 from . import affection as aff
-from . import achievements, daily, expedition, fishing, omamori, photo, season, torii, wardrobe, weather
+from . import achievements, daily, expedition, festival, fishing, omamori, photo, season, torii, tutorial, wardrobe, weather
+from .settings import SettingsWindow
 from .diary import DiaryCard
 from .guests import fade as fade_window
 from .spellcard import MIN_GAP as CUTIN_GAP
@@ -119,6 +120,12 @@ class Game(QObject):
         self._card_queue: list = []              # 일기·출석·신문·사진 카드는 하나씩 차례로
         self.fx = season.SeasonFx()
         self.wfx = weather.WeatherFx()
+        self.ffx = festival.FestivalFx()
+        self.tip: tutorial.Tip | None = None
+        self._out_since: dict[str, float] = {}         # 붐빔 조절: 언제부터 나와 있었나 / 쉬었나
+        self._bench_since: dict[str, float] = {}
+        self._crowd_n = 0
+        tutorial.decide(self.state)
         weather.set_magic(self.state.weather_magic, self.state.weather_magic_until)
         self._cutin_at = -1e9
         self._night: bool | None = None
@@ -138,10 +145,11 @@ class Game(QObject):
         self.events = Events(self)
         self.visits = Visits(self)
         self._panel_tab = 0
-        keys = list(CHARACTERS) if os.environ.get("HOKORA_ALL") == "1" else self.state.unlocked
-        for key in keys:
-            if key not in self.state.resting and key not in expedition.away(self.state):   # 쉬는 친구·원정 간 친구는 빼고
-                self._spawn(key)
+        elig = self._eligible()                    # 쉬는 친구·원정 간 친구는 빼고, 붐빔 조절만큼만
+        for key in elig[:self.state.max_out or len(elig)]:
+            self._spawn(key)
+        for key in elig[self.state.max_out or len(elig):]:
+            self._bench_since[key] = time.monotonic()
 
         self.clock = QElapsedTimer()
         self.clock.start()
@@ -248,6 +256,7 @@ class Game(QObject):
         decors = [w for k, w in self.decors.items() if k != hidden] if self.state.show_decor else []
         fx = [self.fx] if self.fx.kind and self.state.season_fx else []   # 흩날림·날씨는 맨 뒤
         fx += [self.wfx] if self.wfx.kind and self.state.season_fx else []
+        fx += [self.ffx] if festival.active(self.state) else []
         row = [self.torii_row] if self.state.torii else []
         return [*fx, *row, *decors, self.shrine, *self.pets, *self.guests]
 
@@ -283,6 +292,8 @@ class Game(QObject):
         QTimer.singleShot(3500, self._new_day)
         QTimer.singleShot(5000, self._check_expeditions)
         QTimer.singleShot(6500, self._check_achievements)
+        QTimer.singleShot(4200, self._tutorial_show)
+        self._refresh_festival()
         if self._away >= MIN_AWAY:
             QTimer.singleShot(2500, lambda: self._show_diary(self._away, time.time() - self._away,
                                                              self._away_earned, offline=True))
@@ -301,8 +312,12 @@ class Game(QObject):
         for pet in everyone:
             pet.step(dt)
         self.shrine.step(dt)
-        if self.fx.isVisible() or self.torii_row.isVisible() or self.wfx.isVisible():
+        if self.tip is not None:
+            self._tutorial_follow()
+        if self.fx.isVisible() or self.torii_row.isVisible() or self.wfx.isVisible() or self.ffx.isVisible():
             g = self.ground_under(self.shrine.pos_x)
+            if self.ffx.isVisible():
+                self.ffx.follow(self.shrine.pos_x, g.y)
             if self.fx.isVisible():
                 self.fx.follow(self.shrine.pos_x, g.y)
             if self.wfx.isVisible():
@@ -440,6 +455,7 @@ class Game(QObject):
             self.events.catch()
             return
         if pet.pat():
+            self._tutorial_event("pat")
             reward = PAT_REWARD * pat_multiplier(self.state) * aff.pat_bonus(self.state, pet.ch.key)
             reward += int(omamori.bonus(self.state, "pat"))           # 복 부적
             now = time.monotonic()
@@ -456,6 +472,7 @@ class Game(QObject):
 
     def on_thrown(self, pet: PetWindow, speed: float) -> None:
         if speed > 400:                           # 살짝 내려놓은 건 빼고
+            self._tutorial_event("throw")
             daily.bump(self.state, "throw")
             self._daily_check()
 
@@ -468,6 +485,7 @@ class Game(QObject):
 
     # ── 신사 키우기 / 해금 ──
     def open_panel(self) -> None:
+        self._tutorial_event("panel")
         if self.panel is not None:
             self.panel.close()
         self.panel = ShrinePanel(self.state, self.upgrade, self.omikuji, self.on_decor, self.pray, self.upgrade_box,
@@ -491,6 +509,9 @@ class Game(QObject):
     def _every_half_minute(self) -> None:
         self._new_day()
         self._refresh_season()
+        self._festival_tick()
+        self._crowd_n += 1
+        self._crowd_tick(rotate=self._crowd_n % 20 == 0)   # 10분마다 번갈아
         self._check_expeditions()
         self._check_achievements()
         self._daily_check()                        # 새전 모으기·함께 지내기는 시간이 지나며 채워짐
@@ -591,7 +612,8 @@ class Game(QObject):
                     "torii": self.offer_torii, "pull": self.pull_omamori, "equip": self.equip_omamori,
                     "wpull": self.pull_wardrobe, "wear": lambda v: self.wear(*v), "wfx": lambda v: self.set_fx(*v),
                     "exchange": self.exchange_cloth, "shrine_skin": self.shrine_skin, "wbuy": self.buy_outfit,
-                    "expedition": lambda v: self.send_expedition(*v), "title": self.set_title}
+                    "expedition": lambda v: self.send_expedition(*v), "title": self.set_title,
+                    "festival": lambda _v: self.hold_festival()}
         return handlers[name](value)
 
     def set_look(self, stage: int) -> None:
@@ -885,6 +907,189 @@ class Game(QObject):
         self._check_achievements()
         self.save()
 
+    # ── 예대제 ──
+    def hold_festival(self) -> bool:
+        s = self.state
+        price = festival.cost(s)
+        if not festival.hold(s):
+            return False
+        self.shrine.set_saisen(s.saisen)
+        self.shrine.pop(f"-{price:,}")
+        self._say_at_shrine("🎆 예대제 개막!  2시간 동안 새전 수입 ×2, 손님이 몰려와요!")
+        if not self.hidden_for_fullscreen:
+            burst = PetalBurst(self.shrine.pos_x, self.shrine.y() + self.shrine.height())
+            self.keep(burst)
+            burst.show()
+        self._refresh_festival()
+        self.later(1.0, self._dance)
+        log.info("예대제 개막 (%d)", price)
+        self._check_achievements()
+        self.save()
+        return True
+
+    def _refresh_festival(self) -> None:
+        on = festival.active(self.state) and not self.hidden_for_fullscreen
+        self.ffx.night = bool(self._night)
+        if on != self.ffx.isVisible():
+            if on:
+                self.ffx.follow(self.shrine.pos_x, self.ground_under(self.shrine.pos_x).y)
+            self.ffx.setVisible(on)
+
+    def _dance(self) -> None:
+        """본오도리: 다 같이 폴짝·손 흔들기."""
+        dancers = [p for p in self.pets if p.grounded]
+        for i, p in enumerate(dancers):
+            self.later(i * 0.15, lambda p=p: p.grounded and p.act(random.choice(("happy", "wave")), 1.4))
+        if dancers and not self.hidden_for_fullscreen:
+            p = random.choice(dancers)
+            say(random.choice(["♪ 왓쇼이~!", "♪ 축제다~!", "♪ 영차 영차!"]), p.pos_x, p.pos_y - 76, 2.2)
+
+    def _festival_tick(self) -> None:
+        s = self.state
+        if festival.active(s):
+            self._refresh_festival()
+            self._dance()
+            return
+        self._refresh_festival()
+        res = festival.finish(s)
+        if res is None:
+            return
+        earned, tips = res
+        self.shrine.set_saisen(s.saisen)
+        self.show_card(DiaryCard("🎆 예대제 결산", [
+            "참배객이 줄을 이었다! 친구들은 밤새 춤을 췄다.",
+            f"축제 동안 모인 새전 {earned:,}"], f"참배객이 두고 간 새전 +{tips:,}",
+            "24시간 뒤에 다시 열 수 있어요"))
+        log.info("예대제 끝: 모인 새전 %d, 참배객 %d", earned, tips)
+        self.save()
+
+    # ── 붐빔 조절 ──
+    def _eligible(self) -> list[str]:
+        base = list(CHARACTERS) if os.environ.get("HOKORA_ALL") == "1" else self.state.unlocked
+        away = expedition.away(self.state)
+        return [k for k in base if k not in self.state.resting and k not in away]
+
+    def set_max_out(self, n: int) -> None:
+        self.state.max_out = max(0, int(n))
+        self._crowd_tick()
+        log.info("동시에 나와 있는 친구: %s", n or "전부")
+        self.save()
+
+    def _crowd_tick(self, rotate: bool = False) -> None:
+        elig = self._eligible()
+        cap = self.state.max_out or len(elig)
+        now = time.monotonic()
+
+        def free(p) -> bool:
+            return (not p.scripted and p.state not in ("held", "fall", "jump") and self.events.thief is not p
+                    and p.on is not None)
+
+        def home(p) -> None:
+            self.pets.remove(p)
+            self._bench_since[p.ch.key] = now
+            fade_window(p, 0.0, 0.6, lambda p=p: (p.close(), p.deleteLater()))
+
+        def out() -> list:
+            return [p for p in self.pets if p.ch.key in elig]
+        if rotate and len(elig) > cap:                     # 오래 나와 있던 친구가 쉬러 들어가고
+            cands = [p for p in out() if free(p)]
+            if cands:
+                home(min(cands, key=lambda p: self._out_since.get(p.ch.key, 0.0)))
+        while len(out()) > cap:
+            cands = [p for p in out() if free(p)]
+            if not cands:
+                break
+            home(min(cands, key=lambda p: self._out_since.get(p.ch.key, 0.0)))
+        shown = {p.ch.key for p in out()}
+        benched = sorted((k for k in elig if k not in shown), key=lambda k: self._bench_since.get(k, 0.0))
+        while len(shown) < cap and benched:                # 오래 쉰 친구부터 나옴
+            k = benched.pop(0)
+            self._drop_in(k)
+            shown.add(k)
+
+    # ── 처음 안내 ──
+    def _tutorial_show(self) -> None:
+        step = tutorial.current(self.state)
+        if step is None:
+            if self.tip is not None:
+                self.tip.close()
+                self.tip = None
+            return
+        if step[0] == "omikuji" and not can_draw(self.state):   # 오늘 이미 뽑았으면 건너뜀
+            tutorial.advance(self.state, "omikuji")
+            return self._tutorial_show()
+        if self.tip is None:
+            self.tip = tutorial.Tip(self._tutorial_skip)
+        self.tip.set_text(step[1])
+        self._tutorial_follow()
+        if not self.hidden_for_fullscreen:
+            self.tip.show()
+
+    def _tutorial_follow(self) -> None:
+        step = tutorial.current(self.state)
+        if step is None or self.tip is None:
+            return
+        if step[2] == "pet" and self.pets:
+            p = next((x for x in self.pets if x.ch.key == "reimu"), self.pets[0])
+            self.tip.point_at(p.pos_x, p.pos_y - 72)
+        else:
+            self.tip.point_at(self.shrine.pos_x, self.shrine.y() + 24)
+
+    def _tutorial_event(self, event: str) -> None:
+        if tutorial.current(self.state) is None:
+            return
+        finished = tutorial.advance(self.state, event)
+        if finished:
+            if self.tip is not None:
+                self.tip.close()
+                self.tip = None
+            self.shrine.set_saisen(self.state.saisen)
+            self.later(1.0, lambda: self._say_at_shrine(
+                f"🎉 안내 끝! 새전 +{tutorial.REWARD}  —  새전을 모아 신사를 키우면 새 친구가 찾아와요 (도감 탭)"))
+            self.save()
+        elif tutorial.current(self.state) is not None:
+            self.later(0.8, self._tutorial_show)
+
+    def _tutorial_skip(self) -> None:
+        self.state.tutorial = tutorial.DONE
+        if self.tip is not None:
+            self.tip.close()
+            self.tip = None
+        self.save()
+
+    def restart_tutorial(self) -> None:
+        self.state.tutorial = 0
+        self._tutorial_show()
+
+    # ── 설정 창 ──
+    def open_settings(self) -> None:
+        w = SettingsWindow(self)
+        self.keep(w)
+        w.show_near(QPoint(round(self.shrine.pos_x), round(self.shrine.y())))
+
+    def set_autostart(self, on: bool) -> None:
+        winutil.set_autostart(on, ENTRY_SCRIPT)
+
+    def open_data_dir(self) -> None:
+        try:
+            os.startfile(str(self.store.path.parent))
+        except (OSError, AttributeError):
+            log.exception("데이터 폴더 열기 실패")
+
+    def restore_backup(self, path) -> None:
+        if not self.store.restore(path):
+            QMessageBox.warning(None, "Hokora", "백업을 되돌리지 못했어요. 로그를 확인해 주세요.")
+            return
+        log.info("백업 되돌림: %s → 다시 시작", path.name)
+        self._restart()
+
+    def _restart(self) -> None:
+        if getattr(sys, "frozen", False):
+            QProcess.startDetached(sys.executable, ["--restarted"])
+        else:
+            QProcess.startDetached(sys.executable, [str(ENTRY_SCRIPT), "--restarted"])
+        self.app.quit()
+
     def buy_outfit(self, item_id: str) -> bool:
         """기간 한정 의상을 (기간이 아닐 때) 새전으로."""
         before = self.state.saisen
@@ -1011,6 +1216,7 @@ class Game(QObject):
 
     # ── 친해지기: 말 걸기·선물 ──
     def on_pet_menu(self, pet: PetWindow, global_pos: QPoint) -> None:
+        self._tutorial_event("menu")
         s, key = self.state, pet.ch.key
         menu = QMenu()
         menu.setStyleSheet(MENU_STYLE)
@@ -1181,6 +1387,7 @@ class Game(QObject):
         """하루 한 번 운세. 새전을 받고, 캐릭터들이 기뻐하거나 깜짝 놀란다."""
         if not can_draw(self.state):
             return
+        self._tutorial_event("omikuji")
         result = draw_omikuji(self.state)
         log.info("오미쿠지: %s (+%d)", result.fortune.rank, result.reward)
         self.shrine.set_saisen(self.state.saisen)
@@ -1233,6 +1440,7 @@ class Game(QObject):
             self.save()
 
     def on_context_menu(self, global_pos: QPoint) -> None:
+        self._tutorial_event("menu")
         menu = QMenu()
         self._fill_menu(menu)
         menu.exec(global_pos)
@@ -1250,33 +1458,8 @@ class Game(QObject):
         if can_draw(s):
             menu.addAction("오늘의 오미쿠지 뽑기", self.omikuji)
         menu.addAction("모두 불러오기", self.gather)
-        if s.decor_pos:
-            view = QAction("장식 보이기  (꺼도 효과는 그대로)", menu, checkable=True)
-            view.setChecked(s.show_decor)
-            view.toggled.connect(self.set_show_decor)
-            menu.addAction(view)
-        cur = QAction("마우스 커서에도 올라타기", menu, checkable=True)
-        cur.setChecked(s.cursor_play)
-        cur.toggled.connect(self.set_cursor_play)
-        menu.addAction(cur)
-        ci = QAction("스펠카드 컷인", menu, checkable=True)
-        ci.setChecked(s.cutin)
-        ci.toggled.connect(self.set_cutin)
-        menu.addAction(ci)
-        fx = QAction("계절·날씨 연출  (벚꽃잎·단풍·눈·반딧불·비·안개)", menu, checkable=True)
-        fx.setChecked(s.season_fx)
-        fx.toggled.connect(self.set_season_fx)
-        menu.addAction(fx)
-        climb = QAction("창 위에도 올라가기", menu, checkable=True)
-        climb.setChecked(s.climb)
-        climb.toggled.connect(self.set_climb)
-        menu.addAction(climb)
-        if winutil.IS_WIN:
-            a = QAction("Windows 시작 시 자동 실행", menu, checkable=True)
-            a.setChecked(winutil.get_autostart() is not None)
-            a.toggled.connect(lambda on: winutil.set_autostart(on, ENTRY_SCRIPT))
-            menu.addAction(a)
         menu.addSeparator()
+        menu.addAction("⚙ 설정", self.open_settings)
         menu.addAction("종료", self.quit)
 
     def gather(self) -> None:
@@ -1355,6 +1538,8 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setFont(QFont("Malgun Gothic", 9))
+    if "--restarted" in sys.argv:                       # 백업 되돌리기로 다시 켜짐: 앞의 것이 끝나길 잠깐 기다림
+        time.sleep(1.5)
     if _notify_running_instance():
         log.info("이미 실행 중 — 기존 캐릭터를 불러오고 종료")
         return 0

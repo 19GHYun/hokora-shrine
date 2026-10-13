@@ -1859,7 +1859,8 @@ class Visits:
         if self._forced in VISITS:
             kind, self._forced = self._forced, ""
             self.start(kind)
-        elif random.random() < VISIT_CHANCE * (1 + omamori.bonus(g.state, "guest")) * weather.current().guests:
+        elif random.random() < (VISIT_CHANCE * (1 + omamori.bonus(g.state, "guest")) * weather.current().guests
+                                * (3.0 if g.state.festival_until > time.time() else 1.0)):          # 예대제엔 손님이 몰려옴
             kinds = available(g.state)
             if kinds:
                 if weather.current().key == "drizzle" and "fairies" in kinds and random.random() < 0.5:
@@ -1879,7 +1880,8 @@ class Visits:
     def _finish(self) -> None:
         v, self.visit = self.visit, None
         v.finish()
-        self._next = time.monotonic() + VISIT_COOLDOWN
+        self._next = time.monotonic() + (VISIT_COOLDOWN / 5 if self.game.state.festival_until > time.time()
+                                         else VISIT_COOLDOWN)
         log.info("손님 돌아감: %s", v.kind)
         self.game.save()
 

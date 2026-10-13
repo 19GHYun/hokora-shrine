@@ -60,6 +60,7 @@ guests.FAIRY_PRANK, guests.SUIKA_STAY = 6.0, (4.0, 4.0)
 game = hk.Game(app)
 game.start()
 s = game.state
+s.tutorial = 99                                  # 처음 안내는 따로 시험 (다른 시험에 끼어들지 않게)
 s.unlocked = ["reimu", "marisa", "cirno", "sakuya", "sanae", "remilia", "flandre"]
 P = {p.ch.key: p for p in game.pets}
 ev = game.events
@@ -579,6 +580,83 @@ def t_fishing():
     check("미끼가 없으면 못 낚음", game._fishing is None)
 
 
+def t_festival():
+    from hokora import festival
+    calm()
+    s.saisen = 10 ** 7
+    base = prayer.income_multiplier(s)
+    check("예대제 열기", game.on_action("festival") and festival.active(s))
+    check("예대제 수입 ×2", abs(prayer.income_multiplier(s) / base - 2.0) < 1e-9)
+    check("등롱 줄", game.ffx.isVisible())
+    check("예대제는 하루에 한 번", not game.on_action("festival"))
+    s.festival_until = time.time() - 1
+    before = s.saisen_total
+    game._festival_tick()
+    check("예대제 결산 (참배객 새전)", s.festival_reported and s.saisen_total > before and not game.ffx.isVisible())
+    for c in list(game._card_queue):
+        c.close()
+
+
+def t_crowd():
+    calm()
+    game.set_max_out(3)
+    out = [p.ch.key for p in game.pets]
+    check("동시에 3명만", len(out) == 3, out)
+    G["crowd_prev"] = out
+    game._crowd_tick(rotate=True)
+
+
+def t_crowd2():
+    out2 = [p.ch.key for p in game.pets]
+    check("10분마다 번갈아", len(out2) == 3 and set(out2) != set(G.get("crowd_prev", [])), out2)
+    game.set_max_out(0)
+
+
+def t_crowd3():
+    check("전부 다시 나옴", len(game.pets) == len(game._eligible()), len(game.pets))
+    calm()
+
+
+def t_tutorial():
+    s.tutorial = 0
+    game._tutorial_show()
+    check("처음 안내 말풍선", game.tip is not None and game.tip.isVisible())
+    r = P["reimu"] if P["reimu"] in game.pets else game.pets[0]
+    r.last_reward = 0
+    game.on_pat(r)
+    game.on_thrown(r, 900)
+    game.open_panel()
+    game.panel.close()
+    before = s.saisen_total
+    if s.tutorial == 3:
+        game.omikuji() if hk.can_draw(s) else game._tutorial_show()
+    game._tutorial_event("menu")
+    check("처음 안내 끝 + 새전 100", s.tutorial == 99 and s.saisen_total >= before + 100 and game.tip is None, s.tutorial)
+    for c in list(game._card_queue):
+        c.close()
+    for w in list(game._cards):
+        if type(w).__name__ == "FortuneSlip":
+            w.close()
+
+
+def t_settings():
+    game.open_settings()
+    win = [w for w in game._cards if type(w).__name__ == "SettingsWindow"]
+    check("설정 창", bool(win) and win[-1].isVisible())
+    for w in win:
+        w.close()
+    game.save()
+    st = game.store
+    check("하루 한 번 백업", any(p.name.startswith("save-") for p in st.backup_dir.glob("*.json")))
+    st.backup(force=True)
+    rows = st.backups()
+    check("백업 목록", len(rows) >= 2 and "saisen" in rows[0][1], len(rows))
+    G["restarted"] = False
+    game._restart = lambda: G.__setitem__("restarted", True)
+    game.restore_backup(rows[-1][0])
+    check("백업 되돌리기 (다시 시작)", G["restarted"] and st.readonly)
+
+
 def t_end():
     app.quit()
 
@@ -589,7 +667,8 @@ STEPS = [(t_core, 3000), (t_core2, 2500), (t_thief, 1600), (t_skill, 1800), (t_a
          (t_nitori2, 1500), (t_yuyuko, 9000), (t_yuyuko2, 1500), (t_mystia, 2500), (t_mystia2, 1500),
          (t_youmu, 0), (t_meiling, 11000), (t_reisen, 1000), (t_weather, 1500), (t_cutin, 500), (t_yukari, 6000),
          (t_yukari2, 1000), (t_patchouli, 1500), (t_expedition, 2200),
-         (t_expedition2, 1000), (t_achieve, 1000), (t_fishing, 1000), (t_end, 0)]
+         (t_expedition2, 1000), (t_achieve, 1000), (t_fishing, 1000), (t_festival, 1000),
+         (t_crowd, 1500), (t_crowd2, 1500), (t_crowd3, 2500), (t_tutorial, 2000), (t_settings, 500), (t_end, 0)]
 
 
 def run(i: int = 0) -> None:

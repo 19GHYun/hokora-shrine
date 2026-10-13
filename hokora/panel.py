@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QMen
                                QTabBar, QVBoxLayout, QWidget, QWidgetAction)
 
 from . import affection as aff
-from . import achievements, daily, expedition, fishing, omamori, season, torii, wardrobe, weather
+from . import achievements, daily, expedition, festival, fishing, omamori, season, torii, wardrobe, weather
 from .decor import decor_image
 from .guests import GUEST_ABOUT, VISITS, guest_stage
 from .omikuji import can_draw
@@ -626,6 +626,17 @@ class ShrinePanel(QWidget):
         box.addWidget(self.box_btn)
         p1.addLayout(box)
 
+        # ── 예대제 ──
+        frow = QHBoxLayout()
+        self.fest_label = QLabel(objectName="goal")
+        self.fest_label.setWordWrap(True)
+        self.fest_btn = QPushButton(objectName="upgrade")
+        self.fest_btn.setCursor(Qt.PointingHandCursor)
+        self.fest_btn.clicked.connect(lambda: self._act("festival"))
+        frow.addWidget(self.fest_label, 1)
+        frow.addWidget(self.fest_btn)
+        p1.addLayout(frow)
+
         # ── 센본토리이 ──
         trow = QHBoxLayout()
         self.torii_label = QLabel(objectName="goal")
@@ -1157,6 +1168,18 @@ class ShrinePanel(QWidget):
             out.setEnabled(not gone)
             out.setText("원정 중" if gone else "밖에 나와 있기")
             out.blockSignals(False)
+        # 예대제
+        if festival.active(s):
+            self.fest_label.setText(f"🎆 예대제 중!  새전 수입 ×2 · 손님이 몰려와요  ({fmt_left(festival.left(s))})")
+            self.fest_btn.setText("축제 중")
+            self.fest_btn.setEnabled(False)
+        else:
+            why = festival.blocked(s)
+            self.fest_label.setText("🎆 예대제: 2시간 동안 새전 수입 ×2, 손님이 몰려오고, 끝나면 참배객 새전까지"
+                                    + (f"\n{why}" if why and why != "새전이 모자라요" else ""))
+            self.fest_btn.setText(f"예대제 열기  {festival.cost(s):,}")
+            self.fest_btn.setEnabled(not why)
+
         # 센본토리이
         nm, ttl = torii.next_milestone(s), torii.title(s)
         self.torii_label.setText(f"⛩ 센본토리이 {s.torii:,}개 — 분당 새전 +{torii.income(s)}"

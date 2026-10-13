@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -16,6 +17,7 @@ APP_NAME = "Hokora"
 DATA_DIR = Path(os.environ.get("APPDATA") or (Path.home() / ".local" / "share")) / APP_NAME
 SAVE_FILE = DATA_DIR / "save.json"
 LOG_DIR = DATA_DIR / "logs"
+KEEP_BACKUPS = 7
 
 # ── 경제 ──
 SHRINE_STAGES = {  # 단계 → (이름, 분당 새전, 이 단계로 올리는 비용)
@@ -172,6 +174,14 @@ class GameState:
     fish_caught: int = 0
     fish_bait: int = 0
     fish_bait_date: str = ""
+    # 예대제 (festival.py)
+    festival_until: float = 0.0
+    festival_next: float = 0.0
+    festival_start_total: int = 0
+    festival_reported: bool = True
+    festivals: int = 0
+    tutorial: int = -1               # 처음 안내 단계 (-1 = 아직 안 정함, 99 = 끝)
+    max_out: int = 0                 # 동시에 나와 있는 친구 수 (0 = 전부)
     weather_magic: str = ""          # 파츄리의 날씨 마법
     weather_magic_until: float = 0.0
     cutin: bool = True               # 스펠카드 컷인
@@ -287,6 +297,55 @@ class SaveStore:
             log.exception("저장 파일 형식 오류")
             return GameState()
 
+    @property
+    def backup_dir(self) -> Path:
+        return self.path.parent / "backups"
+
+    def backup(self, force: bool = False) -> Path | None:
+        """저장 파일을 backups/ 에 복사 (하루 한 번, force 면 지금). 최근 7개만 남김."""
+        if not self.path.exists():
+            return None
+        d = self.backup_dir
+        d.mkdir(parents=True, exist_ok=True)
+        now = datetime.now()
+        target = d / (f"save-{now:%Y%m%d-%H%M%S}.json" if force else f"save-{now:%Y%m%d}.json")
+        if target.exists() and not force:
+            return None
+        try:
+            shutil.copy2(self.path, target)
+        except OSError:
+            log.exception("백업 실패")
+            return None
+        for old in sorted(d.glob("save-*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[KEEP_BACKUPS:]:
+            old.unlink(missing_ok=True)
+        log.info("백업: %s", target.name)
+        return target
+
+    def backups(self) -> list[tuple[Path, dict]]:
+        """(백업 파일, 새전·단계·친구 요약) — 새것부터."""
+        out = []
+        for p in sorted(self.backup_dir.glob("save-*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+                out.append((p, data if isinstance(data, dict) else {}))
+            except (OSError, ValueError):
+                continue
+        return out
+
+    def restore(self, backup: Path) -> bool:
+        """백업을 저장 파일로 (지금 저장은 따로 백업해 둠). 이 뒤로는 저장하지 않음 — 다시 켜야 함."""
+        try:
+            json.loads(backup.read_text(encoding="utf-8"))
+            self.backup(force=True)
+            tmp = self.path.with_name(self.path.name + ".tmp")
+            shutil.copy2(backup, tmp)
+            _replace_retry(tmp, self.path)
+        except (OSError, ValueError):
+            log.exception("되돌리기 실패")
+            return False
+        self.readonly = True
+        return True
+
     def save(self, state: GameState) -> bool:
         if self.readonly:
             return False
@@ -298,6 +357,7 @@ class SaveStore:
                 f.flush()
                 os.fsync(f.fileno())
             _replace_retry(tmp, self.path)
+            self.backup()                             # 하루 한 번 백업
             return True
         except OSError:
             log.exception("저장 실패: %s", self.path)
