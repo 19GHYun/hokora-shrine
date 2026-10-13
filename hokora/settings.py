@@ -47,6 +47,9 @@ class SettingsWindow(QWidget):
         check("마우스 커서에도 올라타기", s.cursor_play, game.set_cursor_play, "커서를 가만히 두면 폴짝 올라타요")
         check("창 위에도 올라가기", s.climb, game.set_climb, "열려 있는 창 윗변으로 점프해요")
         check("스펠카드 컷인", s.cutin, game.set_cutin, "특기를 쓸 때 스펠카드 이름이 지나가요")
+        check("시계 친구  (정각마다 팻말로 시간을 알려 줘요)", s.clock_friend, game.set_clock_friend)
+        check("PC 상태에 반응  (배터리·CPU·늦은 밤·휴지통)", s.pc_react, game.set_pc_react,
+              "읽기만 하고 아무것도 바꾸지 않아요 (휴지통도 알려 주기만)")
 
         v.addWidget(QLabel("보기", objectName="section"))
         check("계절·날씨 연출  (벚꽃잎·단풍·눈·반딧불·비·안개)", s.season_fx, game.set_season_fx)

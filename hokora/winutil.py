@@ -246,3 +246,58 @@ def set_autostart(enabled: bool, script: Path) -> bool:
     except OSError:
         log.exception("자동 실행 설정 실패")
         return False
+
+
+# ── PC 상태 (배터리·CPU·휴지통) — 읽기만 하고 아무것도 바꾸지 않는다 ──
+class _PowerStatus(ctypes.Structure):
+    _fields_ = [("ACLineStatus", ctypes.c_ubyte), ("BatteryFlag", ctypes.c_ubyte),
+                ("BatteryLifePercent", ctypes.c_ubyte), ("SystemStatusFlag", ctypes.c_ubyte),
+                ("BatteryLifeTime", wintypes.DWORD), ("BatteryFullLifeTime", wintypes.DWORD)]
+
+
+def battery() -> tuple[int | None, bool]:
+    """(배터리 %, 충전기 꽂힘). 배터리가 없는 PC 면 (None, True)."""
+    if not IS_WIN:
+        return None, True
+    st = _PowerStatus()
+    if not ctypes.windll.kernel32.GetSystemPowerStatus(ctypes.byref(st)):
+        return None, True
+    if st.BatteryFlag & 128 or st.BatteryLifePercent == 255:      # 배터리 없음 / 알 수 없음
+        return None, True
+    return int(st.BatteryLifePercent), st.ACLineStatus == 1
+
+
+class _FileTime(ctypes.Structure):
+    _fields_ = [("lo", wintypes.DWORD), ("hi", wintypes.DWORD)]
+
+    @property
+    def value(self) -> int:
+        return (self.hi << 32) | self.lo
+
+
+def cpu_times() -> tuple[int, int] | None:
+    """(쉬는 시간, 전체 시간) — 두 번 재서 차이로 CPU 사용률을 낸다."""
+    if not IS_WIN:
+        return None
+    idle, kernel, user = _FileTime(), _FileTime(), _FileTime()
+    if not ctypes.windll.kernel32.GetSystemTimes(ctypes.byref(idle), ctypes.byref(kernel), ctypes.byref(user)):
+        return None
+    return idle.value, kernel.value + user.value                    # kernel 에 idle 이 포함됨
+
+
+class _RecycleInfo(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("i64Size", ctypes.c_longlong), ("i64NumItems", ctypes.c_longlong)]
+
+
+def recycle_bin() -> tuple[int, int] | None:
+    """휴지통 (항목 수, 바이트). 모든 드라이브 합계."""
+    if not IS_WIN:
+        return None
+    info = _RecycleInfo()
+    info.cbSize = ctypes.sizeof(_RecycleInfo)
+    try:
+        if ctypes.windll.shell32.SHQueryRecycleBinW(None, ctypes.byref(info)) != 0:
+            return None
+    except OSError:
+        return None
+    return int(info.i64NumItems), int(info.i64Size)

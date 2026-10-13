@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 from . import __version__, winutil
 from . import affection as aff
 from . import achievements, daily, expedition, festival, fishing, omamori, photo, season, torii, tutorial, wardrobe, weather
+from . import card, lifesense, moon
 from .settings import SettingsWindow
 from .diary import DiaryCard
 from .guests import fade as fade_window
@@ -126,6 +127,14 @@ class Game(QObject):
         self._bench_since: dict[str, float] = {}
         self._crowd_n = 0
         tutorial.decide(self.state)
+        from datetime import datetime as _dt
+        self._chimed = (_dt.now().date(), _dt.now().hour)   # 켜자마자 울리지 않게
+        self._cpu = lifesense.CpuMeter()
+        self._cpu_hot = 0
+        self._said: dict[str, float] = {}                   # 반응별 마지막으로 말한 시각
+        self._batt_low = False
+        self._pc_n = 0
+        self.life_timer = QTimer(self, timeout=self._life_tick, interval=20_000)
         weather.set_magic(self.state.weather_magic, self.state.weather_magic_until)
         self._cutin_at = -1e9
         self._night: bool | None = None
@@ -286,6 +295,7 @@ class Game(QObject):
         self.watch_timer.start()
         self.platform_timer.start()
         self.day_timer.start()
+        self.life_timer.start()
         self._refresh_platforms()
         self._refresh_season()
         self._sync_torii()
@@ -553,6 +563,8 @@ class Game(QObject):
     def _refresh_season(self) -> None:
         night = season.is_night()
         if night != self._night:
+            if night and self._night is not None and moon.is_full():     # 보름달 밤이 시작됨
+                self.later(3.0, self._full_moon_night)
             self._night = night
             self.shrine.set_night(night)
             for d in self.decors.values():
@@ -1007,6 +1019,116 @@ class Game(QObject):
             self._drop_in(k)
             shown.add(k)
 
+    # ── 시계 친구·PC 상태 반응 ──
+    def _life_tick(self) -> None:
+        if self.hidden_for_fullscreen or self.napping:
+            return
+        from datetime import datetime as _dt
+        now = _dt.now()
+        if self.state.clock_friend and now.minute == 0 and self._chimed != (now.date(), now.hour):
+            self._chimed = (now.date(), now.hour)
+            self._chime(now.hour)
+        if self.state.pc_react:
+            self._pc_n += 1
+            self._pc_tick(recycle=self._pc_n % 30 == 1)        # 휴지통은 10분마다
+
+    def _speaker(self, prefer: tuple[str, ...] = ()):
+        free = [p for p in self.pets if p.grounded and p.isVisible()]
+        for k in prefer:
+            for p in free:
+                if p.ch.key == k:
+                    return p
+        return random.choice(free) if free else None
+
+    def _chime(self, hour: int) -> None:
+        p = self._speaker(("remilia", "flandre") if hour == 0 else ())
+        if p is None:
+            return
+        p.act("wave", 2.0)
+        sign = lifesense.HourSign(p, lifesense.hour_text(hour))
+        self.keep(sign)
+        sign.show()
+        self.later(0.6, lambda: say(lifesense.hour_line(hour, p.ch.key), p.pos_x, p.pos_y - 150, 3.5))
+        log.info("시계 친구: %d시 (%s)", hour, p.ch.key)
+
+    def _ok_to_say(self, what: str, every: float) -> bool:
+        now = time.monotonic()
+        if now - self._said.get(what, -1e9) < every:
+            return False
+        self._said[what] = now
+        return True
+
+    def _pc_tick(self, recycle: bool = False) -> None:
+        pct, charging = winutil.battery()
+        if pct is not None:
+            if pct <= lifesense.BATTERY_LOW and not charging:
+                if not self._batt_low or self._ok_to_say("battery", 20 * 60):
+                    self._batt_low = True
+                    self._said["battery"] = time.monotonic()
+                    sleepy = [p for p in self.pets if p.grounded][:3]
+                    for q in sleepy:
+                        q.act("sit", 8)
+                    p = self._speaker()
+                    if p is not None:
+                        self.events._say(p, lifesense.pick(lifesense.LOW_BATTERY, p=pct), 3.5)
+            elif charging and self._batt_low:
+                self._batt_low = False
+                for q in self.pets:
+                    q.react(True)
+                p = self._speaker()
+                if p is not None:
+                    self.events._say(p, lifesense.pick(lifesense.CHARGING), 3.0)
+            elif pct > lifesense.BATTERY_LOW + 10:
+                self._batt_low = False
+        cpu = self._cpu.sample()
+        self._cpu_hot = self._cpu_hot + 1 if cpu is not None and cpu >= lifesense.CPU_HOT else 0
+        if self._cpu_hot >= 3 and self._ok_to_say("cpu", 15 * 60):      # 1분쯤 계속 바쁨
+            p = self._speaker()
+            if p is not None:
+                p.act("wave", 2.4)                                    # 부채질
+                self.events._say(p, lifesense.pick(lifesense.CPU_HOT_LINES), 3.0)
+        from datetime import datetime as _dt
+        h = _dt.now().hour
+        if 1 <= h <= 4 and winutil.idle_seconds() < 120 and self._ok_to_say("late", 6 * 3600):
+            p = self._speaker(("reimu", "sakuya"))
+            if p is not None:
+                p.act("sit", 6)
+                self.events._say(p, lifesense.pick(lifesense.LATE_LINES, h=h), 3.5)
+        if recycle:
+            info = winutil.recycle_bin()
+            if lifesense.recycle_full(info) and self._ok_to_say("recycle", 3 * 3600):
+                p = self._speaker(("reimu",))
+                if p is not None:
+                    if p.ch.key == "reimu":
+                        p.act("skill", 4.0)                           # 빗자루질
+                    n, size = info
+                    self.events._say(p, f"🗑 {lifesense.pick(lifesense.RECYCLE_LINES)}  ({n:,}개 · {lifesense.fmt_bytes(size)})", 4.0)
+                    log.info("휴지통 알림: %d개 %d바이트", n, size)
+
+    def _full_moon_night(self) -> None:
+        self._say_at_shrine("🌕 오늘은 보름달! 밤 동안 새전 수입 ×1.3")
+        p = self._speaker(("remilia", "flandre"))
+        if p is not None and p.ch.key in ("remilia", "flandre"):
+            p.react(True)
+            self.later(1.2, lambda: self.events._say(p, "보름달이야… 기분 좋은 밤이네."))
+
+    def set_clock_friend(self, on: bool) -> None:
+        self.state.clock_friend = on
+        self.save()
+
+    def set_pc_react(self, on: bool) -> None:
+        self.state.pc_react = on
+        self.save()
+
+    # ── 신사 명함 ──
+    def make_card(self) -> None:
+        img, path = card.make(self)
+        photo.to_clipboard(img)
+        self.state.cards += 1
+        self.show_card(PhotoCard(img, path, "🪪 신사 명함을 만들었어요"))
+        log.info("신사 명함: %s", path)
+        self.save()
+
     # ── 처음 안내 ──
     def _tutorial_show(self) -> None:
         step = tutorial.current(self.state)
@@ -1453,6 +1575,7 @@ class Game(QObject):
         menu.addSeparator()
         menu.addAction("신사 관리 · 도감", self.open_panel)
         menu.addAction("📸 사진 찍기", self.take_photo)
+        menu.addAction("🪪 신사 명함 만들기", self.make_card)
         if "pond" in self.decors:
             menu.addAction(f"🎣 낚시하기  (미끼 {fishing.bait(s)}개)", self.go_fishing)
         if can_draw(s):

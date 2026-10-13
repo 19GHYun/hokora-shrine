@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QMen
                                QTabBar, QVBoxLayout, QWidget, QWidgetAction)
 
 from . import affection as aff
-from . import achievements, daily, expedition, festival, fishing, omamori, season, torii, wardrobe, weather
+from . import achievements, daily, expedition, festival, fishing, moon, omamori, season, torii, wardrobe, weather
 from .decor import decor_image
 from .guests import GUEST_ABOUT, VISITS, guest_stage
 from .omikuji import can_draw
@@ -600,6 +600,8 @@ class ShrinePanel(QWidget):
         self.weather_label = QLabel(objectName="done")
         self.weather_label.setWordWrap(True)
         p1.addWidget(self.weather_label)
+        self.moon_label = QLabel(objectName="goal")
+        p1.addWidget(self.moon_label)
         up = QHBoxLayout()
         self.up_bar = QProgressBar()
         self.up_bar.setTextVisible(False)
@@ -1089,6 +1091,9 @@ class ShrinePanel(QWidget):
         magic = weather.magic_left()
         self.weather_label.setText(f"{wt.icon} 지금 天候: {wt.name}({wt.kanji}) — {wt.desc}   ·   "
                                    + (f"파츄리의 마법 {fmt_left(magic)}" if magic else f"{weather.next_change()}에 바뀌어요"))
+        mname, micon = moon.name()
+        effect = ("  ·  보름달 밤엔 새전 수입 ×1.3" if moon.is_full() else "  ·  그믐 밤엔 손님이 잘 와요" if moon.is_new() else "")
+        self.moon_label.setText(f"{micon} 오늘의 달: {mname} (월령 {moon.age():.0f}일, 밝기 {moon.illumination() * 100:.0f}%){effect}")
         self.sub.setText(f"새전 {s.saisen:,}   ·   분당 새전 {s.income_per_min * boost:g}"
                          + (f"  ({', '.join(tags)})" if tags else ""))
         drawable = can_draw(s)

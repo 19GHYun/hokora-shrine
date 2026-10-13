@@ -657,6 +657,48 @@ def t_settings():
     check("백업 되돌리기 (다시 시작)", G["restarted"] and st.readonly)
 
 
+def t_life():
+    from hokora import bubble, moon
+    from datetime import datetime, timezone
+    calm()
+
+    def said(word: str) -> bool:
+        return any(word in b.text for b in bubble._alive)
+    check("달 계산 (2024-01-25 보름)", moon.is_full(datetime(2024, 1, 25, 17, 54, tzinfo=timezone.utc)))
+    check("달 계산 (2024-01-11 삭)", moon.is_new(datetime(2024, 1, 11, 11, 57, tzinfo=timezone.utc)))
+    real_full = moon.is_full
+    moon.is_full = lambda now=None: True
+    os.environ["HOKORA_NIGHT"] = "1"
+    base_night = prayer.income_multiplier(s)
+    moon.is_full = lambda now=None: False
+    check("보름달 밤 수입 ×1.3", abs(base_night / prayer.income_multiplier(s) - 1.3) < 1e-9)
+    moon.is_full = real_full
+    os.environ["HOKORA_NIGHT"] = "0"
+    game._chime(15)
+    check("시계 친구 팻말", any(type(w).__name__ == "HourSign" for w in game._cards))
+    G["real"] = (hk.winutil.battery, hk.winutil.recycle_bin, game._cpu.sample)
+    hk.winutil.battery = lambda: (15, False)
+    game._pc_tick()
+    check("배터리 부족 반응", game._batt_low)
+    hk.winutil.battery = lambda: (16, True)
+    game._pc_tick()
+    check("충전 반응", not game._batt_low)
+    game._cpu.sample = lambda: 97.0
+    for _ in range(3):
+        game._pc_tick()
+    check("CPU 과열 반응", "cpu" in game._said)
+    hk.winutil.recycle_bin = lambda: (500, 3 * 1024 ** 3)
+    game._pc_tick(recycle=True)
+    check("휴지통 청소 친구", said("휴지통"))
+    hk.winutil.battery, hk.winutil.recycle_bin, game._cpu.sample = G["real"]
+    game.make_card()
+    cards = list((TMP / "photos").glob("hokora_card_*.png"))
+    from PySide6.QtGui import QImage
+    check("신사 명함", len(cards) == 1 and QImage(str(cards[0])).width() == 1200)
+    for c in list(game._card_queue):
+        c.close()
+
+
 def t_end():
     app.quit()
 
@@ -668,7 +710,7 @@ STEPS = [(t_core, 3000), (t_core2, 2500), (t_thief, 1600), (t_skill, 1800), (t_a
          (t_youmu, 0), (t_meiling, 11000), (t_reisen, 1000), (t_weather, 1500), (t_cutin, 500), (t_yukari, 6000),
          (t_yukari2, 1000), (t_patchouli, 1500), (t_expedition, 2200),
          (t_expedition2, 1000), (t_achieve, 1000), (t_fishing, 1000), (t_festival, 1000),
-         (t_crowd, 1500), (t_crowd2, 1500), (t_crowd3, 2500), (t_tutorial, 2000), (t_settings, 500), (t_end, 0)]
+         (t_crowd, 1500), (t_crowd2, 1500), (t_crowd3, 2500), (t_tutorial, 2000), (t_life, 1000), (t_settings, 500), (t_end, 0)]
 
 
 def run(i: int = 0) -> None:

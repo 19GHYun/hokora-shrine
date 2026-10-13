@@ -53,11 +53,8 @@ def _sky(p: QPainter, rect: QRectF, now: datetime, kind: str) -> None:
             p.setBrush(QColor(255, 255, 230, rng.randint(120, 230)))
             r = rng.uniform(0.6, 1.5)
             p.drawEllipse(QPointF(x, y), r, r)
-        mx, my = rect.right() - 60, rect.top() + 46
-        p.setBrush(QColor(255, 244, 200))
-        p.drawEllipse(QPointF(mx, my), 18, 18)
-        p.setBrush(QColor("#232C5C"))
-        p.drawEllipse(QPointF(mx + 8, my - 5), 15, 15)
+        from . import moon                                    # 오늘의 진짜 달 모양
+        moon.draw(p, rect.right() - 60, rect.top() + 46, 18, dark=QColor(30, 38, 80, 160))
     # 먼 산 두 겹
     for depth, (col, amp, base) in enumerate(((QColor(255, 255, 255, 70), 26, 0.62), (QColor(255, 255, 255, 110), 16, 0.78))):
         if season.is_night(now):
@@ -184,7 +181,7 @@ class PhotoCard(QWidget):
 
     W = 340
 
-    def __init__(self, img: QImage, path: Path):
+    def __init__(self, img: QImage, path: Path, title: str = "📸 찰칵! 사진을 저장했어요"):
         super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint
                          | Qt.NoDropShadowWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
@@ -192,6 +189,7 @@ class PhotoCard(QWidget):
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self.setCursor(Qt.PointingHandCursor)
         self.path = path
+        self.title = title
         self.thumb = img
         iw = self.W - 28
         self.th = iw * img.height() / max(1, img.width())
@@ -224,7 +222,7 @@ class PhotoCard(QWidget):
         f.setBold(True)
         p.setFont(f)
         p.setPen(QColor("#B3122C"))
-        p.drawText(QRectF(14, 10, self.W - 28, 22), Qt.AlignLeft | Qt.AlignVCenter, "📸 찰칵! 사진을 저장했어요")
+        p.drawText(QRectF(14, 10, self.W - 28, 22), Qt.AlignLeft | Qt.AlignVCenter, self.title)
         p.drawImage(QRectF(14, 38, self.W - 28, self.th), self.thumb)
         f2 = QFont("Malgun Gothic", 8)
         p.setFont(f2)

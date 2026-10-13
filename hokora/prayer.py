@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
-from . import omamori, season, weather
+from . import moon, omamori, season, weather
 from .state import GameState
 
 INCOME_BOOST = 2        # 번영 기원: 수입 배수
@@ -68,6 +68,8 @@ def income_multiplier(s: GameState) -> float:
     m *= weather.current().income            # 쾌청 ×1.2, 오로라 ×2
     if s.festival_until > time.time():       # 예대제
         m *= 2.0
+    if moon.is_full() and season.is_night():  # 보름달 밤
+        m *= moon.FULL_INCOME
     return m * (1 + omamori.bonus(s, "income"))
 
 

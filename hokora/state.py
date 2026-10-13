@@ -182,6 +182,9 @@ class GameState:
     festivals: int = 0
     tutorial: int = -1               # 처음 안내 단계 (-1 = 아직 안 정함, 99 = 끝)
     max_out: int = 0                 # 동시에 나와 있는 친구 수 (0 = 전부)
+    clock_friend: bool = True        # 시계 친구 (정각마다 팻말)
+    pc_react: bool = True            # PC 상태 반응 (배터리·CPU·늦은 밤·휴지통)
+    cards: int = 0                   # 만든 신사 명함 수
     weather_magic: str = ""          # 파츄리의 날씨 마법
     weather_magic_until: float = 0.0
     cutin: bool = True               # 스펠카드 컷인
