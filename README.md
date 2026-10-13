@@ -70,7 +70,7 @@
 - **처음 안내**: 처음 켜면 말풍선이 하나씩 안내해 줍니다 (쓰다듬기 → 던지기 → 신사 관리 창 → 오미쿠지 → 우클릭 메뉴). 다 따라 하면 새전 100. 말풍선을 누르면 그만 봅니다.
 - **⚙ 설정** (우클릭 메뉴): 커서 올라타기 · 창 위에 올라가기 · 스펠카드 컷인 · 계절·날씨 연출 · 장식 보이기 · 크기 · 자동 실행을 한곳에서.
   **동시에 나와 있는 친구**를 3·5·7명으로 정하면 나머지는 신사에서 쉬다가 10분마다 번갈아 나옵니다 (작업표시줄이 붐빌 때).
-- **저장 백업**: 하루에 한 번 저절로 백업합니다 (최근 7개, `%APPDATA%\Hokoraackups`). 설정 창에서 지금 백업하거나, 원하는 시점으로 되돌릴 수 있습니다 (되돌리면 Hokora 가 다시 켜짐).
+- **저장 백업**: 하루에 한 번 저절로 백업합니다 (최근 7개, `%APPDATA%\Hokora\backups`). 설정 창에서 지금 백업하거나, 원하는 시점으로 되돌릴 수 있습니다 (되돌리면 Hokora 가 다시 켜짐).
 
 ### 예대제
 
@@ -420,7 +420,7 @@ python tools/import_sheet.py 시트.png reimu --names idle,blink,walk_0,walk_1,s
 | --- | --- |
 | 저장 | `%APPDATA%\Hokora\save.json` |
 | 로그 | `%APPDATA%\Hokora\logs\hokora.log` |
-| 백업 | `%APPDATA%\Hokoraackups\` (하루 한 번, 최근 7개) |
+| 백업 | `%APPDATA%\Hokora\backups\` (하루 한 번, 최근 7개) |
 | 사진 | `사진\Hokora\` (보통 `%USERPROFILE%\Pictures\Hokora`) |
 | 자동 실행 (켰을 때만) | 레지스트리 `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run` 의 `Hokora` 값 |
 
