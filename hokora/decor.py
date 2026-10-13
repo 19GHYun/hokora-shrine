@@ -118,5 +118,7 @@ class DecorWindow(QWidget):
         if self._dragging:
             self._dragging = False
             self.host.on_decor_moved(self.key, self.pos_x)
+        elif self.key == "pond" and hasattr(self.host, "go_fishing"):
+            self.host.go_fishing()                       # 연못: 낚시
         else:
             self.host.on_shrine_clicked()

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QMen
                                QTabBar, QVBoxLayout, QWidget, QWidgetAction)
 
 from . import affection as aff
-from . import daily, omamori, season, torii, wardrobe, weather
+from . import achievements, daily, expedition, fishing, omamori, season, torii, wardrobe, weather
 from .decor import decor_image
 from .guests import GUEST_ABOUT, VISITS, guest_stage
 from .omikuji import can_draw
@@ -402,6 +402,69 @@ class _WTile(QWidget):
             self.on_click(self.payload)
 
 
+class _Badge(QWidget):
+    """업적 하나: 그림 문자 배지. 달성했으면 눌러서 칭호로 달기."""
+
+    S = 38
+
+    def __init__(self, state: GameState, key: str, on_click: Callable[[str], None]):
+        super().__init__()
+        self.state, self.key, self.on_click = state, key, on_click
+        self.setFixedSize(self.S, self.S)
+        a = achievements.ACHIEVEMENTS[key]
+        self.setToolTip(f"{a.icon} {a.name}\n{a.desc}\n보상: {achievements.reward_text(a)}")
+
+    def paintEvent(self, _e) -> None:
+        s, a = self.state, achievements.ACHIEVEMENTS[self.key]
+        done, worn = self.key in s.achievements, s.title == self.key
+        self.setCursor(Qt.PointingHandCursor if done else Qt.ArrowCursor)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(1, 1, self.S - 2, self.S - 2)
+        p.setPen(QPen(QColor("#C8102E"), 2.2) if worn else QPen(QColor(200, 16, 46, 70 if done else 30), 1))
+        p.setBrush(QColor(255, 244, 214, 240) if done else QColor(236, 230, 232, 200))
+        p.drawRoundedRect(r, 9, 9)
+        f = QFont("Segoe UI Emoji", 14)
+        p.setFont(f)
+        p.setOpacity(1.0 if done else 0.28)
+        p.drawText(r, Qt.AlignCenter, a.icon)
+        p.end()
+
+    def mousePressEvent(self, e) -> None:
+        if e.button() == Qt.LeftButton and self.key in self.state.achievements:
+            self.on_click(self.key)
+
+
+class _FishTile(QWidget):
+    """낚시 도감 칸."""
+
+    W, H = 68, 66
+
+    def __init__(self, state: GameState, key: str):
+        super().__init__()
+        self.state, self.key = state, key
+        self.setFixedSize(self.W, self.H)
+
+    def paintEvent(self, _e) -> None:
+        n = self.state.fish.get(self.key, 0)
+        c = fishing.FISH[self.key]
+        self.setToolTip(f"{c.name}  ·  {n}번 낚음" if n else "아직 못 낚았어요")
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(1, 1, self.W - 2, self.H - 2)
+        p.setPen(QPen(QColor(200, 16, 46, 60 if n else 30), 1))
+        p.setBrush(QColor(255, 255, 255, 225 if n else 150))
+        p.drawRoundedRect(r, 8, 8)
+        fishing.draw_icon(p, QRectF(10, 6, self.W - 20, 34), self.key, dim=not n)
+        f = QFont("Malgun Gothic", 7)
+        p.setFont(f)
+        p.setPen(QColor("#3A2A2E") if n else QColor("#8C7479"))
+        p.drawText(QRectF(2, 42, self.W - 4, 12), Qt.AlignCenter, c.name if n else "???")
+        p.setPen(QColor("#8C7479"))
+        p.drawText(QRectF(2, 53, self.W - 4, 11), Qt.AlignCenter, f"×{n}" if n else "")
+        p.end()
+
+
 class _CharPick(QWidget):
     """의상실에서 옷을 입힐 친구 고르기 (작은 얼굴)."""
 
@@ -524,13 +587,13 @@ class ShrinePanel(QWidget):
         self.tabs.setDrawBase(False)
         self.tabs.setExpanding(False)
         v.addWidget(self.tabs)
-        page1, page2, page3, page4, page5, page6, page7, page8 = (QWidget() for _ in range(8))
-        p1, p3, p4, p5, p6, p7, p8 = (QVBoxLayout(pg) for pg in (page1, page3, page4, page5, page6, page7, page8))
-        for lay in (p1, p3, p4, p5, p6, p7, p8):
+        page1, page2, page3, page4, page5, page6, page7, page8, page9 = (QWidget() for _ in range(9))
+        p1, p3, p4, p5, p6, p7, p8, p9 = (QVBoxLayout(pg) for pg in (page1, page3, page4, page5, page6, page7, page8, page9))
+        for lay in (p1, p3, p4, p5, p6, p7, p8, p9):
             lay.setContentsMargins(0, 4, 0, 0)
             lay.setSpacing(10)
-        self.pages = [page1, page6, page4, page7, page8, page2, page5, page3]
-        for name, page in zip(("신사", "부탁", "참배", "부적", "의상", "도감", "손님", "꾸미기"), self.pages):
+        self.pages = [page1, page6, page4, page7, page8, page2, page5, page3, page9]
+        for name, page in zip(("신사", "부탁", "참배", "부적", "의상", "도감", "손님", "꾸미기", "모험"), self.pages):
             self.tabs.addTab(name)
             page.hide()
             v.addWidget(page)
@@ -752,6 +815,82 @@ class ShrinePanel(QWidget):
         self.daily_foot = QLabel(objectName="sub")
         self.daily_foot.setWordWrap(True)
         p6.addWidget(self.daily_foot)
+        self.ach_title = QLabel(objectName="section")
+        p6.addWidget(self.ach_title)
+        agrid = QGridLayout()
+        agrid.setSpacing(5)
+        self.badges = []
+        for i, key in enumerate(achievements.ACHIEVEMENTS):
+            b = _Badge(state, key, lambda k: self._act("title", k))
+            agrid.addWidget(b, i // 10, i % 10)
+            self.badges.append(b)
+        agrid.setColumnStretch(10, 1)
+        p6.addLayout(agrid)
+        self.ach_tip = QLabel(objectName="goal")
+        self.ach_tip.setWordWrap(True)
+        p6.addWidget(self.ach_tip)
+
+        # ── 모험: 원정 보내기 + 낚시 도감 ──
+        p9.addWidget(QLabel("🗺 원정 보내기", objectName="section"))
+        self.x_info = QLabel(objectName="goal")
+        self.x_info.setWordWrap(True)
+        p9.addWidget(self.x_info)
+        self.x_rows = []
+        for _ in range(3):
+            row = QWidget()
+            rh = QHBoxLayout(row)
+            rh.setContentsMargins(0, 0, 0, 0)
+            lab = QLabel(objectName="done")
+            bar = QProgressBar()
+            bar.setTextVisible(False)
+            bar.setRange(0, 1000)
+            bar.setFixedWidth(150)
+            rh.addWidget(lab, 1)
+            rh.addWidget(bar)
+            p9.addWidget(row)
+            self.x_rows.append((row, lab, bar))
+        xrow = QHBoxLayout()
+        xrow.setSpacing(4)
+        self.x_picks = {k: _CharPick(k, self._x_pick) for k in CHARACTERS}
+        for w in self.x_picks.values():
+            xrow.addWidget(w)
+        xrow.addStretch(1)
+        p9.addLayout(xrow)
+        self.x_char = next((k for k in CHARACTERS if k in state.unlocked), "reimu")
+        xgrid = QGridLayout()
+        xgrid.setSpacing(6)
+        self.x_cards = {}
+        for i, (pk, pl) in enumerate(expedition.PLACES.items()):
+            card = QWidget(objectName="card")
+            card.setAttribute(Qt.WA_StyledBackground, True)
+            cv = QVBoxLayout(card)
+            cv.setContentsMargins(10, 6, 10, 6)
+            cv.setSpacing(2)
+            title = QLabel(f"{pl.icon} {pl.name}  ·  {pl.hours:g}시간", objectName="name")
+            info = QLabel(objectName="goal")
+            info.setWordWrap(True)
+            btn = QPushButton(objectName="small")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda _=False, pk=pk: self._act("expedition", (self.x_char, pk)))
+            for w in (title, info, btn):
+                cv.addWidget(w)
+            xgrid.addWidget(card, i // 2, i % 2)
+            self.x_cards[pk] = (info, btn)
+        p9.addLayout(xgrid)
+        self.fish_title = QLabel(objectName="section")
+        p9.addWidget(self.fish_title)
+        fgrid2 = QGridLayout()
+        fgrid2.setSpacing(5)
+        self.fish_tiles = []
+        for i, key in enumerate(fishing.FISH):
+            t = _FishTile(state, key)
+            fgrid2.addWidget(t, i // 6, i % 6)
+            self.fish_tiles.append(t)
+        fgrid2.setColumnStretch(6, 1)
+        p9.addLayout(fgrid2)
+        self.fish_tip = QLabel(objectName="goal")
+        self.fish_tip.setWordWrap(True)
+        p9.addWidget(self.fish_tip)
 
         # ── 손님 ──
         tip = QLabel("가끔 신사에 손님이 찾아와요. 신사가 커질수록 찾아오는 손님이 늘어요. "
@@ -923,7 +1062,8 @@ class ShrinePanel(QWidget):
     # ── 내용 ──
     def refresh(self) -> None:
         s = self.state
-        self.title.setText(f"⛩  {s.stage_name}  ({s.shrine_level}단계)")
+        ttl = achievements.title(s)
+        self.title.setText(f"⛩  {s.stage_name}  ({s.shrine_level}단계)" + (f"   「{ttl}」" if ttl else ""))
         boost = income_multiplier(s)
         tags = (["번영 기원 ×2"] if left(s, "prosper") else []) + ([f"신문 ×{NEWS_BOOST:g}"] if news_active(s) else [])
         if season.is_new_year():
@@ -1012,7 +1152,10 @@ class ShrinePanel(QWidget):
                     bar.hide()
             out.setVisible(met)
             out.blockSignals(True)
-            out.setChecked(key not in s.resting)
+            gone = key in expedition.away(s)
+            out.setChecked(key not in s.resting and not gone)
+            out.setEnabled(not gone)
+            out.setText("원정 중" if gone else "밖에 나와 있기")
             out.blockSignals(False)
         # 센본토리이
         nm, ttl = torii.next_milestone(s), torii.title(s)
@@ -1077,6 +1220,13 @@ class ShrinePanel(QWidget):
                 status.setText(f"{n:,} / {task['goal']:,}   ·   새전 +{task['reward']:,}")
                 self._role(status, "goal")
         all_done = s.daily_tasks and all(t["done"] for t in s.daily_tasks)
+        self._refresh_adventure()
+        got, total = len([k for k in s.achievements if k in achievements.ACHIEVEMENTS]), len(achievements.ACHIEVEMENTS)
+        ttl = achievements.title(s)
+        self.ach_title.setText(f"🏆 업적 {got}/{total}" + (f"   ·   칭호 「{ttl}」" if ttl else ""))
+        self.ach_tip.setText("배지에 마우스를 올리면 조건과 보상이 보여요. 달성한 배지를 누르면 칭호로 달아요 (다시 누르면 떼기).")
+        for b in self.badges:
+            b.update()
         self.daily_foot.setText(("🎉 오늘의 부탁을 모두 들어줬어요! 내일 또 새 부탁이 와요."
                                  if all_done else f"셋 다 들어주면 보너스 새전 +{daily.all_bonus(s):,}")
                                 + f"\n지금까지 들어준 부탁 {s.daily_done}개")
@@ -1292,6 +1442,53 @@ class ShrinePanel(QWidget):
             box.adjustSize()
         self.fx_box.parentWidget().layout().activate()
         self._fit_tab(self.tabs.currentIndex())
+
+    def _x_pick(self, key: str) -> None:
+        self.x_char = key
+        self._refresh_adventure()
+
+    def _refresh_adventure(self) -> None:
+        s = self.state
+        now = time.time()
+        gone = expedition.away(s)
+        self.x_info.setText(f"원정 중 {len(s.expeditions)}/{expedition.slots(s)}명  ·  다녀오는 동안 작업표시줄에서 안 보여요. "
+                            "꺼 둬도 시간은 흘러요. ★적성이 맞으면 보상 ×1.5")
+        for i, (row, lab, bar) in enumerate(self.x_rows):
+            if i < len(s.expeditions):
+                e = s.expeditions[i]
+                pl = expedition.PLACES[e["place"]]
+                name = wardrobe.SHORT.get(e["char"], e["char"])
+                lab.setText(f"{pl.icon} {name} — {pl.name}  ({expedition.fmt_left(expedition.left(e, now))} 남음)")
+                span = max(1.0, e["end"] - e["start"])
+                bar.setValue(int(min(1.0, (now - e["start"]) / span) * 1000))
+                row.show()
+            else:
+                row.hide()
+        if self.x_char not in s.unlocked:
+            self.x_char = next((k for k in CHARACTERS if k in s.unlocked), "reimu")
+        for k, w in self.x_picks.items():
+            w.setVisible(k in s.unlocked)
+            w.set_state(k == self.x_char, s.skins.get(k))
+            w.setEnabled(k not in gone)
+            w.setToolTip(CHARACTERS[k].name + ("  (원정 중)" if k in gone else ""))
+        why = expedition.can_send(s, self.x_char)
+        for pk, (info, btn) in self.x_cards.items():
+            pl = expedition.PLACES[pk]
+            r = expedition.reward_for(s, self.x_char, pk)
+            fits = "·".join(wardrobe.SHORT.get(k, k) for k in pl.fits)
+            star = "  ★적성!" if self.x_char in pl.fits else ""
+            info.setText(f"새전 {r['saisen']:,}" + (f" · 옷감 {r['cloth']}" if r["cloth"] else "")
+                         + (" · 부적 1번" if r["charm"] else "") + f"{star}\n적성: {fits}")
+            btn.setText(f"{wardrobe.SHORT.get(self.x_char, self.x_char)} 보내기" if not why else why)
+            btn.setEnabled(not why)
+        caught = len(s.fish)
+        self.fish_title.setText(f"🎣 낚시 도감 {caught}/{len(fishing.FISH)}   ·   오늘 남은 미끼 {fishing.bait(s)}/{fishing.BAIT_PER_DAY}")
+        self.fish_tip.setText("연못(꾸미기 → 🎋 정원)을 놓고 연못을 누르면 낚시해요. 찌가 쏙 들어가는 순간 클릭! "
+                              "밤엔 메기·장어, 비 오는 날엔 물고기가 잘 낚여요."
+                              if "pond" in s.decor_pos else
+                              "꾸미기 탭 → 🎋 정원에서 연못을 사서 놓으면 낚시할 수 있어요.")
+        for t in self.fish_tiles:
+            t.update()
 
     def _pick_char(self, key: str) -> None:
         self.w_char = key

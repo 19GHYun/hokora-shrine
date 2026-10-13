@@ -163,6 +163,15 @@ class GameState:
     reisen_until: float = 0.0        # 레이센의 피로회복약: 이때까지 쓰다듬기 새전 ×2
     dream_pill: bool = False         # 레이센의 꿈나라 약: 다음에 꺼져 있는 동안 새전함 2배
     weather_slot: str = ""           # 마지막으로 알린 날씨 시간대 (weather.slot)
+    # 원정 (expedition.py)·업적 (achievements.py)·낚시 (fishing.py)
+    expeditions: list[dict] = field(default_factory=list)   # [{char, place, start, end, reward}]
+    expedition_done: int = 0
+    achievements: list[str] = field(default_factory=list)
+    title: str = ""                  # 단 칭호 (업적 키)
+    fish: dict[str, int] = field(default_factory=dict)      # 낚을거리 → 낚은 수
+    fish_caught: int = 0
+    fish_bait: int = 0
+    fish_bait_date: str = ""
     weather_magic: str = ""          # 파츄리의 날씨 마법
     weather_magic_until: float = 0.0
     cutin: bool = True               # 스펠카드 컷인

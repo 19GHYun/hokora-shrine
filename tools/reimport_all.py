@@ -81,6 +81,7 @@ PLAN = {
     "marisa@gift": [("3-b.png", "preset:outfit --grid 3x4 --keep 0.03", True)],
     "yukari": [("4-b.png", "preset:guest --grid 3x4 --keep 0.02", True)],
     "patchouli": [("5-b.png", "preset:guest --grid 3x4 --keep 0.01", True)],
+    "fish": [("fish.png", "medaka,funa,goldfish,koi,catfish,eel,can,boot,coins,cucumber,tamatebako,golden_koi --grid 3x4 --keep 0.03", True)],
     "yuyuko": [("yuyuko_1.png", GUEST + " --grid 3x4", True)],
     "mystia": [("mistia_1.png", GUEST + " --grid 3x4", True)],
     "koishi": [("3_2_1.png", "idle_0,idle_1,blink,bow,-,walk_0,walk_1,walk_2,walk_3,skill_0,skill_1,caught,happy", True)],

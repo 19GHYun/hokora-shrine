@@ -18,7 +18,9 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 
 from . import __version__, winutil
 from . import affection as aff
-from . import daily, omamori, photo, season, torii, wardrobe, weather
+from . import achievements, daily, expedition, fishing, omamori, photo, season, torii, wardrobe, weather
+from .diary import DiaryCard
+from .guests import fade as fade_window
 from .spellcard import MIN_GAP as CUTIN_GAP
 from .spellcard import CutIn
 from .bubble import _alive as bubble_alive
@@ -138,7 +140,7 @@ class Game(QObject):
         self._panel_tab = 0
         keys = list(CHARACTERS) if os.environ.get("HOKORA_ALL") == "1" else self.state.unlocked
         for key in keys:
-            if key not in self.state.resting:          # 쉬는 친구는 신사 안에
+            if key not in self.state.resting and key not in expedition.away(self.state):   # 쉬는 친구·원정 간 친구는 빼고
                 self._spawn(key)
 
         self.clock = QElapsedTimer()
@@ -279,6 +281,8 @@ class Game(QObject):
         self._refresh_season()
         self._sync_torii()
         QTimer.singleShot(3500, self._new_day)
+        QTimer.singleShot(5000, self._check_expeditions)
+        QTimer.singleShot(6500, self._check_achievements)
         if self._away >= MIN_AWAY:
             QTimer.singleShot(2500, lambda: self._show_diary(self._away, time.time() - self._away,
                                                              self._away_earned, offline=True))
@@ -487,6 +491,8 @@ class Game(QObject):
     def _every_half_minute(self) -> None:
         self._new_day()
         self._refresh_season()
+        self._check_expeditions()
+        self._check_achievements()
         self._daily_check()                        # 새전 모으기·함께 지내기는 시간이 지나며 채워짐
 
     def _new_day(self) -> None:
@@ -584,7 +590,8 @@ class Game(QObject):
         handlers = {"look": self.set_look, "scale": self.set_scale, "out": lambda v: self.set_out(*v),
                     "torii": self.offer_torii, "pull": self.pull_omamori, "equip": self.equip_omamori,
                     "wpull": self.pull_wardrobe, "wear": lambda v: self.wear(*v), "wfx": lambda v: self.set_fx(*v),
-                    "exchange": self.exchange_cloth, "shrine_skin": self.shrine_skin, "wbuy": self.buy_outfit}
+                    "exchange": self.exchange_cloth, "shrine_skin": self.shrine_skin, "wbuy": self.buy_outfit,
+                    "expedition": lambda v: self.send_expedition(*v), "title": self.set_title}
         return handlers[name](value)
 
     def set_look(self, stage: int) -> None:
@@ -758,6 +765,126 @@ class Game(QObject):
         self.save()
         return True
 
+    # ── 원정 ──
+    def send_expedition(self, key: str, place: str) -> bool:
+        s = self.state
+        if not expedition.send(s, key, place):
+            return False
+        p = expedition.PLACES[place]
+        pet = next((x for x in self.pets if x.ch.key == key), None)
+        if pet is not None:
+            if self.events.thief is pet:
+                self.events.cancel_thief()
+            self.events.cancel_play()
+            pet.scripted = True
+            if pet.grounded:
+                pet.act("wave", 1.4)
+            say(f"{p.icon} {p.name}, 다녀올게!", pet.pos_x, pet.pos_y - 76, 2.4)
+
+            def gone(pet=pet):
+                if pet in self.pets:
+                    self.pets.remove(pet)
+                fade_window(pet, 0.0, 0.8, lambda: (pet.close(), pet.deleteLater()))
+            self.later(1.5, gone)
+        log.info("원정: %s → %s", key, place)
+        self.save()
+        return True
+
+    def _check_expeditions(self) -> None:
+        s = self.state
+        done = expedition.finished(s)
+        if not done:
+            return
+        for e in done:
+            lines, prize = expedition.collect(s, e)
+            key = e["char"]
+            name = wardrobe.SHORT.get(key, CHARACTERS[key].name if key in CHARACTERS else key)
+            p = expedition.PLACES[e["place"]]
+            card = DiaryCard(f"🗺 원정 보고 — {p.icon} {p.name}", [ln.format(n=name) for ln in lines], prize)
+            self.show_card(card)
+            if key not in s.resting and all(x.ch.key != key for x in self.pets):
+                self._drop_in(key)
+            log.info("원정 귀환: %s (%s)", key, prize)
+        self.shrine.set_saisen(s.saisen)
+        self.save()
+        self._check_achievements()
+
+    # ── 업적 ──
+    def _check_achievements(self) -> None:
+        new = achievements.check(self.state)
+        if not new:
+            return
+        self.shrine.set_saisen(self.state.saisen)
+        if len(new) >= 3:                                  # 한꺼번에 많이 → 카드 한 장
+            saisen = sum(a.reward[0] for a in new)
+            cloth = sum(a.reward[1] for a in new)
+            lines = [f"{a.icon} {a.name} — {a.desc}" for a in new[:8]]
+            if len(new) > 8:
+                lines.append(f"… 그리고 {len(new) - 8}개 더")
+            self.show_card(DiaryCard(f"🏆 업적 {len(new)}개 달성!", lines,
+                                     f"새전 +{saisen:,}" + (f"  ·  옷감 +{cloth}" if cloth else ""),
+                                     "신사 관리 창 '부탁' 탭에서 칭호로 달 수 있어요"))
+        else:
+            for i, a in enumerate(new):
+                self.later(i * 2.2, lambda a=a: self._say_at_shrine(
+                    f"🏆 업적 달성: {a.name}  —  {achievements.reward_text(a)}"))
+        for p in self.pets:
+            p.react(True)
+        log.info("업적: %s", [a.key for a in new])
+        self.save()
+
+    def set_title(self, key: str) -> bool:
+        s = self.state
+        if key and key not in s.achievements:
+            return False
+        s.title = "" if s.title == key else key
+        self.save()
+        return True
+
+    # ── 낚시 ──
+    def go_fishing(self) -> None:
+        s = self.state
+        if "pond" not in self.decors or self.hidden_for_fullscreen:
+            return
+        if getattr(self, "_fishing", None) is not None:
+            return
+        if not fishing.use_bait(s):
+            self._say_at_shrine("🎣 오늘 미끼를 다 썼어요. 내일 또 낚시해요!")
+            return
+        pond = self.decors["pond"]
+        g = self.ground_under(pond.pos_x)
+        win = fishing.FishingWindow(pond.pos_x, g.y - pond.height() + 30, fishing.bait(s), self._fished)
+        self._fishing = win
+        win.destroyed.connect(lambda *_: setattr(self, "_fishing", None))
+        win.show()
+        self.save()
+
+    def _fished(self, key: str | None, msg: str) -> None:
+        s = self.state
+        pond = self.decors.get("pond")
+        x = pond.pos_x if pond is not None else self.shrine.pos_x
+        y = (pond.y() if pond is not None else self.shrine.y()) - 120
+        if key is None:
+            self.save()
+            return
+        c = fishing.FISH[key]
+        saisen, cloth, first = fishing.record(s, c)
+        self.shrine.set_saisen(s.saisen)
+        if saisen:
+            self.shrine.pop(f"+{saisen:,}")
+        prize = "  ".join(t for t in (f"새전 +{saisen:,}" if saisen else "", f"옷감 +{cloth}" if cloth else "") if t)
+        say(f"🎣 {c.name}!" + (" (처음!)" if first else "") + (f"  {prize}" if prize else ""), x, y, 3.0)
+        near = [p for p in self.pets if p.grounded and abs(p.pos_x - x) < 300]
+        if near and c.kind != "junk":
+            fan = random.choice(near)
+            fan.react(True)
+            self.later(0.8, lambda: self.events._say(fan, random.choice(["와, 큰 거다!", "대단해!", "오늘 저녁은 생선이다~"])))
+        elif near:
+            self.later(0.8, lambda: self.events._say(random.choice(near), random.choice(["…깡통이네.", "푸흡, 장화다!"])))
+        log.info("낚시: %s", key)
+        self._check_achievements()
+        self.save()
+
     def buy_outfit(self, item_id: str) -> bool:
         """기간 한정 의상을 (기간이 아닐 때) 새전으로."""
         before = self.state.saisen
@@ -899,6 +1026,19 @@ class Game(QObject):
         head.setEnabled(False)
         menu.addAction("💬 말 걸기", lambda: self.talk_to(pet))
         menu.addAction("🏠 신사에서 쉬게 하기", lambda: self.set_out(key, False))
+        trip = menu.addMenu("🗺 원정 보내기")
+        trip.setStyleSheet(MENU_STYLE)
+        why = expedition.can_send(s, key)
+        for pk, pl in expedition.PLACES.items():
+            r = expedition.reward_for(s, key, pk)
+            fit = "  ★적성" if key in pl.fits else ""
+            act = trip.addAction(f"{pl.icon} {pl.name}  ({pl.hours:g}시간 · 새전 {r['saisen']:,}){fit}",
+                                 lambda pk=pk: self.send_expedition(key, pk))
+            act.setEnabled(not why)
+        if why:
+            trip.addSeparator()
+            note = trip.addAction(why)
+            note.setEnabled(False)
         mine = [i for i in s.wardrobe if i.startswith(f"{key}:")]
         fxs = [i for i in s.wardrobe if i.startswith("fx:")]
         if mine:
@@ -1105,6 +1245,8 @@ class Game(QObject):
         menu.addSeparator()
         menu.addAction("신사 관리 · 도감", self.open_panel)
         menu.addAction("📸 사진 찍기", self.take_photo)
+        if "pond" in self.decors:
+            menu.addAction(f"🎣 낚시하기  (미끼 {fishing.bait(s)}개)", self.go_fishing)
         if can_draw(s):
             menu.addAction("오늘의 오미쿠지 뽑기", self.omikuji)
         menu.addAction("모두 불러오기", self.gather)

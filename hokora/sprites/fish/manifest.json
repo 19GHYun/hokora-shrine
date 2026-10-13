@@ -1,0 +1,58 @@
+{
+  "version": 2,
+  "standing_height": 200,
+  "facing": 1,
+  "frames": {
+    "medaka": [
+      103,
+      82
+    ],
+    "funa": [
+      122,
+      154
+    ],
+    "goldfish": [
+      122,
+      164
+    ],
+    "koi": [
+      135,
+      147
+    ],
+    "catfish": [
+      143,
+      145
+    ],
+    "eel": [
+      166,
+      130
+    ],
+    "can": [
+      68,
+      205
+    ],
+    "boot": [
+      109,
+      206
+    ],
+    "coins": [
+      113,
+      198
+    ],
+    "cucumber": [
+      151,
+      196
+    ],
+    "tamatebako": [
+      102,
+      206
+    ],
+    "golden_koi": [
+      130,
+      155
+    ]
+  },
+  "sources": [
+    "fish.png"
+  ]
+}

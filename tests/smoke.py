@@ -265,7 +265,7 @@ def t_shop():
     check("친구 쉬게 하기", "cirno" not in [p.ch.key for p in game.pets])
     game.on_action("out", ("cirno", True))
     check("다시 내보내기", "cirno" in [p.ch.key for p in game.pets])
-    for tab in range(8):
+    for tab in range(9):
         game._panel_tab = tab
         game.open_panel()
         app.processEvents()
@@ -513,6 +513,72 @@ def t_patchouli():
         v.cancel()
 
 
+def t_expedition():
+    calm()
+    from hokora import expedition
+    s.saisen = 10 ** 7
+    s.shrine_level = 5
+    check("원정 보내기", game.on_action("expedition", ("reimu", "youkai")))
+    check("같은 친구는 또 못 보냄", not game.on_action("expedition", ("reimu", "village")))
+    G["exp_reward"] = s.expeditions[0]["reward"] if s.expeditions else None
+    check("적성 보너스 (레이무 → 요괴 퇴치)", G["exp_reward"] is not None
+          and G["exp_reward"]["saisen"] == int(max(10, s.income_per_min) * expedition.PLACES["youkai"].saisen * 1.5))
+
+
+def t_expedition2():
+    check("원정 간 친구는 작업표시줄에 없음", "reimu" not in [p.ch.key for p in game.pets])
+    for e in s.expeditions:                           # 시간이 다 된 걸로
+        e["end"] = time.time() - 1
+    before, cloth = s.saisen_total, s.cloth
+    game._check_expeditions()
+    check("원정 귀환 보상", s.saisen_total >= before + G["exp_reward"]["saisen"] and s.cloth >= cloth + G["exp_reward"]["cloth"])
+    check("돌아온 친구", "reimu" in [p.ch.key for p in game.pets] and s.expedition_done == 1 and not s.expeditions)
+    for c in list(game._card_queue):
+        c.close()
+
+
+def t_achieve():
+    from hokora import achievements
+    n0 = len(s.achievements)
+    total0 = s.saisen_total
+    s.pats = max(s.pats, 100)
+    game._check_achievements()
+    check("업적 달성 + 보상", len(s.achievements) > n0 and s.saisen_total > total0, len(s.achievements))
+    k = s.achievements[0]
+    check("칭호 달기", game.on_action("title", k) and achievements.title(s) == achievements.ACHIEVEMENTS[k].name)
+    check("없는 업적은 칭호 못 닮", not game.on_action("title", "pat10000") or "pat10000" in s.achievements)
+    for c in list(game._card_queue):
+        c.close()
+
+
+def t_fishing():
+    from hokora import fishing
+    calm()
+    s.saisen = 10 ** 7
+    game.on_decor("pond", "buy")
+    check("연못 놓기", "pond" in game.decors)
+    b0 = fishing.bait(s)
+    game.go_fishing()
+    win = getattr(game, "_fishing", None)
+    check("낚시 창", win is not None and fishing.bait(s) == b0 - 1)
+    if win is not None:
+        before = s.saisen
+        win._finish("koi", "")
+        check("비단잉어 낚기", s.fish.get("koi") == 1 and s.saisen > before and s.fish_caught == 1)
+        win.close()
+    game._fishing = None
+    game.go_fishing()
+    win = game._fishing
+    if win is not None:
+        win._finish(None, "놓쳤다")
+        check("놓치면 아무것도 없음", sum(s.fish.values()) == 1)
+        win.close()
+    game._fishing = None
+    s.fish_bait, s.fish_bait_date = 0, __import__("datetime").date.today().isoformat()
+    game.go_fishing()
+    check("미끼가 없으면 못 낚음", game._fishing is None)
+
+
 def t_end():
     app.quit()
 
@@ -522,7 +588,8 @@ STEPS = [(t_core, 3000), (t_core2, 2500), (t_thief, 1600), (t_skill, 1800), (t_a
          (t_shop, 1000), (t_season_shop, 12000), (t_tewi, 1500), (t_koishi, 7500), (t_nitori, 11000),
          (t_nitori2, 1500), (t_yuyuko, 9000), (t_yuyuko2, 1500), (t_mystia, 2500), (t_mystia2, 1500),
          (t_youmu, 0), (t_meiling, 11000), (t_reisen, 1000), (t_weather, 1500), (t_cutin, 500), (t_yukari, 6000),
-         (t_yukari2, 1000), (t_patchouli, 1500), (t_end, 0)]
+         (t_yukari2, 1000), (t_patchouli, 1500), (t_expedition, 2200),
+         (t_expedition2, 1000), (t_achieve, 1000), (t_fishing, 1000), (t_end, 0)]
 
 
 def run(i: int = 0) -> None:
