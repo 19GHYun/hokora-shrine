@@ -49,6 +49,7 @@ FALLBACK = {
     "climb": ["held", "fall", "caught", "idle"],  # 벽 타기 (두 팔을 든 그림)
     "hang": ["held", "fall", "caught", "idle"],   # 천장·벽에 매달리기
     "bow": ["happy", "idle"],           # 꾸벅 인사 (손님)
+    "slide": ["sit", "idle"],           # 그린 길 미끄럼
 }
 
 

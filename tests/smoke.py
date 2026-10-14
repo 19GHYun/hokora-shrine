@@ -33,7 +33,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from hokora import app as hk  # noqa: E402
 from hokora import affection as aff  # noqa: E402
-from hokora import daily, guests, omamori, photo, play, prayer, torii, wardrobe  # noqa: E402
+from hokora import daily, guests, ink, omamori, photo, play, prayer, torii, wardrobe  # noqa: E402
 from hokora import omikuji as hk_omikuji  # noqa: E402
 from hokora.state import GameState  # noqa: E402
 from hokora import events as hk_events  # noqa: E402
@@ -755,6 +755,84 @@ def t_options():
     game.tray = G["tray"]
 
 
+def t_goods():
+    """놀잇감: 요술 붓(그린 길이 발판, 가파르면 미끄럼)."""
+    calm()
+    s.goods, s.saisen = [], 1_000
+
+    def cards():
+        return [w for w in game._cards if type(w).__name__ == "GoodsCard"]
+    game.use_goods("brush")
+    check("잠긴 놀잇감 → 사기 카드", bool(cards()) and cards()[-1].isVisible() and not cards()[-1].buy_btn.isEnabled())
+    for c in cards():
+        c.close()
+    check("새전 모자라면 못 삼", not game.buy_goods("brush") and "brush" not in s.goods)
+    s.saisen = 60_000
+    game.use_goods("brush")
+    cards()[-1].buy_btn.click()
+    canvas = game._ink_canvas
+    check("요술 붓 사기 → 바로 그리기", "brush" in s.goods and s.saisen == 40_000
+          and canvas is not None and canvas.isVisible())
+    g = ground()
+    x0 = g.x1 + 40
+    pts = ([(x0 + i * 4, g.y - 4 - i * 2.0) for i in range(50)]
+           + [(x0 + 196 + i * 4, g.y - 102 + i * 3.0) for i in range(1, 30)])
+    canvas.pick("shu")
+    made = canvas.on_stroke(pts, canvas.color)
+    pc = game.ink[-1].pieces[0] if game.ink and game.ink[-1].pieces else None
+    xm = pc.x1 + 50 if pc else 0.0
+    check("그린 길 = 발판", made is not None and pc is not None and game.ink[-1].win.isVisible()
+          and game.platform(pc.id, xm, 0.0) is not None
+          and (game.find_landing(xm, pc.y_at(xm) - 30, pc.y_at(xm) + 5) or (0, 0))[1] == pc.id)
+    canvas.close()
+    check("다 그렸어요 → 색 기억", game._ink_canvas is None and s.ink_color == "shu")
+    steep = [x for x in pc.xs if pc.slope_at(x) > 0.65] if pc else []
+    pet = G["ink_pet"] = game.pets[0]                 # 붐빔 조절 시험 뒤라 P 의 창은 이미 바뀌었을 수 있음
+    if steep:
+        x = steep[len(steep) // 4]
+        pet.pos_x, pet.pos_y, pet.on, pet._on_left = x, pc.y_at(x), pc.id, 0.0
+        pet.state, pet.vx, pet.scripted = "idle", 0.0, False
+        pet.state_until = time.monotonic() + 99
+    G["slides0"] = s.slides
+
+
+def t_goods2():
+    """그린 길 미끄럼·사라짐, 신사 미닫이문(신사 안 들여다보기)."""
+    pet = G["ink_pet"]
+    check("가파른 길 → 미끄럼 → 슝", s.slides > G["slides0"], (pet.state, pet.on, s.slides))
+    st = game.ink[-1]
+    st.born = time.monotonic() - ink.INK_LIFE - 1
+    game._ink_tick()
+    check("그린 길은 시간이 지나면 사라짐", not game.ink)
+    game.add_stroke([(ground().x1 + 50 + i * 5, ground().y - 60) for i in range(40)], "sumi")
+    game.clear_ink()
+    check("그린 길 지우기", not game.ink)
+
+    s.saisen = 40_000
+    game.use_goods("room")
+    [w for w in game._cards if type(w).__name__ == "GoodsCard"][-1].buy_btn.click()
+    room = game._room
+    check("미닫이문 사기 → 신사 안", "room" in s.goods and s.saisen == 10_000 and room is not None and room.isVisible())
+    invited = list(room.invited) if room else []
+    check("안이 비면 친구가 잠깐 들어옴", room is not None and len(room.seats) >= 2 and invited,
+          (room.seats if room else None, invited))
+    n0 = s.snacks
+    who = room.eat()
+    key = next(iter(room.seats))
+    room.poke(key)
+    room.grab()
+    check("귤 먹기·말 걸기", s.snacks == n0 + 1 and who in room.seats and any(b[0] == key for b in room.bubbles))
+    room.close()
+    check("문 닫으면 다시 밖으로", game._room is None and all(any(p.ch.key == k for p in game.pets) for k in invited))
+    game.open_room()
+    real = hk.winutil.fullscreen_app_running
+    hk.winutil.fullscreen_app_running = lambda games_only=False: True
+    game._watch()
+    check("전체화면이면 신사 안 창 닫힘", game._room is None)
+    hk.winutil.fullscreen_app_running = real
+    game._watch()
+
+
 def t_end():
     app.quit()
 
@@ -766,7 +844,7 @@ STEPS = [(t_core, 3000), (t_core2, 2500), (t_thief, 1600), (t_skill, 1800), (t_a
          (t_youmu, 0), (t_meiling, 11000), (t_reisen, 1000), (t_weather, 1500), (t_cutin, 500), (t_yukari, 6000),
          (t_yukari2, 1000), (t_patchouli, 1500), (t_expedition, 2200),
          (t_expedition2, 1000), (t_achieve, 1000), (t_fishing, 1000), (t_festival, 1000),
-         (t_crowd, 1500), (t_crowd2, 1500), (t_crowd3, 2500), (t_tutorial, 2000), (t_options, 1500), (t_life, 1000), (t_settings, 500), (t_end, 0)]
+         (t_crowd, 1500), (t_crowd2, 1500), (t_crowd3, 2500), (t_tutorial, 2000), (t_options, 1500), (t_goods, 1800), (t_goods2, 1000), (t_life, 1000), (t_settings, 500), (t_end, 0)]
 
 
 def run(i: int = 0) -> None:

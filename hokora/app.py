@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 from . import __version__, winutil
 from . import affection as aff
 from . import achievements, daily, expedition, festival, fishing, omamori, photo, season, torii, tutorial, wardrobe, weather
-from . import card, lifesense, moon
+from . import card, goods, ink, lifesense, moon, room
 from .settings import SettingsWindow
 from .diary import DiaryCard
 from .guests import fade as fade_window
@@ -34,6 +34,7 @@ from .events import Events
 from .guests import BELL_PRICE, BELL_TEXT, Flash, Visits
 from .omikuji import FortuneSlip, can_draw
 from .omikuji import draw as draw_omikuji
+from .panel import STYLE as PANEL_STYLE
 from .panel import ShrinePanel
 from .photo import PhotoCard
 from .pet import CURSOR, PetWindow
@@ -126,6 +127,11 @@ class Game(QObject):
         self._out_since: dict[str, float] = {}         # 붐빔 조절: 언제부터 나와 있었나 / 쉬었나
         self._bench_since: dict[str, float] = {}
         self._crowd_n = 0
+        self.ink: list[ink.Stroke] = []                # 요술 붓으로 그린 길
+        self._ink_next = ink.INK0
+        self._ink_canvas: ink.InkCanvas | None = None
+        self._room: room.RoomWindow | None = None      # 신사 안 창
+        self._room_in: set[str] = set()                # 신사 안을 볼 때 잠깐 들어간 친구
         tutorial.decide(self.state)
         from datetime import datetime as _dt
         self._chimed = (_dt.now().date(), _dt.now().hour)   # 켜자마자 울리지 않게
@@ -268,7 +274,8 @@ class Game(QObject):
         fx += [self.wfx] if self.wfx.kind and self.state.season_fx else []
         fx += [self.ffx] if festival.active(self.state) else []
         row = [self.torii_row] if self.state.torii and self.state.show_torii else []
-        return [*fx, *row, *decors, self.shrine, *self.pets, *self.guests]
+        inks = [st.win for st in self.ink]
+        return [*fx, *row, *decors, *inks, self.shrine, *self.pets, *self.guests]
 
     @property
     def scale(self) -> float:
@@ -323,6 +330,8 @@ class Game(QObject):
         for pet in everyone:
             pet.step(dt)
         self.shrine.step(dt)
+        if self.ink:
+            self._ink_tick()
         if self.tip is not None:
             self._tutorial_follow()
         if self.fx.isVisible() or self.torii_row.isVisible() or self.wfx.isVisible() or self.ffx.isVisible():
@@ -364,9 +373,18 @@ class Game(QObject):
             self.hidden_for_fullscreen = busy
             for w in self.windows():
                 w.setVisible(not busy)
+            if busy:
+                for w in (self._ink_canvas, self._room):
+                    if w is not None:
+                        w.close()
             log.info("전체화면 %s → %s", "감지" if busy else "종료", "숨김" if busy else "다시 표시")
         if not busy:
-            for w in self.windows():
+            self._restack()
+
+    def _restack(self) -> None:
+        """뒤 → 앞 순서로 다시 맨 위로. 신사 안 창·그리기 판은 그보다도 위."""
+        for w in [*self.windows(), self._room, self._ink_canvas]:
+            if w is not None:
                 winutil.keep_topmost(int(w.winId()))
 
     # ── 창 위 발판 (PetWindow 가 부름) ──
@@ -412,7 +430,102 @@ class Game(QObject):
         self.platform_timer.setInterval(PLATFORM_FAST if fast else PLATFORM_SLOW)
 
     def has_surface_below(self, x: float, y: float) -> bool:
-        return any(p.x1 <= x <= p.x2 and p.y > y + 1 for p in self.platforms)
+        return (any(p.x1 <= x <= p.x2 and p.y > y + 1 for p in self.platforms)
+                or any(pc.x1 <= x <= pc.x2 and pc.y_at(x) > y + 1 for pc in self.ink_paths))
+
+    # ── 요술 붓: 그은 선이 발판 (PetWindow 가 부름) ──
+    @property
+    def has_ink(self) -> bool:
+        return bool(self.ink)
+
+    @property
+    def ink_paths(self) -> list[ink.InkPath]:
+        return [pc for st in self.ink for pc in st.pieces]
+
+    def ink_path(self, hwnd: int) -> ink.InkPath | None:
+        for st in self.ink:
+            for pc in st.pieces:
+                if pc.id == hwnd:
+                    return pc
+        return None
+
+    def ink_entry(self, on: int, x: float, y: float, d: int) -> tuple[int, float] | None:
+        """걷는 발밑에서 시작하는(지나가는) 그린 길 — 앞쪽이 올라가거나 평평할 때만 (발판 아래로 파고들지 않게)."""
+        ahead = x + d * 12
+        for pc in self.ink_paths:
+            if pc.id == on or not (pc.x1 - 3 <= x <= pc.x2 + 3 and pc.x1 <= ahead <= pc.x2):
+                continue
+            here = pc.y_at(x)
+            if abs(here - y) <= 6 and pc.y_at(ahead) <= y + 2:
+                return pc.id, here
+        return None
+
+    def continue_at(self, on: int, x: float, y: float) -> tuple[int, float, float] | None:
+        """발판 끝 바로 너머 x 에서 거의 같은 높이로 이어지는 발판 (그린 길 ↔ 그린 길·창 윗변·작업표시줄)."""
+        for pc in self.ink_paths:
+            if pc.id != on and pc.x1 - 2 <= x <= pc.x2 + 2 and abs(pc.y_at(x) - y) <= 9:
+                return pc.id, pc.y_at(x), 0.0
+        if ink.is_ink(on):
+            for p in self.platforms:
+                if p.hwnd != on and p.hwnd != CURSOR and p.x1 <= x <= p.x2 and abs(p.y - y) <= 9:
+                    return p.hwnd, p.y, p.win_left
+        return None
+
+    def on_slide(self, pet: PetWindow) -> None:
+        self.state.slides += 1
+
+    def start_drawing(self) -> None:
+        if self._ink_canvas is not None:
+            self._ink_canvas.raise_()
+            return
+        c = ink.InkCanvas(self.state.ink_color, self.add_stroke, self.clear_ink, self._drawing_done, PANEL_STYLE)
+        self._ink_canvas = c
+        self.keep(c)
+        c.show()
+        c.raise_()
+        c.activateWindow()
+        c.setFocus()
+        log.info("길 그리기 시작")
+
+    def _drawing_done(self, color: str) -> None:
+        self._ink_canvas = None
+        self.state.ink_color = color
+        self.save()
+
+    def add_stroke(self, pts: list[tuple[float, float]], color: str = "sumi") -> ink.Stroke | None:
+        pts = ink.resample(pts)
+        if len(pts) < 2 or ink.length(pts) < ink.MIN_LEN:
+            return None
+        st = ink.Stroke(pts, color, self._ink_next)
+        self._ink_next -= max(1, len(st.pieces))
+        self.ink.append(st)
+        while len(self.ink) > ink.MAX_STROKES:
+            self._remove_stroke(self.ink[0])
+        self.state.ink_drawn += 1
+        if not self.hidden_for_fullscreen:
+            st.win.show()
+            self._restack()
+        log.info("그린 길: 점 %d개, 조각 %d개", len(pts), len(st.pieces))
+        return st
+
+    def _remove_stroke(self, st: ink.Stroke) -> None:
+        if st in self.ink:
+            self.ink.remove(st)
+        st.win.close()
+        st.win.deleteLater()
+
+    def clear_ink(self) -> None:
+        for st in list(self.ink):
+            self._remove_stroke(st)
+
+    def _ink_tick(self) -> None:
+        now = time.monotonic()
+        for st in list(self.ink):
+            a = st.alpha(now)
+            if a <= 0:
+                self._remove_stroke(st)
+            elif a < 1:
+                st.win.setWindowOpacity(a)
 
     def portal(self, x: float, direction: int) -> float | None:
         """모니터 사이 틈 앞이면 건너편 x."""
@@ -427,11 +540,21 @@ class Game(QObject):
         for p in self.platforms:
             if p.x1 <= x <= p.x2 and y0 <= p.y <= y1 and (best is None or p.y < best[0]):
                 best = (p.y, p.hwnd)
+        for pc in self.ink_paths:
+            if pc.x1 <= x <= pc.x2:
+                y = pc.y_at(x)
+                if y0 <= y <= y1 and (best is None or y < best[0]):
+                    best = (y, pc.id)
         return best
 
     def platform(self, hwnd: int, x: float, win_left: float):
         """그 창 윗변 중 캐릭터가 서 있는 구간. 창이 옮겨졌으면 옮겨진 만큼 감안해서 찾는다.
         커서(CURSOR)는 커서 끝의 아주 좁은 발판 — win_left 가 커서 x 라서 커서를 따라 움직인다."""
+        if ink.is_ink(hwnd):                     # 그린 길: 서 있는 x 의 높이
+            pc = self.ink_path(hwnd)
+            if pc is None or not pc.x1 - 2 <= x <= pc.x2 + 2:
+                return None
+            return winutil.Platform(hwnd, pc.x1, pc.x2, pc.y_at(x), 0.0)
         if hwnd == CURSOR:
             if not self.state.cursor_play:
                 return None
@@ -446,6 +569,18 @@ class Game(QObject):
 
     def jump_target(self, pet: PetWindow) -> tuple[float, float] | None:
         """점프해서 갈 만한 곳: 닿을 만한 다른 창 윗변이나 (높이가 다른) 작업표시줄."""
+        if self.ink and random.random() < 0.7:          # 그린 길이 있으면 그쪽으로 자주
+            cands = []
+            for pc in self.ink_paths:
+                lo, hi = max(pc.x1 + 8, pet.pos_x - JUMP_REACH), min(pc.x2 - 8, pet.pos_x + JUMP_REACH)
+                if pc.id == pet.on or lo >= hi:
+                    continue
+                x = random.uniform(lo, hi)
+                up = pet.pos_y - pc.y_at(x)
+                if 20 < abs(up) and -700 <= up <= JUMP_UP_MAX:
+                    cands.append((x, pc.y_at(x)))
+            if cands:
+                return random.choice(cands)
         targets: list[tuple[float, float]] = []
         for p in self.platforms:
             if p.hwnd == pet.on or p.x2 - p.x1 < 80:
@@ -984,7 +1119,79 @@ class Game(QObject):
     def _eligible(self) -> list[str]:
         base = list(CHARACTERS) if os.environ.get("HOKORA_ALL") == "1" else self.state.unlocked
         away = expedition.away(self.state)
-        return [k for k in base if k not in self.state.resting and k not in away]
+        return [k for k in base if k not in self.state.resting and k not in away and k not in self._room_in]
+
+    # ── 놀잇감 (새전으로 엶) ──
+    def use_goods(self, key: str) -> None:
+        if key not in self.state.goods:
+            self.show_goods(key)
+        elif key == "brush":
+            self.start_drawing()
+        elif key == "room":
+            self.open_room()
+
+    def show_goods(self, key: str) -> None:
+        c = goods.GoodsCard(self, key)
+        self.keep(c)
+        c.show_near(QPoint(round(self.shrine.pos_x), round(self.shrine.y())))
+
+    def buy_goods(self, key: str) -> bool:
+        g, s = goods.GOODS[key], self.state
+        if key in s.goods or s.saisen < g.price:
+            return False
+        s.saisen -= g.price
+        s.goods.append(key)
+        self.shrine.set_saisen(s.saisen)
+        self._say_at_shrine(f"{g.icon} {aff.josa(g.name, '을', '를')} 손에 넣었다!")
+        log.info("놀잇감 삼: %s", key)
+        self.save()
+        return True
+
+    # ── 신사 안 들여다보기 ──
+    def room_friends(self) -> list[str]:
+        """신사 안에 있는 친구: 해금했지만 작업표시줄에 안 나와 있고 원정도 안 간 친구."""
+        base = list(CHARACTERS) if os.environ.get("HOKORA_ALL") == "1" else self.state.unlocked
+        out = {p.ch.key for p in self.pets}
+        away = expedition.away(self.state)
+        return [k for k in base if k in CHARACTERS and k not in out and k not in away]
+
+    def open_room(self) -> None:
+        if self._room is not None:
+            self._room.raise_()
+            return
+        invited: list[str] = []
+        need = 2 - len(self.room_friends())
+        if need > 0:                                     # 안이 비었으면 밖에 있던 친구가 잠깐 들어옴
+            free = [p for p in self.pets if p.grounded and p.isVisible() and self.events.thief is not p]
+            random.shuffle(free)
+            for pet in free[:need]:
+                self.pets.remove(pet)
+                self._room_in.add(pet.ch.key)
+                invited.append(pet.ch.key)
+                fade_window(pet, 0.0, 0.5, lambda pet=pet: (pet.close(), pet.deleteLater()))
+        self.state.room_visits += 1
+        w = room.RoomWindow(self, invited)
+        self._room = w
+        self.keep(w)
+        w.place_near(self.shrine.pos_x, self.shrine.y())
+        w.show()
+        w.raise_()
+        log.info("신사 안 들여다보기: 안에 %s (잠깐 들어옴 %s)", self.room_friends(), invited)
+        self.save()
+
+    def room_closed(self) -> None:
+        """신사 안 창을 닫음: 잠깐 들어갔던 친구는 다시 밖으로."""
+        self._room = None
+        back, self._room_in = sorted(self._room_in), set()
+        elig = self._eligible()
+        for k in back:
+            if k in elig and not any(p.ch.key == k for p in self.pets):
+                self._drop_in(k)
+        if back:
+            self._crowd_tick()
+
+    def on_room_snack(self) -> None:
+        self.state.snacks += 1
 
     def set_max_out(self, n: int) -> None:
         self.state.max_out = max(0, int(n))
@@ -1622,6 +1829,12 @@ class Game(QObject):
         menu.addAction("신사 관리 · 도감", self.open_panel)
         menu.addAction("📸 사진 찍기", self.take_photo)
         menu.addAction("🪪 신사 명함 만들기", self.make_card)
+        for key in ("brush", "room"):
+            g = goods.GOODS[key]
+            text = g.use if key in s.goods else f"🔒 {g.use.split(' ', 1)[1]}  (새전 {g.price:,})"
+            menu.addAction(text, lambda key=key: self.use_goods(key))
+        if self.ink:
+            menu.addAction("🧽 그린 길 지우기", self.clear_ink)
         if "pond" in self.decors:
             menu.addAction(f"🎣 낚시하기  (미끼 {fishing.bait(s)}개)", self.go_fishing)
         if can_draw(s):

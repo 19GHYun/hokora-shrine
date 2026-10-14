@@ -19,6 +19,7 @@ from .bubble import say
 from .omikuji import can_draw
 from .prayer import charm_active
 from .pet import RUN_SPEED as RUN
+from .pet import is_floor
 from .play import Duel, Tag, combo_for
 
 if TYPE_CHECKING:
@@ -95,7 +96,7 @@ class Events:
         self.gust()
 
     def gust(self) -> "PetWindow | None":
-        cands = [p for p in self.game.pets if p.grounded and p.on is not None and p.on < 0]
+        cands = [p for p in self.game.pets if p.grounded and is_floor(p.on)]
         if not cands:
             return None
         p = random.choice(cands)
@@ -174,7 +175,7 @@ class Events:
 
     def start_play(self, kind: str) -> bool:
         """같은 바닥에 있는 친구들로 놀이를 시작 (사람이 모자라면 False)."""
-        free = [p for p in self.game.pets if p.grounded and p.on is not None and p.on < 0]
+        free = [p for p in self.game.pets if p.grounded and is_floor(p.on)]
         by_ground: dict[int, list] = {}
         for p in free:
             by_ground.setdefault(p.on, []).append(p)
