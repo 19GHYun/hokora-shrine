@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 from . import __version__, winutil
 from . import affection as aff
 from . import achievements, daily, expedition, festival, fishing, omamori, photo, season, torii, tutorial, wardrobe, weather
-from . import card, goods, ink, lifesense, moon, room
+from . import card, cucumber, goods, ink, lifesense, moon, offering, room, ufo
 from .settings import SettingsWindow
 from .diary import DiaryCard
 from .guests import fade as fade_window
@@ -132,6 +132,9 @@ class Game(QObject):
         self._ink_canvas: ink.InkCanvas | None = None
         self._room: room.RoomWindow | None = None      # 신사 안 창
         self._room_in: set[str] = set()                # 신사 안을 볼 때 잠깐 들어간 친구
+        self.ufo: ufo.Ufo | None = None                # 누에의 UFO
+        self._abducted: dict[str, float] = {}          # UFO 에 끌려간 친구 → 돌아오는 시각 (time.time)
+        self._started = time.monotonic()
         tutorial.decide(self.state)
         from datetime import datetime as _dt
         self._chimed = (_dt.now().date(), _dt.now().hour)   # 켜자마자 울리지 않게
@@ -154,6 +157,7 @@ class Game(QObject):
         if self.state.shrine_skin in SHRINE_SKINS:
             self.shrine.set_skin(self.state.shrine_skin)
         self.torii_row = ToriiRow(self)
+        self.offer_tray = offering.OfferTray(self)     # 신사 앞 공물상
         self.shrine.set_saisen(self.state.saisen)
         self.decors: dict[str, DecorWindow] = {
             k: DecorWindow(self, k, x) for k, x in self.state.decor_pos.items() if k in DECOR}
@@ -275,7 +279,9 @@ class Game(QObject):
         fx += [self.ffx] if festival.active(self.state) else []
         row = [self.torii_row] if self.state.torii and self.state.show_torii else []
         inks = [st.win for st in self.ink]
-        return [*fx, *row, *decors, *inks, self.shrine, *self.pets, *self.guests]
+        offer = [self.offer_tray] if self.state.offering else []
+        sky = self.ufo.windows() if self.ufo is not None else []
+        return [*fx, *row, *decors, *inks, self.shrine, *offer, *self.pets, *self.guests, *sky]
 
     @property
     def scale(self) -> float:
@@ -307,6 +313,9 @@ class Game(QObject):
         self._refresh_platforms()
         self._refresh_season()
         self._sync_torii()
+        self._sync_offering()
+        if os.environ.get("HOKORA_UFO") == "1":            # 시험용: 켜자마자 UFO
+            QTimer.singleShot(6000, self.summon_ufo)
         QTimer.singleShot(3500, self._new_day)
         QTimer.singleShot(5000, self._check_expeditions)
         QTimer.singleShot(6500, self._check_achievements)
@@ -332,10 +341,17 @@ class Game(QObject):
         self.shrine.step(dt)
         if self.ink:
             self._ink_tick()
+        if self.ufo is not None:
+            self.ufo.step(dt)
+            if self.ufo.done:
+                self.ufo = None
         if self.tip is not None:
             self._tutorial_follow()
-        if self.fx.isVisible() or self.torii_row.isVisible() or self.wfx.isVisible() or self.ffx.isVisible():
+        if (self.fx.isVisible() or self.torii_row.isVisible() or self.wfx.isVisible() or self.ffx.isVisible()
+                or self.offer_tray.isVisible()):
             g = self.ground_under(self.shrine.pos_x)
+            if self.offer_tray.isVisible():
+                self.offer_tray.follow(self.shrine.pos_x, g.y, self.shrine.width())
             if self.ffx.isVisible():
                 self.ffx.follow(self.shrine.pos_x, g.y)
             if self.fx.isVisible():
@@ -377,6 +393,9 @@ class Game(QObject):
                 for w in (self._ink_canvas, self._room):
                     if w is not None:
                         w.close()
+                if self.ufo is not None:
+                    self.ufo.cancel()
+                    self.ufo = None
             log.info("전체화면 %s → %s", "감지" if busy else "종료", "숨김" if busy else "다시 표시")
         if not busy:
             self._restack()
@@ -665,6 +684,8 @@ class Game(QObject):
         self._check_expeditions()
         self._check_achievements()
         self._daily_check()                        # 새전 모으기·함께 지내기는 시간이 지나며 채워짐
+        self._ufo_returns()
+        self._ufo_roll()
 
     def _new_day(self) -> None:
         """날짜가 바뀌면(켰을 때 포함) 오늘의 부탁을 새로 받고 출석 도장."""
@@ -1119,7 +1140,8 @@ class Game(QObject):
     def _eligible(self) -> list[str]:
         base = list(CHARACTERS) if os.environ.get("HOKORA_ALL") == "1" else self.state.unlocked
         away = expedition.away(self.state)
-        return [k for k in base if k not in self.state.resting and k not in away and k not in self._room_in]
+        return [k for k in base if k not in self.state.resting and k not in away and k not in self._room_in
+                and k not in self._abducted]
 
     # ── 놀잇감 (새전으로 엶) ──
     def use_goods(self, key: str) -> None:
@@ -1153,7 +1175,7 @@ class Game(QObject):
         base = list(CHARACTERS) if os.environ.get("HOKORA_ALL") == "1" else self.state.unlocked
         out = {p.ch.key for p in self.pets}
         away = expedition.away(self.state)
-        return [k for k in base if k in CHARACTERS and k not in out and k not in away]
+        return [k for k in base if k in CHARACTERS and k not in out and k not in away and k not in self._abducted]
 
     def open_room(self) -> None:
         if self._room is not None:
@@ -1192,6 +1214,151 @@ class Game(QObject):
 
     def on_room_snack(self) -> None:
         self.state.snacks += 1
+
+    # ── 누에의 UFO (eSheep 오마주) ──
+    def _ufo_roll(self) -> None:
+        if (self.ufo is not None or self.hidden_for_fullscreen or self.napping or self.visits.visit is not None
+                or time.monotonic() - self._started < ufo.FIRST_AFTER):
+            return
+        if random.random() < ufo.CHANCE_PER_30S:
+            self.summon_ufo()
+
+    def summon_ufo(self) -> bool:
+        if self.ufo is not None or self.hidden_for_fullscreen:
+            return False
+        free = [p for p in self.pets if p.grounded and p.isVisible() and self.events.thief is not p]
+        if not free:
+            return False
+        self.ufo = ufo.Ufo(self, random.choice(free))
+        self._restack()
+        log.info("UFO 등장: %s 노림", self.ufo.pet.ch.key)
+        return True
+
+    def ufo_beam(self, pet: PetWindow) -> None:
+        self.events._say(pet, random.choice(["으아아, 몸이 떠!", "뭐, 뭐야 이 빛은?!", "살려 줘~!"]), 2.5)
+
+    def ufo_shot(self, u: ufo.Ufo, saved: bool) -> None:
+        s = self.state
+        reward = max(200, s.income_per_min * 15) * (3 if u.rainbow else 1)
+        s.add_saisen(reward)
+        s.ufo_shot += 1
+        self.shrine.set_saisen(s.saisen)
+        self.shrine.pop(f"+{reward}")
+        self._say_at_shrine(f"🛸 UFO 격추!{'  무지개 UFO라 새전 ×3!' if u.rainbow else ''}  새전 +{reward:,}")
+        if saved:
+            self.later(1.4, lambda p=u.pet: p in self.pets and self.events._say(p, random.choice(ufo.LINES_SAVED)))
+        ufo.nue_appears(self, u.x, u.y + 10)           # UFO 의 주인이 떨어짐
+        log.info("UFO 격추 (%s): 새전 +%d", "구출" if saved else "오기 전", reward)
+        self.check_unlocks()
+        self.save()
+
+    def ufo_rescued(self, u: ufo.Ufo) -> None:
+        s = self.state
+        reward = max(100, s.income_per_min * 6)
+        s.add_saisen(reward)
+        s.ufo_rescued += 1
+        self.shrine.set_saisen(s.saisen)
+        self._say_at_shrine(f"🛸 붙잡아서 구출!  새전 +{reward:,}")
+        log.info("UFO 에서 잡아채 구출: %s", u.pet.ch.key)
+        self.save()
+
+    def ufo_abduct(self, pet: PetWindow) -> None:
+        if pet in self.pets:
+            self.pets.remove(pet)
+        pet.hide()
+        pet.close()
+        pet.deleteLater()
+        self._abducted[pet.ch.key] = time.time() + ufo.AWAY_TIME
+        self.state.ufo_taken += 1
+        self._say_at_shrine(f"🛸 {aff.josa(pet.ch.name, '이', '가')} UFO에 끌려갔다…!  (10분 뒤 돌아와요)")
+        log.info("UFO 에 끌려감: %s", pet.ch.key)
+        self.save()
+
+    def _ufo_returns(self) -> None:
+        """끌려간 친구가 선물을 들고 돌아옴."""
+        now = time.time()
+        for key, at in list(self._abducted.items()):
+            if now < at:
+                continue
+            del self._abducted[key]
+            if key not in self._eligible() or any(p.ch.key == key for p in self.pets):
+                continue
+            self._drop_in(key)
+            s = self.state
+            reward = max(300, s.income_per_min * 10)
+            s.add_saisen(reward)
+            s.cloth += 5
+            self.shrine.set_saisen(s.saisen)
+            pet = next(p for p in self.pets if p.ch.key == key)
+            self.later(1.5, lambda p=pet, r=reward: p in self.pets and self.events._say(
+                p, f"UFO에서 돌아왔어… 이거 선물! (새전 +{r:,} · 옷감 +5)", 4.0))
+            log.info("UFO 에서 돌아옴: %s", key)
+
+    # ── 니토리의 오이 시세 (동물의 숲 무 주식 오마주) ──
+    def open_cucumber(self) -> None:
+        w = cucumber.CucumberWindow(self)
+        self.keep(w)
+        w.show_near(QPoint(round(self.shrine.pos_x), round(self.shrine.y())))
+
+    def on_cucumber(self, text: str) -> None:
+        self.shrine.set_saisen(self.state.saisen)
+        self._say_at_shrine(text)
+        log.info("오이: %s", text)
+        self.save()
+
+    # ── 공물 (고양이 수집 오마주) ──
+    def open_offering(self) -> None:
+        w = offering.OfferingWindow(self)
+        self.keep(w)
+        w.show_near(QPoint(round(self.shrine.pos_x), round(self.shrine.y())))
+
+    def place_offering(self, key: str, cucumbers: bool = False) -> bool:
+        if not offering.place(self.state, key, cucumbers):
+            return False
+        o = offering.OFFERINGS[key]
+        self.shrine.set_saisen(self.state.saisen)
+        self._sync_offering()
+        self._say_at_shrine(f"{o.icon} {aff.josa(o.name, '을', '를')} 공물로 올렸다!")
+        log.info("공물: %s", key)
+        self.save()
+        return True
+
+    def clear_offering(self) -> None:
+        self.state.offering = ""
+        self._sync_offering()
+        self.save()
+
+    def _sync_offering(self) -> None:
+        s = self.state
+        show = bool(s.offering) and not self.hidden_for_fullscreen
+        self.offer_tray.set_offering(s.offering)
+        if show:
+            self.offer_tray.follow(self.shrine.pos_x, self.ground_under(self.shrine.pos_x).y, self.shrine.width())
+        if show != self.offer_tray.isVisible():
+            self.offer_tray.setVisible(show)
+            if show:
+                self._restack()
+
+    def offering_seen(self, kind: str) -> None:
+        """손님이 옴: 공물을 좋아하는 손님이면 조금 뒤 먹고 답례품을 두고 감."""
+        if offering.wanted(self.state) == kind:
+            self.later(offering.EAT_AFTER, lambda: self._offering_eaten(kind))
+
+    def _offering_eaten(self, kind: str) -> None:
+        s = self.state
+        if offering.wanted(s) != kind:
+            return
+        key = s.offering
+        o = offering.OFFERINGS[key]
+        gift, saisen, cloth, first = offering.receive(s, kind)
+        self._sync_offering()
+        self.shrine.set_saisen(s.saisen)
+        self.shrine.pop(f"+{saisen}")
+        self._say_at_shrine(f"{o.icon} {offering.SHORT[kind]}: 「{o.name}」 잘 먹을게~!")
+        self.show_card(offering.GiftCard(kind, key, gift, saisen, cloth, first))
+        log.info("공물 먹음: %s → 답례품 %s", key, gift)
+        self.check_unlocks()
+        self.save()
 
     def set_max_out(self, n: int) -> None:
         self.state.max_out = max(0, int(n))
@@ -1541,6 +1708,9 @@ class Game(QObject):
             self.napping = True
             self.events.cancel_play()
             self.visits.cancel()
+            if self.ufo is not None:
+                self.ufo.cancel()
+                self.ufo = None
             self._nap_start = time.time() - idle          # 실제로 자리를 비운 시각
             self._nap_total = self.state.saisen_total
             self.events.cancel_thief()
@@ -1835,6 +2005,13 @@ class Game(QObject):
             menu.addAction(text, lambda key=key: self.use_goods(key))
         if self.ink:
             menu.addAction("🧽 그린 길 지우기", self.clear_ink)
+        menu.addAction("🍙 공물 올리기" + (f"  ({offering.OFFERINGS[s.offering].icon} 올려 둠)"
+                                          if s.offering in offering.OFFERINGS else ""), self.open_offering)
+        if s.guest_visits.get("nitori") or os.environ.get("HOKORA_ALL") == "1":
+            menu.addAction("🥒 오이 시세" + (f"  (오이 {s.cuke_have:,}개)" if s.cuke_have else ""), self.open_cucumber)
+        else:
+            locked = menu.addAction("🥒 오이 시세 — 니토리를 만나면 열려요")
+            locked.setEnabled(False)
         if "pond" in self.decors:
             menu.addAction(f"🎣 낚시하기  (미끼 {fishing.bait(s)}개)", self.go_fishing)
         if can_draw(s):

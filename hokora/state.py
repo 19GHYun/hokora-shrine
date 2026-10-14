@@ -198,6 +198,22 @@ class GameState:
     slides: int = 0                  # 친구들이 그린 길에서 미끄럼 탄 횟수
     room_visits: int = 0             # 신사 안을 들여다본 횟수
     snacks: int = 0                  # 신사 안에서 귤·수박을 먹은 수
+    offering: str = ""               # 신사 앞에 올린 공물 (offering.py)
+    offering_since: float = 0.0
+    offerings_made: int = 0
+    gifts: dict[str, int] = field(default_factory=dict)   # 손님 → 받은 답례품 수
+    cuke_week: str = ""              # 오이 시세 (cucumber.py): 이번 주 일요일
+    cuke_base: int = 100             # 이번 주 니토리 오이 값
+    cuke_seed: int = 0
+    cuke_hint: bool = True           # 이번 주 니토리의 귀띔이 맞는지
+    cuke_have: int = 0
+    cuke_paid: int = 0               # 가진 오이를 산 값 합계
+    cuke_bought: str = ""            # 가진 오이를 산 주 (주가 바뀌면 시듦)
+    cuke_profit: int = 0
+    cuke_best: int = 0
+    ufo_shot: int = 0                # UFO 격추 (ufo.py)
+    ufo_rescued: int = 0             # 끌려가는 친구를 잡아채서 구출
+    ufo_taken: int = 0               # UFO 에 끌려간 횟수
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
     @property

@@ -1,0 +1,104 @@
+{
+  "version": 2,
+  "standing_height": 200,
+  "facing": 1,
+  "frames": {
+    "offer_konpeito": [
+      107,
+      135
+    ],
+    "offer_scoop": [
+      105,
+      200
+    ],
+    "offer_sake": [
+      106,
+      201
+    ],
+    "offer_carrot": [
+      113,
+      197
+    ],
+    "offer_rose": [
+      84,
+      205
+    ],
+    "offer_cucumber": [
+      127,
+      206
+    ],
+    "offer_onigiri": [
+      145,
+      155
+    ],
+    "offer_score": [
+      116,
+      190
+    ],
+    "offer_dango": [
+      123,
+      176
+    ],
+    "offer_grimoire": [
+      123,
+      198
+    ],
+    "offer_inari": [
+      118,
+      154
+    ],
+    "offer_sanbo": [
+      104,
+      189
+    ],
+    "gift_fairies": [
+      76,
+      163
+    ],
+    "gift_aya": [
+      115,
+      180
+    ],
+    "gift_suika": [
+      83,
+      190
+    ],
+    "gift_tewi": [
+      75,
+      184
+    ],
+    "gift_koishi": [
+      82,
+      206
+    ],
+    "gift_nitori": [
+      116,
+      178
+    ],
+    "gift_yuyuko": [
+      116,
+      158
+    ],
+    "gift_mystia": [
+      116,
+      166
+    ],
+    "gift_reisen": [
+      101,
+      160
+    ],
+    "gift_patchouli": [
+      63,
+      174
+    ],
+    "gift_yukari": [
+      101,
+      170
+    ]
+  },
+  "sources": [
+    "offer.png",
+    "gift.png",
+    "offer.png"
+  ]
+}

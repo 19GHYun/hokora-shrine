@@ -33,7 +33,8 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from hokora import app as hk  # noqa: E402
 from hokora import affection as aff  # noqa: E402
-from hokora import daily, guests, ink, omamori, photo, play, prayer, torii, wardrobe  # noqa: E402
+from hokora import cucumber, daily, guests, ink, offering, omamori, photo, play, prayer, torii, wardrobe  # noqa: E402
+from hokora import ufo as hk_ufo  # noqa: E402
 from hokora import omikuji as hk_omikuji  # noqa: E402
 from hokora.state import GameState  # noqa: E402
 from hokora import events as hk_events  # noqa: E402
@@ -833,6 +834,132 @@ def t_goods2():
     game._watch()
 
 
+def t_ufo():
+    """누에의 UFO: 여러 번 누르면 격추 → 친구가 떨어져 돌아옴."""
+    calm()
+    check("UFO 등장", game.summon_ufo() and game.ufo is not None)
+    u = game.ufo
+    if u is None:
+        return
+    u.x, u.y = u.target
+    u._start_beam()
+    pet = G["ufo_pet"] = u.pet
+    check("빛으로 빨아올림", u.phase == "beam" and pet.scripted and u.beam.isVisible())
+    n0 = s.ufo_shot
+    for _ in range(u.hp_max):
+        u.hit()
+    check("UFO 격추 → 친구가 떨어짐", u.phase == "hit" and not pet.scripted and pet.state == "fall"
+          and s.ufo_shot == n0 + 1)
+    check("격추하면 누에가 떨어짐", any(p.ch.key == "nue" for p in game.guests))
+
+
+def t_ufo2():
+    """구출된 친구 착지 / 끌려가는 친구를 잡아채서 구출 / 못 막으면 끌려감."""
+    pet = G["ufo_pet"]
+    check("구출된 친구 착지", pet.on is not None and not pet.scripted, (pet.state, pet.on))
+    if game.ufo is not None:
+        game.ufo.close()
+        game.ufo = None
+    game.summon_ufo()
+    u = game.ufo
+    u.x, u.y = u.target
+    u._start_beam()
+    n0 = s.ufo_rescued
+    u.pet._press_pos = QPoint(1, 1)                      # 사용자가 잡아챔
+    u.step(0.05)
+    u.pet._press_pos = None
+    u.pet.state = "fall"
+    check("잡아채서 구출", u.phase == "leave" and s.ufo_rescued == n0 + 1 and not u.pet.scripted)
+    u.close()
+    game.ufo = None
+    hk_ufo.LIFT_TIME = 0.4
+    game.summon_ufo()
+    u = game.ufo
+    u.x, u.y = u.target
+    u._start_beam()
+    G["victim"] = u.pet.ch.key
+
+
+def t_ufo3():
+    key = G["victim"]
+    hk_ufo.LIFT_TIME = 9.0
+    check("못 막으면 끌려감", key in game._abducted and all(p.ch.key != key for p in game.pets) and s.ufo_taken >= 1)
+    check("끌려간 친구는 붐빔 조절·신사 안에서 빠짐", key not in game._eligible() and key not in game.room_friends())
+    game._abducted[key] = time.time() - 1
+    game._ufo_returns()
+    check("시간이 지나면 선물 들고 돌아옴", key not in game._abducted and any(p.ch.key == key for p in game.pets))
+    if game.ufo is not None:
+        game.ufo.close()
+        game.ufo = None
+
+
+def t_cuke():
+    """니토리의 오이 시세: 일요일에 사서 평일에 팔고, 다음 주엔 시든다."""
+    from datetime import datetime as real_dt
+    now = [real_dt(2026, 10, 11, 10, 0)]                 # 일요일
+
+    class FakeDT(real_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return now[0]
+    cucumber.datetime = FakeDT
+    s.saisen, s.cuke_week, s.cuke_have, s.cuke_paid = 50_000, "", 0, 0
+    got = cucumber.buy(s, 100)
+    check("오이 사기 (일요일)", got == 100 and s.cuke_have == 100 and s.cuke_paid == 100 * s.cuke_base)
+    now[0] = real_dt(2026, 10, 12, 9, 0)                 # 월요일 오전
+    check("월요일 오전엔 아직 못 팖", cucumber.sell(s, 10) == 0 and cucumber.can_buy(now[0]))
+    now[0] = real_dt(2026, 10, 14, 15, 0)                # 수요일 오후
+    price = cucumber.price_now(s)
+    got = cucumber.sell(s, 50)
+    check("그때 시세대로 팔기", got == 50 * price and s.cuke_have == 50 and price == cucumber.prices(s)[5])
+    check("평일엔 못 삼", cucumber.buy(s, 10) == 0)
+    w = cucumber.CucumberWindow(game)
+    w.show()
+    check("오이 시세 창", w.isVisible() and len(w.btns) == 2)
+    w.close()
+    now[0] = real_dt(2026, 10, 18, 8, 0)                 # 다음 일요일
+    check("다음 주가 되면 시듦", cucumber.refresh(s) == 50 and s.cuke_have == 0)
+    shapes = [cucumber.make_prices(seed, 100) for seed in range(400)]
+    check("시세 패턴 (12칸, 대폭등은 2배 넘게)", all(len(ps) == 12 and min(ps) >= 9 for _, ps in shapes)
+          and all(max(ps) >= 200 for pat, ps in shapes if pat == 1))
+    cucumber.datetime = real_dt
+
+
+def t_offer():
+    """공물: 올려 두면 그 손님이 와서 먹고 답례품."""
+    for c in list(game._card_queue):
+        c.close()
+    s.saisen, s.offering, s.gifts = 10_000, "", {}
+    check("공물 올리기", game.place_offering("onigiri") and s.offering == "onigiri"
+          and game.offer_tray.isVisible() and s.saisen == 8_000 and offering.wanted(s) == "yuyuko")
+    check("공물은 한 번에 하나", not game.place_offering("sake"))
+    game.clear_offering()
+    s.cuke_have, s.cuke_paid, s.cuke_bought = 20, 2_000, s.cuke_week
+    check("가진 오이 10개로 공물", game.place_offering("cucumber", True) and s.cuke_have == 10 and s.saisen == 8_000)
+    game.clear_offering()
+    check("치우면 공물상도 사라짐", not s.offering and not game.offer_tray.isVisible())
+    w = offering.OfferingWindow(game)
+    w.show()
+    check("공물 창", w.isVisible())
+    w.close()
+    game.place_offering("onigiri")
+    offering.EAT_AFTER = 0.3
+    if game.visits.visit is not None:
+        game.visits.visit.cancel()
+    G["yuyuko"] = game.visits.start("yuyuko")
+
+
+def t_offer2():
+    offering.EAT_AFTER = 7.0
+    cards = [c for c in game._card_queue if type(c).__name__ == "GiftCard"]
+    check("손님이 먹고 답례품", G["yuyuko"] and not s.offering and s.gifts.get("yuyuko") == 1 and cards,
+          (G["yuyuko"], s.offering, s.gifts))
+    for c in list(game._card_queue):
+        c.close()
+    if game.visits.visit is not None:
+        game.visits.visit.cancel()
+
+
 def t_end():
     app.quit()
 
@@ -844,7 +971,8 @@ STEPS = [(t_core, 3000), (t_core2, 2500), (t_thief, 1600), (t_skill, 1800), (t_a
          (t_youmu, 0), (t_meiling, 11000), (t_reisen, 1000), (t_weather, 1500), (t_cutin, 500), (t_yukari, 6000),
          (t_yukari2, 1000), (t_patchouli, 1500), (t_expedition, 2200),
          (t_expedition2, 1000), (t_achieve, 1000), (t_fishing, 1000), (t_festival, 1000),
-         (t_crowd, 1500), (t_crowd2, 1500), (t_crowd3, 2500), (t_tutorial, 2000), (t_options, 1500), (t_goods, 1800), (t_goods2, 1000), (t_life, 1000), (t_settings, 500), (t_end, 0)]
+         (t_crowd, 1500), (t_crowd2, 1500), (t_crowd3, 2500), (t_tutorial, 2000), (t_options, 1500), (t_goods, 1800), (t_goods2, 1000), (t_ufo, 1500), (t_ufo2, 1200), (t_ufo3, 500),
+         (t_cuke, 300), (t_offer, 1500), (t_offer2, 1500), (t_life, 1000), (t_settings, 500), (t_end, 0)]
 
 
 def run(i: int = 0) -> None:

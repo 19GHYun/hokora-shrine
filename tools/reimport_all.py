@@ -85,6 +85,14 @@ PLAN = {
     "yuyuko": [("yuyuko_1.png", GUEST + " --grid 3x4", True)],
     "mystia": [("mistia_1.png", GUEST + " --grid 3x4", True)],
     "koishi": [("3_2_1.png", "idle_0,idle_1,blink,bow,-,walk_0,walk_1,walk_2,walk_3,skill_0,skill_1,caught,happy", True)],
+    # 공물·답례품 아이콘 (공물 시트는 ✦ 가 공물상 위에 있어서 --star)
+    "items": [("111.png", "offer_konpeito,offer_scoop,offer_sake,offer_carrot,offer_rose,offer_cucumber,offer_onigiri,"
+                          "offer_score,offer_dango,offer_grimoire,offer_inari,offer_sanbo --grid 3x4 --keep 0.03 --star", True),
+              ("222.png", "gift_fairies,gift_aya,gift_suika,gift_tewi,gift_koishi,gift_nitori,gift_yuyuko,gift_mystia,"
+                          "gift_reisen,gift_patchouli,gift_yukari --grid 3x4 --keep 0.03", False)],
+    # 누에: --keep 0.02 로 특기 컷의 작은 UFO 를 살림. 다시 넣은 뒤 happy 오른팔의 ✦ 자국(회색)을 소매색으로 칠하고
+    # 초록 테두리를 빼야 함 (g > max(r, b) + 18 → g = max(r, b))
+    "nue": [("444.png", "preset:guest --grid 3x4 --keep 0.02", True)],
 }
 
 

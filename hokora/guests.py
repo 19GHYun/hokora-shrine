@@ -25,7 +25,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
 from . import affection as aff
-from . import moon, omamori, season, wardrobe, weather
+from . import moon, offering, omamori, season, wardrobe, weather
 from .decor import decor_image
 from .bubble import say
 from .news import NewsCard, answer_for, make_article
@@ -1875,8 +1875,12 @@ class Visits:
             self.start(kind)
         elif random.random() < (VISIT_CHANCE * (1 + omamori.bonus(g.state, "guest")) * weather.current().guests
                                 * (3.0 if g.state.festival_until > time.time() else 1.0)          # 예대제엔 손님이 몰려옴
-                                * (moon.NEW_GUESTS if moon.is_new() and season.is_night() else 1.0)):  # 그믐 밤
+                                * (moon.NEW_GUESTS if moon.is_new() and season.is_night() else 1.0)  # 그믐 밤
+                                * (offering.BOOST if g.state.offering else 1.0)):                  # 공물
             kinds = available(g.state)
+            want = offering.wanted(g.state)
+            if want in kinds and random.random() < offering.PICK:      # 공물을 좋아하는 손님이 냄새를 맡고
+                kinds = [want]
             if kinds:
                 if weather.current().key == "drizzle" and "fairies" in kinds and random.random() < 0.5:
                     kinds = ["fairies"]                      # 안개비: 요정들이 장난치기 좋은 날
@@ -1891,6 +1895,7 @@ class Visits:
             s.guest_visits[key] = s.guest_visits.get(key, 0) + 1
         log.info("손님 방문: %s", kind)
         self.game.ring_bell(kind)
+        self.game.offering_seen(kind)
         return True
 
     def _finish(self) -> None:

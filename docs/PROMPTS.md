@@ -408,3 +408,68 @@ python tools/import_sheet.py 메이링C.png meiling --preset life
 python tools/import_sheet.py 메이링걷기.png meiling --preset walk
 python tools/import_sheet.py 레이센.png reisen --preset guest
 ```
+
+## 공물·답례품 아이콘 (자홍 배경)
+
+그림이 없으면 그림 문자로 나옵니다. `hokora/sprites/props/_preview.png` 를 그림체 참고용으로 첨부합니다.
+오이·네잎클로버처럼 초록이 있어서 배경은 자홍입니다.
+
+```
+Using the attached image ONLY as an art style reference (thick soft dark-brown outline,
+flat colors with gentle shading, cute chibi game-asset style), draw 12 small Japanese food and
+offering item icons as ONE sheet, 3 rows x 4 columns, every icon about the same size, each centered
+in its own cell, with clear magenta space between them so nothing touches:
+1. A small pile of colorful konpeito star candies on a tiny white plate.
+2. A slightly blurry suspicious photograph (a polaroid showing a mysterious shadow), tilted.
+3. A white ceramic sake bottle (tokkuri) with a small sake cup.
+4. Two fresh orange carrots with green leaves.
+5. A single red rose with a green stem and two leaves.
+6. A fresh green cucumber.
+7. Two white rice balls (onigiri) wrapped with dark seaweed, on a bamboo leaf.
+8. A sheet of music with notes, rolled at one end, tied with a red ribbon.
+9. Tsukimi dango: three white rice dumplings on a skewer, with a small pampas grass leaf.
+10. A thick old magic book with a purple cover, a gold corner, and a small crescent moon emblem.
+11. Three inari sushi (rice in fried tofu pouches) on a small wooden plate.
+12. An empty sanbo: a small unpainted wooden Shinto offering stand (a square tray on a box-shaped base with a round hole on the front).
+Background: solid flat pure magenta (#FF00FF) everywhere. No text, no shadows, no grid lines.
+```
+
+```
+python tools/import_sheet.py 공물.png items --names offer_konpeito,offer_scoop,offer_sake,offer_carrot,offer_rose,offer_cucumber,offer_onigiri,offer_score,offer_dango,offer_grimoire,offer_inari,offer_sanbo --grid 3x4 --keep 0.03
+```
+
+답례품 시트는 같은 방법으로, 11개 (마지막 칸은 비움):
+
+```
+Using the attached image ONLY as an art style reference (thick soft dark-brown outline,
+flat colors with gentle shading, cute chibi game-asset style), draw 11 small keepsake gift icons as ONE sheet,
+3 rows x 4 columns (the last cell stays empty), every icon about the same size, each centered in its own cell,
+with clear magenta space between them so nothing touches:
+1. A shiny brown acorn with a little sparkle.
+2. A folded newspaper with a big autograph signature scribble on it (no readable letters).
+3. A purple gourd (hyotan) sake flask with a red cord.
+4. A four-leaf clover.
+5. A small light-blue heart-shaped charm with a closed eye drawn on it, hanging from thin blue cords.
+6. A metal wrench with a small cucumber-green handle.
+7. A folding fan decorated with pale pink cherry blossoms.
+8. Two grilled eel skewers (kabayaki).
+9. A small wooden medicine box with a white rabbit mark, and two pills.
+10. A glowing red-orange crystal shard (philosopher's stone fragment).
+11. A big red ribbon bow with white frills.
+Background: solid flat pure magenta (#FF00FF) everywhere. No text, no shadows, no grid lines.
+```
+
+```
+python tools/import_sheet.py 답례품.png items --names gift_fairies,gift_aya,gift_suika,gift_tewi,gift_koishi,gift_nitori,gift_yuyuko,gift_mystia,gift_reisen,gift_patchouli,gift_yukari --grid 3x4 --keep 0.03 --append
+```
+
+## 누에 (UFO 의 주인, 손님 시트)
+
+기준 그림 → 손님 시트 순서. 배경은 초록.
+
+- 누에: `Houjuu Nue from Touhou Project: short messy black hair, red eyes, a mischievous cat-like grin with a small fang, a short black one-piece dress with a small red bow at the collar, black thigh-high socks, red shoes. Asymmetric strange wings on her back, close to her body: three red curved blade-shaped wings on one side and three blue arrow-tipped tail-like wings on the other side. She holds a small black trident.`
+  손님 특기: `9. Holding up her trident with a sly grin, a tiny red UFO floating next to her head. 10. Pointing at the viewer and laughing mischievously, the tiny UFO spinning.`
+
+```
+python tools/import_sheet.py 누에.png nue --preset guest
+```

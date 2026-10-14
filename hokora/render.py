@@ -490,6 +490,8 @@ GUESTS: dict[str, Character] = {
                       dress="#FFFFFF", dress_dark="#DDDDDD", sleeves="#FFFFFF", shoes="#2E2626"),
     "star": Character(key="star", name="스타 사파이어", hair="#2E2630", hair_dark="#1C161E", eyes="#5A4A5A",
                       dress="#3A5CC0", dress_dark="#2A4494", sleeves="#FFFFFF"),
+    "nue": Character(key="nue", name="호쥬 누에", hair="#1E1A22", hair_dark="#0E0B12", eyes="#C0303A",
+                     dress="#26222C", dress_dark="#141118", sleeves="#26222C", shoes="#C0303A"),   # UFO 의 주인
     "aya": Character(key="aya", name="샤메이마루 아야", hair="#2A2226", hair_dark="#161014", eyes="#B0343A",
                      dress="#2E2A30", dress_dark="#1A171C", sleeves="#FFFFFF", shoes="#B0343A"),
     "suika": Character(key="suika", name="이부키 스이카", hair="#E08A3C", hair_dark="#C06E26", eyes="#8A5A2A",
