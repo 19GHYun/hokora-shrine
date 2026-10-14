@@ -61,7 +61,22 @@ def fullscreen_app_running(games_only: bool = False) -> bool:
     except (AttributeError, OSError):
         return False
     # 2 = QUNS_BUSY(전체화면 앱), 3 = QUNS_RUNNING_D3D_FULL_SCREEN, 4 = QUNS_PRESENTATION_MODE
-    return state.value in ((3, 4) if games_only else (2, 3, 4))
+    if state.value not in ((3, 4) if games_only else (2, 3, 4)):
+        return False
+    return not foreground_is_ours()       # 화면을 덮는 우리 창(길 그리기 판)은 전체화면 앱이 아님
+
+
+def foreground_is_ours() -> bool:
+    """맨 앞 창이 이 프로그램의 창인지."""
+    if not IS_WIN:
+        return False
+    user32 = ctypes.windll.user32
+    hwnd = user32.GetForegroundWindow()
+    if not hwnd:
+        return False
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(ctypes.c_void_p(hwnd), ctypes.byref(pid))
+    return pid.value == os.getpid()
 
 
 class _LastInputInfo(ctypes.Structure):

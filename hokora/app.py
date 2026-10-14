@@ -385,6 +385,8 @@ class Game(QObject):
         전용 전체화면 게임·발표 모드에서만 숨는다 (맨 위로 올리다 게임을 방해하지 않게).
         """
         busy = winutil.fullscreen_app_running(games_only=self.state.fullscreen_show)
+        if self._ink_canvas is not None:      # 길 그리기 판이 화면을 덮고 있는 동안은 숨지 않음
+            busy = False
         if busy != self.hidden_for_fullscreen:
             self.hidden_for_fullscreen = busy
             for w in self.windows():

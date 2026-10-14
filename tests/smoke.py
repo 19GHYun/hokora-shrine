@@ -785,6 +785,12 @@ def t_goods():
     check("그린 길 = 발판", made is not None and pc is not None and game.ink[-1].win.isVisible()
           and game.platform(pc.id, xm, 0.0) is not None
           and (game.find_landing(xm, pc.y_at(xm) - 30, pc.y_at(xm) + 5) or (0, 0))[1] == pc.id)
+    real = hk.winutil.fullscreen_app_running
+    hk.winutil.fullscreen_app_running = lambda games_only=False: True    # 화면을 덮는 그리기 판 = 전체화면으로 보임
+    game._watch()
+    check("그리는 동안은 전체화면으로 숨지 않음", game._ink_canvas is canvas and canvas.isVisible()
+          and not game.hidden_for_fullscreen)
+    hk.winutil.fullscreen_app_running = real
     canvas.close()
     check("다 그렸어요 → 색 기억", game._ink_canvas is None and s.ink_color == "shu")
     steep = [x for x in pc.xs if pc.slope_at(x) > 0.65] if pc else []
