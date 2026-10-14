@@ -699,6 +699,62 @@ def t_life():
         c.close()
 
 
+def t_options():
+    """설정: 센본토리이 숨기기, 전체화면에서도 돌아다니기, 손님 방울."""
+    calm()
+    s.torii = max(s.torii, 4)
+    game._sync_torii()
+    check("센본토리이 보임", game.torii_row.isVisible() and game.torii_row in game.windows())
+    game.set_show_torii(False)
+    check("센본토리이 숨기기 (수입은 그대로)", not game.torii_row.isVisible()
+          and game.torii_row not in game.windows() and torii.income(s) == s.torii // 2)
+    game.set_show_torii(True)
+    check("센본토리이 다시 보이기", game.torii_row.isVisible())
+
+    real = hk.winutil.fullscreen_app_running
+    hk.winutil.fullscreen_app_running = lambda games_only=False: not games_only     # 영상·브라우저 전체화면
+    game._watch()
+    check("전체화면이면 숨음 (기본)", game.hidden_for_fullscreen and not game.shrine.isVisible())
+    game.set_fullscreen_show(True)
+    check("전체화면에서도 돌아다니기", not game.hidden_for_fullscreen and game.shrine.isVisible()
+          and game.torii_row.isVisible() and all(p.isVisible() for p in game.pets))
+    hk.winutil.fullscreen_app_running = lambda games_only=False: True               # 전용 전체화면 게임
+    game._watch()
+    check("전용 전체화면 게임에선 켜도 숨음", game.hidden_for_fullscreen and not game.shrine.isVisible())
+    hk.winutil.fullscreen_app_running = real
+    game.set_fullscreen_show(False)
+    game._watch()
+    check("전체화면 끝나면 다시 보임", not game.hidden_for_fullscreen and game.shrine.isVisible())
+
+    toasts: list = []
+    G["tray"] = game.tray
+    game.tray = type("FakeTray", (), {"showMessage": lambda self, *a: toasts.append(a)})()
+    s.guest_bell, s.saisen = False, 5_000
+    game.ring_bell("aya")
+    check("손님 방울 없으면 알림 없음", not toasts)
+    check("손님 방울: 새전 모자라면 못 삼", not game.buy_guest_bell() and not s.guest_bell and s.saisen == 5_000)
+    s.saisen = guests.BELL_PRICE + 1_000
+    game.open_settings()
+    win = [w for w in game._cards if type(w).__name__ == "SettingsWindow"][-1]
+    G["settings_h"] = win.height()
+    check("설정 창: 방울 사기 버튼", win.bell_buy.isVisible() and not win.bell_check.isVisible()
+          and win.bell_btn.isEnabled())
+    win.bell_btn.click()
+    check("손님 방울 사기", s.guest_bell and s.guest_bell_on and s.saisen == 1_000
+          and win.bell_check.isVisible() and win.bell_check.isChecked() and not win.bell_buy.isVisible(),
+          (s.saisen, win.height()))
+    win.close()
+    check("손님이 오면 알림", game.visits.start("tewi") and toasts and "테위" in toasts[-1][1], toasts[-1:])
+    game.set_guest_bell(False)
+    n = len(toasts)
+    game.ring_bell("aya")
+    check("손님 방울 끄기", len(toasts) == n)
+    game.set_guest_bell(True)
+    if game.visits.visit:
+        game.visits.visit.cancel()
+    game.tray = G["tray"]
+
+
 def t_end():
     app.quit()
 
@@ -710,7 +766,7 @@ STEPS = [(t_core, 3000), (t_core2, 2500), (t_thief, 1600), (t_skill, 1800), (t_a
          (t_youmu, 0), (t_meiling, 11000), (t_reisen, 1000), (t_weather, 1500), (t_cutin, 500), (t_yukari, 6000),
          (t_yukari2, 1000), (t_patchouli, 1500), (t_expedition, 2200),
          (t_expedition2, 1000), (t_achieve, 1000), (t_fishing, 1000), (t_festival, 1000),
-         (t_crowd, 1500), (t_crowd2, 1500), (t_crowd3, 2500), (t_tutorial, 2000), (t_life, 1000), (t_settings, 500), (t_end, 0)]
+         (t_crowd, 1500), (t_crowd2, 1500), (t_crowd3, 2500), (t_tutorial, 2000), (t_options, 1500), (t_life, 1000), (t_settings, 500), (t_end, 0)]
 
 
 def run(i: int = 0) -> None:

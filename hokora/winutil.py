@@ -47,8 +47,11 @@ def keep_topmost(hwnd: int) -> None:
                                           _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE)
 
 
-def fullscreen_app_running() -> bool:
-    """전체화면 게임·영상·발표 중이면 True (Windows 가 알림을 멈추는 조건과 같음)."""
+def fullscreen_app_running(games_only: bool = False) -> bool:
+    """전체화면 게임·영상·발표 중이면 True (Windows 가 알림을 멈추는 조건과 같음).
+
+    games_only 면 전용 전체화면 게임(D3D)·발표 모드만 True — 영상·브라우저 전체화면은 False.
+    """
     if not IS_WIN:
         return False
     state = ctypes.c_int(0)
@@ -58,7 +61,7 @@ def fullscreen_app_running() -> bool:
     except (AttributeError, OSError):
         return False
     # 2 = QUNS_BUSY(전체화면 앱), 3 = QUNS_RUNNING_D3D_FULL_SCREEN, 4 = QUNS_PRESENTATION_MODE
-    return state.value in (2, 3, 4)
+    return state.value in ((3, 4) if games_only else (2, 3, 4))
 
 
 class _LastInputInfo(ctypes.Structure):

@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
 
 from . import winutil
+from .guests import BELL_PRICE
 from .panel import STYLE
 
 if TYPE_CHECKING:
@@ -54,11 +55,33 @@ class SettingsWindow(QWidget):
         v.addWidget(QLabel("보기", objectName="section"))
         check("계절·날씨 연출  (벚꽃잎·단풍·눈·반딧불·비·안개)", s.season_fx, game.set_season_fx)
         check("신사 옆에 장식 보이기  (꺼도 효과는 그대로)", s.show_decor, game.set_show_decor)
+        check("센본토리이 보이기  (꺼도 분당 새전은 그대로)", s.show_torii, game.set_show_torii)
+        check("전체화면에서도 돌아다니기  (영상·브라우저 전체화면)", s.fullscreen_show, game.set_fullscreen_show,
+              "끄면 전체화면일 때 모두 숨어요. 전용 전체화면 게임에서는 켜도 숨어요 (게임 방해 방지)")
         self.size_btns = self._choices(v, "크기", SIZES, s.size_scale, lambda k: game.on_action("scale", k))
         self.crowd_btns = self._choices(v, "동시에 나와 있는 친구", CROWD, s.max_out, game.set_max_out)
         crowd_tip = QLabel("정하면 나머지 친구는 신사에서 쉬다가 10분마다 번갈아 나와요.", objectName="goal")
         crowd_tip.setWordWrap(True)
         v.addWidget(crowd_tip)
+
+        v.addWidget(QLabel("🔔 손님 방울", objectName="section"))
+        self.bell_check = check("손님이 오면 알려 주기  (Windows 알림 + 딸랑~)", s.guest_bell_on, game.set_guest_bell,
+                                "다른 일을 하고 있어도 손님을 놓치지 않아요")
+        self.bell_buy = QWidget()
+        brow = QHBoxLayout(self.bell_buy)
+        brow.setContentsMargins(0, 0, 0, 0)
+        btip = QLabel("손님이 찾아오면 Windows 알림으로 알려 주는 방울이에요.", objectName="goal")
+        btip.setWordWrap(True)
+        self.bell_btn = QPushButton(f"달기  {BELL_PRICE:,}", objectName="upgrade")
+        self.bell_btn.setCursor(Qt.PointingHandCursor)
+        self.bell_btn.setEnabled(s.saisen >= BELL_PRICE)
+        self.bell_btn.setToolTip(f"새전 {BELL_PRICE:,}" + ("" if s.saisen >= BELL_PRICE else " — 새전이 모자라요"))
+        self.bell_btn.clicked.connect(self._buy_bell)
+        brow.addWidget(btip, 1)
+        brow.addWidget(self.bell_btn)
+        v.addWidget(self.bell_buy)
+        self.bell_check.setVisible(s.guest_bell)
+        self.bell_buy.setVisible(not s.guest_bell)
 
         v.addWidget(QLabel("시스템", objectName="section"))
         if winutil.IS_WIN:
@@ -107,6 +130,13 @@ class SettingsWindow(QWidget):
             b.setObjectName("small" if k == value else "ghost")
             b.style().unpolish(b)
             b.style().polish(b)
+
+    def _buy_bell(self) -> None:
+        if self.game.buy_guest_bell():
+            self.bell_buy.hide()
+            self.bell_check.setChecked(True)
+            self.bell_check.show()
+            self.adjustSize()
 
     def _tutorial(self) -> None:
         self.close()

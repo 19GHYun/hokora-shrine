@@ -188,6 +188,10 @@ class GameState:
     weather_magic: str = ""          # 파츄리의 날씨 마법
     weather_magic_until: float = 0.0
     cutin: bool = True               # 스펠카드 컷인
+    show_torii: bool = True          # 센본토리이 줄을 화면에 보일지 (꺼도 분당 새전은 그대로)
+    fullscreen_show: bool = False    # 영상·브라우저 전체화면에서도 숨지 않고 돌아다니기
+    guest_bell: bool = False         # 손님 방울을 샀나 (손님이 오면 Windows 알림)
+    guest_bell_on: bool = True       # 산 뒤 켜고 끄기
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
     @property

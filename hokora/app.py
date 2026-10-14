@@ -31,7 +31,7 @@ from .daily import StampCard
 from .decor import DecorWindow
 from .diary import MIN_AWAY, PetalBurst, away_card, offline_income
 from .events import Events
-from .guests import Flash, Visits
+from .guests import BELL_PRICE, BELL_TEXT, Flash, Visits
 from .omikuji import FortuneSlip, can_draw
 from .omikuji import draw as draw_omikuji
 from .panel import ShrinePanel
@@ -183,6 +183,7 @@ class Game(QObject):
             sc.availableGeometryChanged.connect(self._on_screen_changed)
         app.screenAdded.connect(self._on_screen_added)
         app.screenRemoved.connect(self._on_screen_changed)
+        self.last_bell = ""
         self.tray = self._make_tray()
 
     # ── 화면 ──
@@ -266,7 +267,7 @@ class Game(QObject):
         fx = [self.fx] if self.fx.kind and self.state.season_fx else []   # 흩날림·날씨는 맨 뒤
         fx += [self.wfx] if self.wfx.kind and self.state.season_fx else []
         fx += [self.ffx] if festival.active(self.state) else []
-        row = [self.torii_row] if self.state.torii else []
+        row = [self.torii_row] if self.state.torii and self.state.show_torii else []
         return [*fx, *row, *decors, self.shrine, *self.pets, *self.guests]
 
     @property
@@ -353,8 +354,12 @@ class Game(QObject):
             self.check_unlocks()
 
     def _watch(self) -> None:
-        """전체화면(게임·영상)이면 숨기고, 아니면 다시 맨 위로."""
-        busy = winutil.fullscreen_app_running()
+        """전체화면(게임·영상)이면 숨기고, 아니면 다시 맨 위로.
+
+        '전체화면에서도 돌아다니기'를 켜면 영상·브라우저 전체화면에선 그대로 두고,
+        전용 전체화면 게임·발표 모드에서만 숨는다 (맨 위로 올리다 게임을 방해하지 않게).
+        """
+        busy = winutil.fullscreen_app_running(games_only=self.state.fullscreen_show)
         if busy != self.hidden_for_fullscreen:
             self.hidden_for_fullscreen = busy
             for w in self.windows():
@@ -714,7 +719,7 @@ class Game(QObject):
         name = torii.title(s)
         tip = f"센본토리이 {s.torii:,}개  ·  분당 새전 +{torii.income(s)}" + (f"  ·  「{name}」" if name else "")
         self.torii_row.setup(s.torii, self.scale, bool(self._night), tip)
-        show = s.torii > 0 and not self.hidden_for_fullscreen
+        show = s.torii > 0 and s.show_torii and not self.hidden_for_fullscreen
         if show != self.torii_row.isVisible():
             if show:
                 g = self.ground_under(self.shrine.pos_x)
@@ -1119,6 +1124,47 @@ class Game(QObject):
     def set_pc_react(self, on: bool) -> None:
         self.state.pc_react = on
         self.save()
+
+    def set_show_torii(self, on: bool) -> None:
+        """센본토리이 줄을 보이거나 숨김. 숨겨도 분당 새전은 그대로."""
+        self.state.show_torii = on
+        self._sync_torii()
+        log.info("센본토리이 %s", "보임" if on else "숨김")
+        self.save()
+
+    def set_fullscreen_show(self, on: bool) -> None:
+        self.state.fullscreen_show = on
+        self._watch()
+        log.info("전체화면에서도 돌아다니기: %s", "켬" if on else "끔")
+        self.save()
+
+    # ── 손님 방울: 손님이 오면 Windows 알림 ──
+    def buy_guest_bell(self) -> bool:
+        s = self.state
+        if s.guest_bell or s.saisen < BELL_PRICE:
+            return False
+        s.saisen -= BELL_PRICE
+        s.guest_bell = s.guest_bell_on = True
+        self.shrine.set_saisen(s.saisen)
+        self._say_at_shrine("🔔 손님 방울을 달았다! 손님이 오면 딸랑~ 알려 줄게")
+        log.info("손님 방울 삼")
+        self.save()
+        return True
+
+    def set_guest_bell(self, on: bool) -> None:
+        self.state.guest_bell_on = on
+        self.save()
+
+    def ring_bell(self, kind: str) -> None:
+        s = self.state
+        if not (s.guest_bell and s.guest_bell_on):
+            return
+        text = BELL_TEXT.get(kind, "손님이 찾아왔어요!")
+        self.last_bell = text
+        if self.tray is not None:
+            self.tray.showMessage("🔔 딸랑딸랑~ 손님이 왔어요", text, self.app.windowIcon(), 6000)
+        self._say_at_shrine("🔔 딸랑딸랑~ 손님이다!")
+        log.info("손님 방울: %s", kind)
 
     # ── 신사 명함 ──
     def make_card(self) -> None:

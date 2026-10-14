@@ -54,6 +54,20 @@ VISITS = {
     "patchouli": (("patchouli",), 2),
     "yukari": (("yukari",), 3),
 }
+BELL_PRICE = 10_000       # 손님 방울 (설정 창에서 삼)
+BELL_TEXT = {  # 손님 방울 알림 글
+    "fairies": "빛의 세 요정이 장난치러 왔어요!",
+    "aya": "아야가 취재하러 왔어요!",
+    "suika": "스이카가 술 마시러 왔어요!",
+    "tewi": "테위가 놀러 왔어요!",
+    "koishi": "코이시가 어딘가 숨어 있어요… 찾아볼까요?",
+    "nitori": "니토리가 노점을 열었어요!",
+    "yuyuko": "유유코가 배고프대요!",
+    "mystia": "미스티아가 포장마차를 열었어요!",
+    "reisen": "레이센이 약을 팔러 왔어요!",
+    "patchouli": "파츄리가 날씨 마법을 걸어 주러 왔어요!",
+    "yukari": "유카리가 틈으로 찾아왔어요!",
+}
 VISIT_CHECK = 60.0        # 이 간격으로 손님이 올지 주사위
 VISIT_CHANCE = 0.15
 VISIT_COOLDOWN = 15 * 60  # 손님이 다녀간 뒤 이만큼은 쉼 → 평균 20분쯤에 한 번
@@ -1876,6 +1890,7 @@ class Visits:
         for key in VISITS[kind][0]:
             s.guest_visits[key] = s.guest_visits.get(key, 0) + 1
         log.info("손님 방문: %s", kind)
+        self.game.ring_bell(kind)
         return True
 
     def _finish(self) -> None:
