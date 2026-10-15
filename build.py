@@ -91,6 +91,7 @@ def main() -> int:
            "--name", EXE_NAME,
            "--icon", str(ICON),
            "--version-file", str(version_file),
+           "--hidden-import", "winsound",       # 손님 방울 소리 (자동으로 안 들어가는 경우가 있었음)
            # AI 등으로 만든 캐릭터 그림 (없는 캐릭터는 코드 그림)
            "--add-data", f"{HERE / 'hokora' / 'sprites'}{';' if sys.platform == 'win32' else ':'}hokora/sprites",
            "--specpath", str(BUILD_DIR),

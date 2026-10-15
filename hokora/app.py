@@ -325,6 +325,7 @@ class Game(QObject):
             QTimer.singleShot(2500, lambda: self._show_diary(self._away, time.time() - self._away,
                                                              self._away_earned, offline=True))
         log.info("시작 — 캐릭터 %d, 신사 %s", len(self.pets), self.state.stage_name)
+        log.info("방울 소리: %s", "가능" if sound.available() else "불가 (winsound 없음)")
 
     # ── 시간 ──
     def _tick(self) -> None:

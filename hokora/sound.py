@@ -74,6 +74,10 @@ def suzu_path() -> Path:
     return path
 
 
+def available() -> bool:
+    return winsound is not None
+
+
 def play_suzu() -> bool:
     """방울 소리를 비동기로 (끝날 때까지 기다리지 않음). 냈으면 True."""
     if os.environ.get("HOKORA_MUTE") == "1" or winsound is None:

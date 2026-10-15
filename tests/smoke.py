@@ -752,6 +752,7 @@ def t_options():
     n_sound = len(SOUNDS)
     check("손님이 오면 알림", game.visits.start("tewi") and toasts and "테위" in toasts[-1][1], toasts[-1:])
     check("손님이 오면 방울 소리", len(SOUNDS) == n_sound + 1)
+    check("소리 재생 모듈 (winsound)", hk_sound.available())
     game.set_guest_bell_sound(False)
     game.ring_bell("aya")
     check("방울 소리 끄기 (알림은 그대로)", len(SOUNDS) == n_sound + 1 and "아야" in toasts[-1][1])
