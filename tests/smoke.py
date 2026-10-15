@@ -21,7 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TMP = Path(tempfile.mkdtemp(prefix="hokora_smoke_"))
-os.environ.update(APPDATA=str(TMP / "appdata"), HOKORA_ALL="1", HOKORA_NAP_AFTER="999999",
+os.environ.update(APPDATA=str(TMP / "appdata"), HOKORA_ALL="1", HOKORA_NAP_AFTER="999999", HOKORA_MUTE="1",
                   HOKORA_SEASON="summer", HOKORA_NIGHT="0", HOKORA_WEATHER="cloudy")
 if os.environ.get("HOKORA_SMOKE_SHOW") != "1":
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -35,6 +35,7 @@ from hokora import app as hk  # noqa: E402
 from hokora import affection as aff  # noqa: E402
 from hokora import cucumber, daily, guests, ink, offering, omamori, photo, play, prayer, torii, wardrobe  # noqa: E402
 from hokora import ufo as hk_ufo  # noqa: E402
+from hokora import sound as hk_sound  # noqa: E402
 from hokora import omikuji as hk_omikuji  # noqa: E402
 from hokora.state import GameState  # noqa: E402
 from hokora import events as hk_events  # noqa: E402
@@ -58,6 +59,8 @@ photo.to_clipboard = lambda img: None
 play.TAG_TIME, play.DUEL_TIME = 4.0, 2.0
 guests.FAIRY_PRANK, guests.SUIKA_STAY = 6.0, (4.0, 4.0)
 
+SOUNDS: list[str] = []
+hk_sound.play_suzu = lambda: SOUNDS.append("suzu") or True      # 진짜 소리는 내지 않고 기록만
 game = hk.Game(app)
 game.start()
 s = game.state
@@ -739,13 +742,25 @@ def t_options():
     win = [w for w in game._cards if type(w).__name__ == "SettingsWindow"][-1]
     G["settings_h"] = win.height()
     check("설정 창: 방울 사기 버튼", win.bell_buy.isVisible() and not win.bell_check.isVisible()
-          and win.bell_btn.isEnabled())
+          and not win.bell_sound.isVisible() and win.bell_btn.isEnabled())
     win.bell_btn.click()
     check("손님 방울 사기", s.guest_bell and s.guest_bell_on and s.saisen == 1_000
-          and win.bell_check.isVisible() and win.bell_check.isChecked() and not win.bell_buy.isVisible(),
+          and win.bell_check.isVisible() and win.bell_check.isChecked() and not win.bell_buy.isVisible()
+          and win.bell_sound.isVisible() and win.bell_sound_check.isChecked(),
           (s.saisen, win.height()))
     win.close()
+    n_sound = len(SOUNDS)
     check("손님이 오면 알림", game.visits.start("tewi") and toasts and "테위" in toasts[-1][1], toasts[-1:])
+    check("손님이 오면 방울 소리", len(SOUNDS) == n_sound + 1)
+    game.set_guest_bell_sound(False)
+    game.ring_bell("aya")
+    check("방울 소리 끄기 (알림은 그대로)", len(SOUNDS) == n_sound + 1 and "아야" in toasts[-1][1])
+    game.set_guest_bell_sound(True)
+    wav = Path(hk_sound.suzu_path())
+    import wave as _wave
+    with _wave.open(str(wav), "rb") as w:
+        check("방울 소리 파일 (코드로 합성)", w.getframerate() == hk_sound.RATE and w.getnframes() > hk_sound.RATE,
+              wav.stat().st_size)
     game.set_guest_bell(False)
     n = len(toasts)
     game.ring_bell("aya")

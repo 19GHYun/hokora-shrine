@@ -192,6 +192,7 @@ class GameState:
     fullscreen_show: bool = False    # 영상·브라우저 전체화면에서도 숨지 않고 돌아다니기
     guest_bell: bool = False         # 손님 방울을 샀나 (손님이 오면 Windows 알림)
     guest_bell_on: bool = True       # 산 뒤 켜고 끄기
+    guest_bell_sound: bool = True    # 손님 방울: 딸랑딸랑 소리도 냄
     goods: list[str] = field(default_factory=list)   # 새전으로 연 놀잇감 (goods.py: brush·room)
     ink_color: str = "sumi"          # 요술 붓 색
     ink_drawn: int = 0               # 그린 길 수

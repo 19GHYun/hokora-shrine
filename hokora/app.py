@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QMessageBox, QSystemTrayIcon
 from . import __version__, winutil
 from . import affection as aff
 from . import achievements, daily, expedition, festival, fishing, omamori, photo, season, torii, tutorial, wardrobe, weather
-from . import card, cucumber, goods, ink, lifesense, moon, offering, room, ufo
+from . import card, cucumber, goods, ink, lifesense, moon, offering, room, sound, ufo
 from .settings import SettingsWindow
 from .diary import DiaryCard
 from .guests import fade as fade_window
@@ -1531,6 +1531,14 @@ class Game(QObject):
         self.state.guest_bell_on = on
         self.save()
 
+    def set_guest_bell_sound(self, on: bool) -> None:
+        self.state.guest_bell_sound = on
+        log.info("손님 방울 소리: %s", "켬" if on else "끔")
+        self.save()
+
+    def preview_bell(self) -> None:
+        sound.play_suzu()
+
     def ring_bell(self, kind: str) -> None:
         s = self.state
         if not (s.guest_bell and s.guest_bell_on):
@@ -1539,6 +1547,8 @@ class Game(QObject):
         self.last_bell = text
         if self.tray is not None:
             self.tray.showMessage("🔔 딸랑딸랑~ 손님이 왔어요", text, self.app.windowIcon(), 6000)
+        if s.guest_bell_sound and not self.hidden_for_fullscreen:   # 게임·영상 전체화면 중엔 소리 안 냄
+            sound.play_suzu()
         self._say_at_shrine("🔔 딸랑딸랑~ 손님이다!")
         log.info("손님 방울: %s", kind)
 

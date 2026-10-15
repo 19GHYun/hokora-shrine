@@ -67,6 +67,21 @@ class SettingsWindow(QWidget):
         v.addWidget(QLabel("🔔 손님 방울", objectName="section"))
         self.bell_check = check("손님이 오면 알려 주기  (Windows 알림 + 딸랑~)", s.guest_bell_on, game.set_guest_bell,
                                 "다른 일을 하고 있어도 손님을 놓치지 않아요")
+        self.bell_sound = QWidget()                      # 방울 소리 켜고 끄기 + 들어보기
+        srow = QHBoxLayout(self.bell_sound)
+        srow.setContentsMargins(0, 0, 0, 0)
+        self.bell_sound_check = QCheckBox("방울 소리도 내기  (딸랑딸랑)")
+        self.bell_sound_check.setChecked(s.guest_bell_sound)
+        self.bell_sound_check.setCursor(Qt.PointingHandCursor)
+        self.bell_sound_check.setToolTip("게임·영상을 전체화면으로 볼 때는 소리를 내지 않아요")
+        self.bell_sound_check.toggled.connect(game.set_guest_bell_sound)
+        listen = QPushButton("▶ 들어보기", objectName="ghost")
+        listen.setCursor(Qt.PointingHandCursor)
+        listen.clicked.connect(game.preview_bell)
+        srow.addWidget(self.bell_sound_check)
+        srow.addWidget(listen)
+        srow.addStretch(1)
+        v.addWidget(self.bell_sound)
         self.bell_buy = QWidget()
         brow = QHBoxLayout(self.bell_buy)
         brow.setContentsMargins(0, 0, 0, 0)
@@ -81,6 +96,7 @@ class SettingsWindow(QWidget):
         brow.addWidget(self.bell_btn)
         v.addWidget(self.bell_buy)
         self.bell_check.setVisible(s.guest_bell)
+        self.bell_sound.setVisible(s.guest_bell)
         self.bell_buy.setVisible(not s.guest_bell)
 
         v.addWidget(QLabel("시스템", objectName="section"))
@@ -136,6 +152,7 @@ class SettingsWindow(QWidget):
             self.bell_buy.hide()
             self.bell_check.setChecked(True)
             self.bell_check.show()
+            self.bell_sound.show()
             self.adjustSize()
 
     def _tutorial(self) -> None:
