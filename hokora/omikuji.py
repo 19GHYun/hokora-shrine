@@ -10,7 +10,7 @@ from PySide6.QtCore import QPoint, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
-from . import omamori, weather
+from . import omamori, training, weather
 from .render import CHARACTERS
 from .state import GameState
 
@@ -58,7 +58,9 @@ def can_draw(s: GameState, today: date | None = None) -> bool:
 def draw(s: GameState, rng: random.Random | None = None, today: date | None = None) -> Draw:
     """오늘의 운세를 뽑고 새전을 준다 (하루 한 번 — 이미 뽑았으면 호출하지 말 것)."""
     rng = rng or random.Random()
-    pool = FORTUNES[:2] if s.fate_boost else FORTUNES   # 레밀리아가 운명을 조작했으면 대길·중길만
+    fate = s.fate_boost
+    remi = training.bonus(s, "remilia")                 # 레밀리아 수련: Lv.5 부터 대길만, 조작된 운명 보상 +5%·Lv
+    pool = (FORTUNES[:1] if remi >= 4 else FORTUNES[:2]) if fate else FORTUNES   # 운명 조작이면 대길·중길만
     lucky = weather.current().lucky                     # 여우비: 대길·중길 2배
     fortune = rng.choices(pool, weights=[f.weight * (2 if lucky and f in FORTUNES[:2] else 1) for f in pool])[0]
     s.fate_boost = False
@@ -67,7 +69,7 @@ def draw(s: GameState, rng: random.Random | None = None, today: date | None = No
         s.omikuji_extra -= 1
     elif s.omikuji_date != today_s:
         s.omikuji_extra = 0                                   # 날이 바뀌면 남은 "한 번 더"는 사라짐
-    reward = int(fortune.reward * s.shrine_level * (1 + omamori.bonus(s, "omikuji")))
+    reward = int(fortune.reward * s.shrine_level * (1 + omamori.bonus(s, "omikuji")) * (1 + 0.05 * remi if fate else 1))
     s.add_saisen(reward)
     s.omikuji_date = (today or date.today()).isoformat()
     s.omikuji_count += 1

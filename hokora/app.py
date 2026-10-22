@@ -20,6 +20,7 @@ from . import __version__, winutil
 from . import affection as aff
 from . import achievements, daily, expedition, festival, fishing, omamori, photo, season, torii, tutorial, wardrobe, weather
 from . import card, cucumber, goods, ink, lifesense, moon, offering, room, sound, ufo
+from . import fireworks, sengu, training
 from .settings import SettingsWindow
 from .diary import DiaryCard
 from .guests import fade as fade_window
@@ -156,6 +157,8 @@ class Game(QObject):
                                    self.state.look_stage)
         if self.state.shrine_skin in SHRINE_SKINS:
             self.shrine.set_skin(self.state.shrine_skin)
+        self.shrine.set_building(sengu.building(self.state))   # 식년천궁 공사 중이면 비계
+        self.fireworks_show: fireworks.FireworksShow | None = None
         self.torii_row = ToriiRow(self)
         self.offer_tray = offering.OfferTray(self)     # 신사 앞 공물상
         self.shrine.set_saisen(self.state.saisen)
@@ -320,6 +323,7 @@ class Game(QObject):
         QTimer.singleShot(5000, self._check_expeditions)
         QTimer.singleShot(6500, self._check_achievements)
         QTimer.singleShot(4200, self._tutorial_show)
+        QTimer.singleShot(5500, self._sengu_tick)                # 꺼 둔 동안 공사가 끝났을 수도
         self._refresh_festival()
         if self._away >= MIN_AWAY:
             QTimer.singleShot(2500, lambda: self._show_diary(self._away, time.time() - self._away,
@@ -682,6 +686,7 @@ class Game(QObject):
         self._new_day()
         self._refresh_season()
         self._festival_tick()
+        self._sengu_tick()
         self._crowd_n += 1
         self._crowd_tick(rotate=self._crowd_n % 20 == 0)   # 10분마다 번갈아
         self._check_expeditions()
@@ -789,7 +794,9 @@ class Game(QObject):
                     "wpull": self.pull_wardrobe, "wear": lambda v: self.wear(*v), "wfx": lambda v: self.set_fx(*v),
                     "exchange": self.exchange_cloth, "shrine_skin": self.shrine_skin, "wbuy": self.buy_outfit,
                     "expedition": lambda v: self.send_expedition(*v), "title": self.set_title,
-                    "festival": lambda _v: self.hold_festival()}
+                    "festival": lambda _v: self.hold_festival(), "sengu": lambda _v: self.start_sengu(),
+                    "fireworks": self.launch_fireworks, "train": self.train_friend,
+                    "fireworks_running": lambda _v: self.fireworks_show is not None}
         return handlers[name](value)
 
     def set_look(self, stage: int) -> None:
@@ -1138,6 +1145,99 @@ class Game(QObject):
             "24시간 뒤에 다시 열 수 있어요"))
         log.info("예대제 끝: 모인 새전 %d, 참배객 %d", earned, tips)
         self.save()
+
+    # ── 식년천궁 ──
+    def start_sengu(self) -> bool:
+        s = self.state
+        price = sengu.cost(s)
+        if not sengu.start(s):
+            return False
+        self.shrine.set_saisen(s.saisen)
+        self.shrine.pop(f"-{price:,}")
+        self.shrine.set_building(True)
+        self._say_at_shrine(f"🏯 식년천궁! {sengu.generation(s) + 1}대째 신사를 짓기 시작했어요 (1시간)")
+        for pet in self.pets:
+            pet.react(True)
+        log.info("식년천궁 시작 (%d) → %d대째", price, sengu.generation(s) + 1)
+        self.save()
+        return True
+
+    def _sengu_tick(self) -> None:
+        s = self.state
+        self.shrine.set_building(sengu.building(s))
+        if not sengu.finish(s):
+            return
+        self.shrine.set_building(False)
+        gen = sengu.generation(s)
+        log.info("식년천궁 완성 → %d대째 (수입 ×%.1f)", gen, sengu.multiplier(s))
+        self._say_at_shrine(f"🏯 {gen}대째 신사 완성!  새전 수입 +{round(sengu.BOOST_EACH * 100 * s.sengu)}%")
+        if not self.hidden_for_fullscreen:
+            burst = PetalBurst(self.shrine.pos_x, self.shrine.y() + self.shrine.height())
+            self.keep(burst)
+            burst.show()
+        self.later(1.0, self._dance)
+        self.show_card(DiaryCard("🏯 식년천궁", [
+            "낡은 신사를 정성껏 허물고, 같은 모습으로 새로 지어 올렸다.",
+            "신님도 새 신사로 옮겨 가셨다. 친구들은 새 나무 냄새에 신이 났다."],
+            f"{gen}대째 신사 · 새전 수입 +{round(sengu.BOOST_EACH * 100 * s.sengu)}% (영구)",
+            f"다음 천궁은 새전 {sengu.cost(s):,}"))
+        self.save()
+
+    # ── 불꽃놀이 봉납 ──
+    def launch_fireworks(self, key: str) -> bool:
+        s = self.state
+        running = self.fireworks_show is not None
+        if fireworks.blocked(s, key, running) or not fireworks.pay(s, key):
+            return False
+        show = fireworks.SIZES[key]
+        self.shrine.set_saisen(s.saisen)
+        self.shrine.pop(f"-{show.price:,}")
+        sc = self.app.screenAt(QPoint(round(self.shrine.pos_x), self.shrine.y())) or self.app.primaryScreen()
+        name = f"{sengu.generation(s)}대째 {s.stage_name}" if s.sengu else s.stage_name
+        w = fireworks.FireworksShow(show, sc.availableGeometry(), self.shrine.pos_x, text=name,
+                                    hidden=lambda: self.hidden_for_fullscreen, on_burst=self._fireworks_cheer)
+        w.destroyed.connect(lambda *_: setattr(self, "fireworks_show", None))
+        self.fireworks_show = w
+        if not self.hidden_for_fullscreen:
+            w.show()
+        self.shrine.raise_()
+        self._say_at_shrine(f"🎆 불꽃놀이 봉납 ({show.name})!")
+        for pet in self.pets:
+            if pet.grounded:
+                pet.act("wave", 1.6)
+        log.info("불꽃놀이 봉납: %s (%d)", show.name, show.price)
+        self.save()
+        return True
+
+    def _fireworks_cheer(self, n: int) -> None:
+        """불꽃이 터질 때 가끔 친구 하나가 "타~마야~!"."""
+        if self.hidden_for_fullscreen or random.random() > 0.35:
+            return
+        cands = [p for p in self.pets if p.grounded and p.state in ("idle", "walk", "sit")]
+        if cands:
+            p = random.choice(cands)
+            p.act(random.choice(("happy", "wave")), 1.4)
+            say(random.choice(fireworks.CHEERS), p.pos_x, p.pos_y - 76, 1.8)
+
+    # ── 친구 수련 ──
+    def train_friend(self, key: str) -> int | None:
+        s = self.state
+        price = training.cost(s, key)
+        lv = training.train(s, key)
+        if lv is None:
+            return None
+        self.shrine.set_saisen(s.saisen)
+        self.shrine.pop(f"-{price:,}")
+        pet = next((p for p in self.pets if p.ch.key == key), None)
+        name, _ = training.EFFECTS[key]
+        if pet is not None and not self.hidden_for_fullscreen:
+            if pet.grounded:
+                pet.act("skill", 1.4)
+            say(f"수련 완료! {name} Lv.{lv}" + ("  (최고!)" if lv >= training.MAX_LV else ""),
+                pet.pos_x, pet.pos_y - 76, 2.4)
+        log.info("수련: %s %s → Lv.%d (%d)", key, name, lv, price)
+        self.save()
+        return lv
 
     # ── 붐빔 조절 ──
     def _eligible(self) -> list[str]:
@@ -1789,6 +1889,23 @@ class Game(QObject):
         head = menu.addAction(f"{pet.ch.name}   {aff.hearts(s, key)}")
         head.setEnabled(False)
         menu.addAction("💬 말 걸기", lambda: self.talk_to(pet))
+        if key in training.EFFECTS:                           # 특기 수련
+            lv, price = training.level(s, key), training.cost(s, key)
+            skill, effect = training.EFFECTS[key]
+            sub = menu.addMenu(f"📿 특기 수련  ({skill} Lv.{lv})")
+            sub.setStyleSheet(MENU_STYLE)
+            info = sub.addAction(f"레벨마다: {effect} · 더 자주")
+            info.setEnabled(False)
+            if price is None:
+                done = sub.addAction("최고 레벨이에요 (Lv.10)")
+                done.setEnabled(False)
+            else:
+                why = training.blocked(s, key)
+                act = sub.addAction(f"Lv.{lv + 1}로 올리기   새전 {price:,}", lambda: self.train_friend(key))
+                act.setEnabled(not why)
+                if why:
+                    note = sub.addAction(why)
+                    note.setEnabled(False)
         menu.addAction("🏠 신사에서 쉬게 하기", lambda: self.set_out(key, False))
         trip = menu.addMenu("🗺 원정 보내기")
         trip.setStyleSheet(MENU_STYLE)

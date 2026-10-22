@@ -14,7 +14,7 @@ import random
 import time
 from typing import TYPE_CHECKING
 
-from . import omamori, weather
+from . import omamori, training, weather
 from .bubble import say
 from .omikuji import can_draw
 from .prayer import charm_active
@@ -117,11 +117,11 @@ class Events:
         if self._doze_until:
             if m.state != "sleep":                       # 쓰다듬거나 들어 올려서 깸
                 self._doze_until = 0.0
-                self._doze_at = now + random.uniform(*DOZE_EVERY)
+                self._doze_at = now + self._doze_gap()
                 self._say(m, random.choice(["앗! 안 잤어요!", "기, 기를 느끼고 있었어요!"]))
             elif now >= self._doze_until:
                 self._doze_until = 0.0
-                self._doze_at = now + random.uniform(*DOZE_EVERY)
+                self._doze_at = now + self._doze_gap()
                 m.act("idle", 2.0)
             elif not self._doze_scolded:
                 sak = next((p for p in self.game.pets if p.ch.key == "sakuya" and p.grounded
@@ -141,6 +141,27 @@ class Events:
             if random.random() < 0.4:
                 self._say(m, "zZ… 문은… 지키고… 있어요…")
 
+    def _doze_gap(self) -> float:
+        """다음에 졸 때까지 (수련할수록 덜 졺: Lv 마다 +15%)."""
+        return random.uniform(*DOZE_EVERY) * (1 + 0.15 * training.bonus(self.game.state, "meiling"))
+
+    def guard_chance(self) -> float:
+        return min(0.97, GUARD_CHANCE + 0.03 * training.bonus(self.game.state, "meiling"))
+
+    def _gain(self, pet: "PetWindow", amount: int) -> None:
+        """특기로 번 새전을 신사에 넣고 +N 표시."""
+        if amount <= 0:
+            return
+        g = self.game
+        g.state.add_saisen(amount)
+        g.shrine.set_saisen(g.state.saisen)
+        g.shrine.pop(f"+{amount:,}")
+        g.check_unlocks()
+
+    def _per_min(self, frac: float) -> int:
+        """분당 수입의 frac 배 (특기 보상을 신사 크기에 맞추려고)."""
+        return round(self.game.state.income_per_min * frac)
+
     def _guard(self, thief: "PetWindow") -> bool:
         """메이링이 깨어 있으면 새전함으로 가는 마리사를 막는다."""
         me = self._meiling()
@@ -149,7 +170,7 @@ class Events:
         if me.state == "sleep":
             self._say(thief, "문지기가 자고 있네~ 헤헤")
             return False
-        if not me.grounded or me.on != thief.on or random.random() > GUARD_CHANCE:
+        if not me.grounded or me.on != thief.on or random.random() > self.guard_chance():
             return False
         me.facing = 1 if thief.pos_x > me.pos_x else -1
         me.act("skill", 1.4)
@@ -233,15 +254,20 @@ class Events:
         key = pet.ch.key
         cool = SKILL_COOLDOWN.get(key)
         now = time.monotonic()
+        if cool is not None:
+            cool *= training.cooldown_scale(self.game.state, key)     # 수련할수록 자주
         if cool is None or now - self._skill_at.get(key, -1e9) < cool or not pet.grounded:
             return False
         if self.game.napping or self.game.hidden_for_fullscreen:
             return False
         self._skill_at[key] = now
+        k = training.bonus(self.game.state, key)
         if key == "reimu":
             pet.act("skill", random.uniform(4, 7))
             if random.random() < 0.3:
                 self._say(pet, random.choice(["오늘도 깨끗하게~", "새전 좀 들어오라~"]))
+            if k:
+                self.game.later(2.0, lambda: self._gain(pet, max(1, self._per_min(0.1 * k))))
         elif key == "cirno":
             pet.act("skill", 1.2)
             target = self._nearest(pet, 260)
@@ -249,6 +275,8 @@ class Events:
                 pet.facing = 1 if target.pos_x > pet.pos_x else -1
                 self.game.later(0.7, lambda: target.grounded and target.react(False))
             self._say(pet, random.choice(["나는 최강이야!", "에잇!", "얼음 맛 좀 봐라!"]))
+            if k:
+                self.game.later(1.2, lambda: self._gain(pet, max(1, self._per_min(0.05 * k))))
         elif key == "sakuya":
             pet.act("skill", 1.2)
             self.game.later(0.9, lambda: self._time_stop(pet))
@@ -258,7 +286,7 @@ class Events:
         elif key == "flandre":
             pet.act("skill", 1.2)
             targets = [o for o in self.game.pets if o is not pet and o.grounded and o.on == pet.on
-                       and abs(o.pos_x - pet.pos_x) < 220]
+                       and abs(o.pos_x - pet.pos_x) < 220 + 20 * k]
             if targets:
                 pet.facing = 1 if targets[0].pos_x > pet.pos_x else -1
             self.game.later(0.6, lambda: self._blast(pet, targets))
@@ -283,23 +311,22 @@ class Events:
         self.game.cutin(pet)
         return True
 
+    def miracle_amount(self) -> int:
+        k = training.bonus(self.game.state, "sanae")
+        return MIRACLE_SAISEN + self._per_min(0.3 * k)
+
     def _miracle(self, sanae: "PetWindow") -> None:
-        g = self.game
-        g.state.add_saisen(MIRACLE_SAISEN)
-        g.shrine.set_saisen(g.state.saisen)
-        g.shrine.pop(f"+{MIRACLE_SAISEN}")
+        self._gain(sanae, self.miracle_amount())
         self._say(sanae, "기적이 일어났어요!")
-        g.check_unlocks()
+
+    def garden_amount(self) -> int:
+        """요우무의 정원 손질: 놓아 둔 장식이 많을수록, 수련할수록 새전이 더."""
+        base = 5 + 3 * len(self.game.state.decor_pos)
+        return round(base * (1 + 0.5 * training.bonus(self.game.state, "youmu")))
 
     def _garden(self, youmu: "PetWindow") -> None:
-        """요우무의 정원 손질: 놓아 둔 장식이 많을수록 새전이 조금 더."""
-        g = self.game
-        gain = 5 + 3 * len(g.state.decor_pos)
-        g.state.add_saisen(gain)
-        g.shrine.set_saisen(g.state.saisen)
-        g.shrine.pop(f"+{gain}")
+        self._gain(youmu, self.garden_amount())
         self._say(youmu, random.choice(["정원 손질 끝!", "베지 못하는 것은 거의 없다!", "가지를 반듯하게~"]))
-        g.check_unlocks()
 
     def _blast(self, flan: "PetWindow", targets: list) -> None:
         """레바테인 한 방: 근처 친구들이 통 튕겨 날아간다 (다치진 않음)."""
@@ -314,13 +341,16 @@ class Events:
         others = [o for o in self.game.pets if o is not pet and o.on == pet.on and abs(o.pos_x - pet.pos_x) < reach]
         return min(others, key=lambda o: abs(o.pos_x - pet.pos_x)) if others else None
 
+    def time_stop_seconds(self) -> float:
+        return TIME_STOP + 0.5 * training.bonus(self.game.state, "sakuya")
+
     def _time_stop(self, sakuya: "PetWindow") -> None:
         others = [p for p in self.game.pets if p is not sakuya and p.state != "held"]
         if not others:
             return
         self._say(sakuya, "시간이여, 멈춰라.")
         for p in others:
-            p.freeze(TIME_STOP)
+            p.freeze(self.time_stop_seconds())
         log.info("사쿠야 시간 정지 (%d명)", len(others))
 
     # ── 새전 도둑 ──
@@ -397,12 +427,16 @@ class Events:
         self.thief_phase, self.thief_until = "steal", time.monotonic() + 1.4
         log.info("마리사가 새전 %d 훔침", amount)
 
+    def catch_bonus(self, stolen: int) -> int:
+        """붙잡았을 때 더 받는 새전: 훔친 것의 50% (마리사를 수련시키면 Lv 마다 +10%p)."""
+        return max(5, round(stolen * (0.5 + 0.1 * training.bonus(self.game.state, "marisa"))))
+
     def catch(self) -> None:
         """도둑질 중인 마리사를 붙잡음 → 돌려받고 보너스."""
         m, g = self.thief, self.game
         if m is None or self.thief_phase not in ("steal", "flee"):
             return
-        bonus = max(5, self.stolen // 2)
+        bonus = self.catch_bonus(self.stolen)
         g.state.saisen += self.stolen
         g.state.add_saisen(bonus)
         g.state.thief_caught += 1

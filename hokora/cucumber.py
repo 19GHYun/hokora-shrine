@@ -20,8 +20,8 @@ from .state import GameState
 if TYPE_CHECKING:
     from .app import Game
 
-MAX_HAVE = 3000
-BUY_STEPS = (10, 100)
+BUY_STEPS = (10, 100, 1000)           # + "최대" (가진 새전만큼) — 가질 수 있는 오이 수에는 한도 없음
+SELL_FEE = 0.05                       # 팔 때 니토리가 떼는 수수료 (많이 사고팔수록 새전이 조금씩 빠짐)
 SLOTS = 12                            # 월 오전 … 토 오후
 SLOT_NAMES = [f"{d} {h}" for d in "월화수목금토" for h in ("오전", "오후")]
 PATTERNS = {0: "들쭉날쭉", 1: "대폭등", 2: "계속 내림", 3: "소폭등"}
@@ -126,7 +126,7 @@ def buy(s: GameState, n: int, now: datetime | None = None) -> int:
     refresh(s, now)
     if not can_buy(now):
         return 0
-    n = max(0, min(n, MAX_HAVE - s.cuke_have, s.saisen // s.cuke_base))
+    n = max(0, min(n, s.saisen // s.cuke_base))
     if n:
         cost = n * s.cuke_base
         s.saisen -= cost
@@ -136,15 +136,22 @@ def buy(s: GameState, n: int, now: datetime | None = None) -> int:
     return n
 
 
+def fee(gross: int) -> int:
+    """팔 때 떼는 수수료 (5%, 올림)."""
+    return -(-gross * round(SELL_FEE * 100) // 100)
+
+
 def sell(s: GameState, n: int, now: datetime | None = None) -> int:
-    """오이 n개 팔기. 받은 새전."""
+    """오이 n개 팔기. 받은 새전 (수수료를 뗀 값)."""
     now = now or datetime.now()
     refresh(s, now)
     n = max(0, min(n, s.cuke_have))
     if not can_sell(now) or not n:
         return 0
     price = price_now(s, now)
-    got = n * price
+    gross = n * price
+    got = gross - fee(gross)
+    s.cuke_fees += gross - got
     cost = round(s.cuke_paid * n / s.cuke_have)
     s.cuke_have -= n
     s.cuke_paid -= cost
@@ -189,7 +196,8 @@ class CucumberWindow(QWidget):
         self.btns: list[QPushButton] = []
         v.addLayout(self.row)
         foot = QLabel("일요일·월요일 오전에 사서, 월요일 오후~토요일에 하루 두 번 바뀌는 값에 팔아요. "
-                      "다음 일요일이 되면 남은 오이는 시들어요.", objectName="sub")
+                      f"팔 때 니토리가 수수료 {SELL_FEE:.0%}를 떼요. 다음 일요일이 되면 남은 오이는 시들어요.",
+                      objectName="sub")
         foot.setWordWrap(True)
         v.addWidget(foot)
         self.refresh()
@@ -206,7 +214,7 @@ class CucumberWindow(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         self.btns = []
-        for _ in range(3 if can_buy(now) else 2):
+        for _ in range(len(BUY_STEPS) + 1 if can_buy(now) else 2):
             b = QPushButton(objectName="upgrade")
             b.setCursor(Qt.PointingHandCursor)
             self.row.addWidget(b)
@@ -214,27 +222,33 @@ class CucumberWindow(QWidget):
         self.row.addStretch(1)
         if can_buy(now):
             self.say.setText("싱싱한 오이 있어! 이번 주 값은 개당 " f"{s.cuke_base}. 월요일 오후부터 팔 수 있어~")
-            for b, n in zip(self.btns, (*BUY_STEPS, MAX_HAVE)):
-                k = min(n, MAX_HAVE - s.cuke_have, s.saisen // s.cuke_base)
-                b.setText(f"{'최대' if n == MAX_HAVE else n}개 사기  {k * s.cuke_base:,}" if k else f"{n}개 사기")
-                b.setEnabled(k > 0)
-                b.clicked.connect(lambda _=False, n=n: self._buy(n))
+            most = s.saisen // s.cuke_base
+            for b, n in zip(self.btns, (*BUY_STEPS, 0)):              # 0 = 최대 (가진 새전만큼)
+                k = min(n, most) if n else most
+                name = f"{n:,}개" if n else "최대"
+                b.setText(f"{name}\n{k * s.cuke_base:,}" if k and (n == 0 or k == n) else f"{name}\n새전 부족")
+                b.setEnabled(k > 0 and (n == 0 or k == n))
+                b.setToolTip(f"{k:,}개 사기" if k else "")
+                b.clicked.connect(lambda _=False, n=n: self._buy(n or most))
                 b.show()
         else:
             k = slot_of(now)
             self.say.setText((hint(s) + " " if k <= 1 else "") + f"지금 시세는 개당 {price}!")
             for b, (label, frac) in zip(self.btns, (("모두 팔기", 1.0), ("절반 팔기", 0.5))):
                 n = max(1, int(s.cuke_have * frac)) if s.cuke_have else 0
-                b.setText(f"{label}  +{n * price:,}" if n else label)
+                gross = n * price
+                b.setText(f"{label}  +{gross - fee(gross):,}" if n else label)
+                b.setToolTip(f"{gross:,} 에서 수수료 {fee(gross):,}" if n else "")
                 b.setEnabled(n > 0)
                 b.clicked.connect(lambda _=False, frac=frac: self._sell(frac))
                 b.show()
         if s.cuke_have:
             avg = s.cuke_paid / s.cuke_have
-            now_value = s.cuke_have * price
+            gross = s.cuke_have * price
+            now_value = gross - fee(gross)
             diff = now_value - s.cuke_paid
             self.info.setText(f"가진 오이 {s.cuke_have:,}개 (산 값 개당 {avg:.0f})  ·  지금 팔면 {now_value:,} "
-                              f"({'+' if diff >= 0 else ''}{diff:,})")
+                              f"({'+' if diff >= 0 else ''}{diff:,}, 수수료 빼고)")
         else:
             self.info.setText(f"가진 오이 없음  ·  지금까지 오이로 번 새전 {s.cuke_profit:+,}"
                               + (f"  ·  최고 시세 {s.cuke_best}" if s.cuke_best else ""))

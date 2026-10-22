@@ -212,6 +212,12 @@ class GameState:
     cuke_bought: str = ""            # 가진 오이를 산 주 (주가 바뀌면 시듦)
     cuke_profit: int = 0
     cuke_best: int = 0
+    cuke_fees: int = 0               # 팔 때 니토리에게 낸 수수료 합계
+    sengu: int = 0                   # 식년천궁 (sengu.py): 신사를 새로 지은 횟수 → 수입 +10%씩
+    sengu_until: float = 0.0         # 지금 짓는 중이면 끝나는 시각 (time.time)
+    skill_lv: dict[str, int] = field(default_factory=dict)   # 친구 수련 (training.py): 친구 → 특기 레벨 (없으면 1)
+    fireworks: int = 0               # 불꽃놀이 봉납 (fireworks.py): 쏘아 올린 횟수
+    fireworks_spent: int = 0
     ufo_shot: int = 0                # UFO 격추 (ufo.py)
     ufo_rescued: int = 0             # 끌려가는 친구를 잡아채서 구출
     ufo_taken: int = 0               # UFO 에 끌려간 횟수

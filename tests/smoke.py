@@ -692,6 +692,7 @@ def t_life():
         game._pc_tick()
     check("CPU 과열 반응", "cpu" in game._said)
     hk.winutil.recycle_bin = lambda: (500, 3 * 1024 ** 3)
+    game._said.pop("recycle", None)               # 이 PC 의 진짜 휴지통이 가득이면 시험 전에 이미 말했을 수 있음
     game._pc_tick(recycle=True)
     check("휴지통 청소 친구", said("휴지통"))
     hk.winutil.battery, hk.winutil.recycle_bin, game._cpu.sample = G["real"]
@@ -925,22 +926,32 @@ def t_cuke():
         def now(cls, tz=None):
             return now[0]
     cucumber.datetime = FakeDT
-    s.saisen, s.cuke_week, s.cuke_have, s.cuke_paid = 50_000, "", 0, 0
+    s.saisen, s.cuke_week, s.cuke_have, s.cuke_paid, s.cuke_fees = 50_000, "", 0, 0, 0
     got = cucumber.buy(s, 100)
     check("오이 사기 (일요일)", got == 100 and s.cuke_have == 100 and s.cuke_paid == 100 * s.cuke_base)
+    s.saisen = 10 ** 7
+    got = cucumber.buy(s, 10_000)
+    check("오이 한도 없음 (3,000개 넘게)", got == 10_000 and s.cuke_have == 10_100)
+    w = cucumber.CucumberWindow(game)
+    w.show()
+    check("사는 날 단추 (10 · 100 · 1,000 · 최대)", len(w.btns) == 4 and w.btns[3].text().startswith("최대")
+          and w.btns[2].text().startswith("1,000개"), [b.text() for b in w.btns])
+    w.close()
     now[0] = real_dt(2026, 10, 12, 9, 0)                 # 월요일 오전
     check("월요일 오전엔 아직 못 팖", cucumber.sell(s, 10) == 0 and cucumber.can_buy(now[0]))
     now[0] = real_dt(2026, 10, 14, 15, 0)                # 수요일 오후
     price = cucumber.price_now(s)
     got = cucumber.sell(s, 50)
-    check("그때 시세대로 팔기", got == 50 * price and s.cuke_have == 50 and price == cucumber.prices(s)[5])
+    gross = 50 * price
+    check("그때 시세대로 팔기 (수수료 5% 빼고)", got == gross - cucumber.fee(gross) and s.cuke_have == 10_050
+          and price == cucumber.prices(s)[5] and s.cuke_fees == cucumber.fee(gross) > 0, (got, gross))
     check("평일엔 못 삼", cucumber.buy(s, 10) == 0)
     w = cucumber.CucumberWindow(game)
     w.show()
     check("오이 시세 창", w.isVisible() and len(w.btns) == 2)
     w.close()
     now[0] = real_dt(2026, 10, 18, 8, 0)                 # 다음 일요일
-    check("다음 주가 되면 시듦", cucumber.refresh(s) == 50 and s.cuke_have == 0)
+    check("다음 주가 되면 시듦", cucumber.refresh(s) == 10_050 and s.cuke_have == 0)
     shapes = [cucumber.make_prices(seed, 100) for seed in range(400)]
     check("시세 패턴 (12칸, 대폭등은 2배 넘게)", all(len(ps) == 12 and min(ps) >= 9 for _, ps in shapes)
           and all(max(ps) >= 200 for pat, ps in shapes if pat == 1))
@@ -982,6 +993,123 @@ def t_offer2():
         game.visits.visit.cancel()
 
 
+def t_sengu():
+    """식년천궁: 최고 단계 신사를 새로 지어 수입 +10% (영구), 값은 할 때마다 2배."""
+    from hokora import diary, sengu
+    calm()
+    s.shrine_level, s.sengu, s.sengu_until, s.saisen = 4, 0, 0.0, 10 ** 7
+    check("최고 단계 전엔 못 함", not game.on_action("sengu") and "단계" in sengu.blocked(s))
+    s.shrine_level = 5
+    base, off0 = prayer.income_multiplier(s), diary.offline_income(s, 3600)
+    check("식년천궁 시작", game.on_action("sengu") and sengu.building(s) and game.shrine.building
+          and s.saisen == 10 ** 7 - sengu.BASE_COST)
+    check("짓는 중엔 또 못 함", not game.on_action("sengu"))
+    game.open_panel()
+    p = game.panel
+    check("신사 탭: 짓는 중 (남은 시간)", p.up_btn.text() == "짓는 중" and not p.up_btn.isEnabled() and "남음" in p.up_label.text())
+    p.close()
+    s.sengu_until = time.time() - 1
+    game._sengu_tick()
+    check("다 지으면 2대째 · 수입 +10%", s.sengu == 1 and not game.shrine.building and not s.sengu_until
+          and abs(prayer.income_multiplier(s) / base - 1.1) < 1e-9, prayer.income_multiplier(s) / base)
+    check("꺼져 있는 동안의 수입에도 +10%", abs(diary.offline_income(s, 3600) / off0 - 1.1) < 0.01)
+    check("다음 천궁은 2배", sengu.cost(s) == 2 * sengu.BASE_COST)
+    game.open_panel()
+    p = game.panel
+    check("신사 탭: 천궁하기 · 2대째 표시", p.up_btn.text() == "천궁하기" and p.up_btn.isEnabled() and "2대째" in p.title.text())
+    p.close()
+    img = game.shrine.grab().toImage()
+    game.shrine.set_building(True)
+    img2 = game.shrine.grab().toImage()
+    check("공사 중엔 비계 · 가림막이 그려짐", img != img2)
+    game.shrine.set_building(False)
+    for c in list(game._card_queue):
+        c.close()
+    s.sengu = 0                                    # 다른 시험의 수입 계산에 끼어들지 않게
+
+
+def t_train():
+    """친구 수련: 특기 Lv.10 까지, 값은 레벨마다 2배."""
+    from hokora import training
+    calm()
+    s.saisen, s.skill_lv = 10 ** 7, {}
+    check("수련 Lv.1 → 2", game.on_action("train", "sanae") == 2 and s.skill_lv["sanae"] == 2
+          and s.saisen == 10 ** 7 - training.BASE_COST)
+    check("값은 레벨마다 2배", training.cost(s, "sanae") == 2 * training.BASE_COST)
+    met = list(s.unlocked)
+    s.unlocked = [k for k in met if k != "youmu"]
+    check("아직 못 만난 친구는 못 함", game.on_action("train", "youmu") is None and "만나지" in training.blocked(s, "youmu"))
+    s.unlocked = met
+    s.skill_lv = {"sanae": 1, "sakuya": 1, "meiling": 1, "marisa": 1, "youmu": 1}
+    lv1 = (ev.miracle_amount(), ev.time_stop_seconds(), ev.guard_chance(), ev.catch_bonus(100), ev.garden_amount())
+    s.skill_lv = {"sanae": 10, "sakuya": 10, "meiling": 10, "marisa": 10, "youmu": 10, "reimu": 10}
+    lv10 = (ev.miracle_amount(), ev.time_stop_seconds(), ev.guard_chance(), ev.catch_bonus(100), ev.garden_amount())
+    check("Lv.1 은 지금과 같음", lv1[0] == hk_events.MIRACLE_SAISEN and lv1[1] == hk_events.TIME_STOP
+          and lv1[2] == hk_events.GUARD_CHANCE and lv1[3] == 50, lv1)
+    check("Lv.10: 기적 · 시간 정지 · 문지기 · 붙잡기 보너스 · 정원 손질이 셈",
+          lv10[0] > lv1[0] and lv10[1] == 7.5 and abs(lv10[2] - 0.97) < 1e-9 and lv10[3] == 140
+          and lv10[4] == round(lv1[4] * 5.5),
+          lv10)
+    check("Lv.10 은 특기를 더 자주 (쿨타임 64%)", abs(training.cooldown_scale(s, "reimu") - 0.64) < 1e-9)
+    check("최고 레벨이면 더 못 올림", game.on_action("train", "sanae") is None and training.cost(s, "sanae") is None)
+    s.skill_lv = {"remilia": 5}
+    ranks = set()
+    for i in range(40):
+        st = GameState(skill_lv={"remilia": 5}, fate_boost=True)
+        ranks.add(hk_omikuji.draw(st, random.Random(i)).fortune.rank)
+    check("레밀리아 Lv.5: 조작된 운명은 대길만", ranks == {"대길"}, ranks)
+    game.open_panel()
+    p = game.panel
+    name = p.cards["remilia"][1].text()
+    p.close()
+    check("도감에 특기 레벨", "Lv.5" in name, name)
+    s.skill_lv = {}
+
+
+def t_fireworks():
+    """불꽃놀이 봉납: 새전을 넣고 신사 위 하늘에 불꽃 (짧게 줄여서 시험)."""
+    import dataclasses
+    from hokora import fireworks
+    calm()
+    G["fw_s"] = fireworks.SIZES["s"]
+    fireworks.SIZES["s"] = dataclasses.replace(G["fw_s"], seconds=4.2)
+    s.saisen, n0 = 10 ** 7, s.fireworks
+    check("불꽃놀이 봉납 (소)", game.on_action("fireworks", "s") and game.fireworks_show is not None
+          and game.fireworks_show.isVisible() and s.saisen == 10 ** 7 - 1_000 and s.fireworks == n0 + 1)
+    check("쏘는 동안엔 또 못 쏨", not game.on_action("fireworks", "m") and "끝나면" in fireworks.blocked(s, "m", True))
+    w = game.fireworks_show
+    scr = app.primaryScreen().geometry()
+    check("하늘 창은 화면을 다 덮지 않음 (전체화면으로 안 보이게)", w.height() < scr.height() * 0.8, (w.width(), w.height()))
+    game.open_panel()
+    p = game.panel
+    check("참배 탭: 쏘는 중엔 단추가 꺼짐", not any(b.isEnabled() for b in p.fw_btns.values()))
+    p.close()
+
+
+def t_fireworks2():
+    w = game.fireworks_show
+    if w is None:
+        check("불꽃이 터짐", False, "벌써 닫힘")
+        return
+    img = w.grab().toImage()
+    lit = sum(img.pixelColor(x, y).alpha() > 40 for y in range(0, img.height(), 6) for x in range(0, img.width(), 6))
+    check("불꽃이 터짐 (하늘에 그려짐)", w.bursts >= 1 and lit > 10, (w.bursts, lit))
+
+
+def t_fireworks3():
+    from hokora import fireworks
+    check("다 쏘면 저절로 닫힘", game.fireworks_show is None)
+    fireworks.SIZES["s"] = G["fw_s"]
+    xl = fireworks.FireworksShow(fireworks.SIZES["xl"], app.primaryScreen().availableGeometry(), 400, text="시험 신사")
+    xl.started -= fireworks.SIZES["xl"].seconds - fireworks.TEXT_TIME + 0.5   # 「奉納」 글자가 뜬 때
+    img = xl.grab().toImage()
+    lit = sum(img.pixelColor(x, y).alpha() > 100 for y in range(0, img.height(), 4) for x in range(0, img.width(), 4))
+    xl.close()
+    check("특대: 마지막에 「奉納」 글자", lit > 50, lit)
+    sched = fireworks.schedule(fireworks.SIZES["xl"], random.Random(1))
+    check("특대 90발 · 피날레에 몰아서", len(sched) == 90 and sum(t > sched[-1] * 0.8 for t in sched) >= 30)
+
+
 def t_end():
     app.quit()
 
@@ -994,7 +1122,8 @@ STEPS = [(t_core, 3000), (t_core2, 2500), (t_thief, 1600), (t_skill, 1800), (t_a
          (t_yukari2, 1000), (t_patchouli, 1500), (t_expedition, 2200),
          (t_expedition2, 1000), (t_achieve, 1000), (t_fishing, 1000), (t_festival, 1000),
          (t_crowd, 1500), (t_crowd2, 1500), (t_crowd3, 2500), (t_tutorial, 2000), (t_options, 1500), (t_goods, 1800), (t_goods2, 1000), (t_ufo, 1500), (t_ufo2, 1200), (t_ufo3, 500),
-         (t_cuke, 300), (t_offer, 1500), (t_offer2, 1500), (t_life, 1000), (t_settings, 500), (t_end, 0)]
+         (t_cuke, 300), (t_offer, 1500), (t_offer2, 1500), (t_life, 1000), (t_settings, 500),
+         (t_sengu, 500), (t_train, 500), (t_fireworks, 2500), (t_fireworks2, 2600), (t_fireworks3, 300), (t_end, 0)]
 
 
 def run(i: int = 0) -> None:

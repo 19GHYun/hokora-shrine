@@ -46,6 +46,7 @@ class ShrineWindow(QWidget):
         self.hover = False
         self.night = False
         self.skin: str | None = None     # 신사 스킨 (그림) — 있으면 단계 모양 대신
+        self.building = False            # 식년천궁으로 새로 짓는 중 (비계 · 가림막)
         self._press = None
         self._dragging = False
         self.set_level(level)
@@ -63,6 +64,11 @@ class ShrineWindow(QWidget):
             return None
         img, anchor = sprites.images[self.skin]
         return img, anchor, SKIN_H * self._k / max(1.0, anchor.y())
+
+    def set_building(self, on: bool) -> None:
+        if on != self.building:
+            self.building = on
+            self.update()
 
     def set_night(self, on: bool) -> None:
         """밤엔 푸르스름하게, 등불이 켜진 듯이."""
@@ -127,6 +133,8 @@ class ShrineWindow(QWidget):
             p.drawImage(0, 0, img)
             if self.night:
                 night_glow(p, img.width(), img.height())
+            if self.building:
+                draw_scaffold(p, img.width(), anchor.y())
         else:
             bw, bh = STAGE_SIZE[self.level]
             k = self._k
@@ -135,6 +143,8 @@ class ShrineWindow(QWidget):
             DRAW_STAGE[self.level](p)
             if self.night:
                 night_glow(p, bw, bh)
+            if self.building:
+                draw_scaffold(p, bw, bh)
         p.restore()
         f = QFont("Malgun Gothic", 9)
         f.setBold(True)
@@ -199,6 +209,38 @@ def _label(p: QPainter, rect: QRectF, text: str) -> None:
     p.drawPath(path)
     p.setPen(QColor("#9E1027"))
     p.drawText(r, Qt.AlignCenter, text)
+
+
+def draw_scaffold(p: QPainter, w: float, h: float) -> None:
+    """식년천궁 공사 중: 건물 앞에 하얀 가림막과 대나무 비계, 가림막엔 「御遷宮」."""
+    p.save()
+    sheet = QRectF(w * 0.14, h * 0.16, w * 0.72, h * 0.84)
+    p.setPen(QPen(QColor(170, 160, 140, 170), max(0.8, w * 0.004)))
+    p.setBrush(QColor(252, 250, 244, 215))
+    p.drawRect(sheet)
+    for i in range(1, 8):                                    # 가림막 주름
+        x = sheet.left() + sheet.width() * i / 8
+        p.drawLine(QPointF(x, sheet.top()), QPointF(x, sheet.bottom()))
+    pole = QPen(QColor(160, 128, 62), max(1.6, w * 0.014), Qt.SolidLine, Qt.RoundCap)
+    p.setPen(pole)
+    for i in range(5):                                       # 세로 대나무
+        x = w * 0.08 + w * 0.84 * i / 4
+        p.drawLine(QPointF(x, h * 0.06), QPointF(x, h))
+    for j in range(4):                                       # 가로 대나무
+        y = h * 0.12 + h * 0.86 * j / 3
+        p.drawLine(QPointF(w * 0.05, y), QPointF(w * 0.95, y))
+    p.setPen(QPen(QColor(90, 70, 40, 200), max(1.0, w * 0.006)))
+    for i in range(4):                                       # 엇갈린 버팀대
+        x1 = w * 0.08 + w * 0.84 * i / 4
+        x2 = w * 0.08 + w * 0.84 * (i + 1) / 4
+        p.drawLine(QPointF(x1, h * 0.98), QPointF(x2, h * 0.41))
+    f = QFont("Yu Gothic UI")
+    f.setBold(True)
+    f.setPixelSize(max(8, int(min(sheet.width() * 0.22, sheet.height() / 4.2))))
+    p.setFont(f)
+    p.setPen(QColor(200, 16, 46, 230))
+    p.drawText(sheet, Qt.AlignCenter, "御\n遷\n宮")
+    p.restore()
 
 
 def _poly(points) -> QPainterPath:

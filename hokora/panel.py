@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QMen
 
 from . import affection as aff
 from . import achievements, daily, expedition, festival, fishing, moon, omamori, season, torii, wardrobe, weather
+from . import fireworks, sengu, training
 from .decor import decor_image
 from .guests import GUEST_ABOUT, VISITS, guest_stage
 from .omikuji import can_draw
@@ -971,6 +972,39 @@ class ShrinePanel(QWidget):
             h.addWidget(btn)
             p4.addWidget(card)
             self.wish_rows[key] = (btn, status)
+        card = QWidget(objectName="card")                  # 불꽃놀이 봉납
+        card.setAttribute(Qt.WA_StyledBackground, True)
+        fv = QVBoxLayout(card)
+        fv.setContentsMargins(12, 8, 10, 8)
+        fv.setSpacing(4)
+        fh = QHBoxLayout()
+        icon = QLabel("🎆")
+        icon.setStyleSheet("font-size: 22px;")
+        icon.setFixedWidth(34)
+        col = QVBoxLayout()
+        col.setSpacing(1)
+        col.addWidget(QLabel("불꽃놀이 봉납", objectName="name"))
+        desc = QLabel("작업표시줄 위 하늘에 불꽃을 쏘아 올려요. 친구들이 \"타~마야~!\" (특대는 마지막에 「奉納」)",
+                      objectName="goal")
+        desc.setWordWrap(True)
+        col.addWidget(desc)
+        self.fw_status = QLabel(objectName="done")
+        col.addWidget(self.fw_status)
+        fh.addWidget(icon)
+        fh.addLayout(col, 1)
+        fv.addLayout(fh)
+        frow = QHBoxLayout()
+        frow.setSpacing(6)
+        self.fw_btns: dict[str, QPushButton] = {}
+        for key, show in fireworks.SIZES.items():
+            b = QPushButton(f"{show.name}  {show.price:,}", objectName="small")
+            b.setCursor(Qt.PointingHandCursor)
+            b.setToolTip(f"{show.shells}발 · 약 {show.seconds:.0f}초")
+            b.clicked.connect(lambda _=False, k=key: self._act("fireworks", k))
+            frow.addWidget(b, 1)
+            self.fw_btns[key] = b
+        fv.addLayout(frow)
+        p4.addWidget(card)
 
         # ── 신사 탭 아래: 신사 모양·스킨·크기 ──
         p1.addWidget(QLabel("신사 모양", objectName="section"))
@@ -1076,7 +1110,8 @@ class ShrinePanel(QWidget):
     def refresh(self) -> None:
         s = self.state
         ttl = achievements.title(s)
-        self.title.setText(f"⛩  {s.stage_name}  ({s.shrine_level}단계)" + (f"   「{ttl}」" if ttl else ""))
+        gen = f" · {sengu.generation(s)}대째" if s.sengu else ""
+        self.title.setText(f"⛩  {s.stage_name}  ({s.shrine_level}단계{gen})" + (f"   「{ttl}」" if ttl else ""))
         boost = income_multiplier(s)
         tags = (["번영 기원 ×2"] if left(s, "prosper") else []) + ([f"신문 ×{NEWS_BOOST:g}"] if news_active(s) else [])
         if season.is_new_year():
@@ -1105,13 +1140,34 @@ class ShrinePanel(QWidget):
             btn.setText("효과 중" if remain else f"새전 {WISHES[key].cost(s):,}")
             btn.setEnabled(not why)
             btn.setToolTip(why)
+        running = self.on_action is not None and bool(self.on_action("fireworks_running", None))
+        for key, b in self.fw_btns.items():
+            why = fireworks.blocked(s, key, running)
+            b.setEnabled(not why)
+            b.setToolTip(why or f"{fireworks.SIZES[key].shells}발 · 약 {fireworks.SIZES[key].seconds:.0f}초")
+        self.fw_status.setText("🎆 지금 쏘는 중!" if running else
+                               (f"지금까지 {s.fireworks:,}번 쏘아 올렸어요" if s.fireworks else ""))
+        self.fw_status.setVisible(bool(self.fw_status.text()))
         cost = s.next_stage_cost
-        if cost is None:
-            self.up_label.setText("최고 단계예요. 훌륭한 신사가 됐어요!")
-            self.up_bar.setRange(0, 1)
-            self.up_bar.setValue(1)
-            self.up_btn.setText("완성")
-            self.up_btn.setEnabled(False)
+        if cost is None:                                    # 최고 단계 다음: 식년천궁
+            gen = sengu.generation(s)
+            if sengu.building(s):
+                remain = sengu.left(s)
+                self.up_label.setText(f"🏗 {gen + 1}대째 신사를 짓는 중…  {fmt_left(remain)} 남음")
+                self.up_bar.setRange(0, int(sengu.BUILD_SECONDS))
+                self.up_bar.setValue(int(sengu.BUILD_SECONDS - remain))
+                self.up_btn.setText("짓는 중")
+                self.up_btn.setEnabled(False)
+            else:
+                price = sengu.cost(s)
+                self.up_label.setText(f"🏯 식년천궁 → {gen + 1}대째 신사 (새전 수입 +{sengu.BOOST_EACH:.0%} 영구)\n"
+                                      f"새전 {min(s.saisen, price):,} / {price:,}")
+                self.up_bar.setRange(0, price)
+                self.up_bar.setValue(min(s.saisen, price))
+                self.up_btn.setText("천궁하기")
+                why = sengu.blocked(s)
+                self.up_btn.setEnabled(not why)
+                self.up_btn.setToolTip(why or "1시간 동안 짓고, 다 지으면 새전 수입이 영구히 올라요. 다음 천궁은 값이 2배.")
         else:
             nxt_name, nxt_income, _ = SHRINE_STAGES[s.shrine_level + 1]
             self.up_label.setText(f"다음: {nxt_name} (분당 {nxt_income})   {min(s.saisen, cost):,} / {cost:,} 새전")
@@ -1145,7 +1201,10 @@ class ShrinePanel(QWidget):
             if pic.property("met") != met:          # 그림은 만났을 때만 다시 그림
                 pic.setPixmap(portrait(key, PORTRAIT, silhouette=not met))
                 pic.setProperty("met", met)
-            name.setText(CHARACTERS[key].name if met else "???")
+            lv = training.level(s, key)
+            name.setText((CHARACTERS[key].name + (f"  · 특기 Lv.{lv}" if lv > 1 else "")) if met else "???")
+            if met and key in training.EFFECTS:
+                name.setToolTip(f"{training.EFFECTS[key][0]} Lv.{lv} — 친구를 오른쪽 클릭 → 📿 특기 수련")
             self._role(name, "name" if met else "locked")
             unlock = UNLOCKS[key]
             if not unlock.goals:
@@ -1561,6 +1620,9 @@ class ShrinePanel(QWidget):
         self.refresh()
 
     def _upgrade(self) -> None:
+        if self.state.next_stage_cost is None:             # 최고 단계면 이 단추는 식년천궁
+            self._act("sengu")
+            return
         self.on_upgrade()
         self.refresh()
 
