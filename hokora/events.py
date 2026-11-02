@@ -146,7 +146,7 @@ class Events:
         return random.uniform(*DOZE_EVERY) * (1 + 0.15 * training.bonus(self.game.state, "meiling"))
 
     def guard_chance(self) -> float:
-        return min(0.97, GUARD_CHANCE + 0.03 * training.bonus(self.game.state, "meiling"))
+        return min(max(0.97, GUARD_CHANCE), GUARD_CHANCE + 0.03 * training.bonus(self.game.state, "meiling"))
 
     def _gain(self, pet: "PetWindow", amount: int) -> None:
         """특기로 번 새전을 신사에 넣고 +N 표시."""

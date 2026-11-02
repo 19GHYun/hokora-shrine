@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QMen
 
 from . import affection as aff
 from . import achievements, daily, expedition, festival, fishing, moon, omamori, season, torii, wardrobe, weather
-from . import fireworks, sengu, training
+from . import fireworks, incident, sengu, training
 from .decor import decor_image
 from .guests import GUEST_ABOUT, VISITS, guest_stage
 from .omikuji import can_draw
@@ -905,6 +905,16 @@ class ShrinePanel(QWidget):
         self.fish_tip = QLabel(objectName="goal")
         self.fish_tip.setWordWrap(True)
         p9.addWidget(self.fish_tip)
+        irow = QHBoxLayout()
+        self.inc_title = QLabel(objectName="section")
+        self.inc_dex = QLabel(objectName="sub")                 # 이변 도감 (제목 줄 오른쪽)
+        irow.addWidget(self.inc_title)
+        irow.addStretch(1)
+        irow.addWidget(self.inc_dex)
+        p9.addLayout(irow)
+        self.inc_now = QLabel(objectName="goal")
+        self.inc_now.setWordWrap(True)
+        p9.addWidget(self.inc_now)
 
         # ── 손님 ──
         tip = QLabel("가끔 신사에 손님이 찾아와요. 신사가 커질수록 찾아오는 손님이 늘어요. "
@@ -1123,6 +1133,9 @@ class ShrinePanel(QWidget):
         wt = weather.current()
         if wt.income != 1:
             tags.append(f"{wt.name} ×{wt.income:g}")
+        inc = incident.active(s)
+        if inc is not None:
+            tags.append(f"{inc.name} ×{incident.MULTIPLIER:g}")
         magic = weather.magic_left()
         self.weather_label.setText(f"{wt.icon} 지금 天候: {wt.name}({wt.kanji}) — {wt.desc}   ·   "
                                    + (f"파츄리의 마법 {fmt_left(magic)}" if magic else f"{weather.next_change()}에 바뀌어요"))
@@ -1574,6 +1587,22 @@ class ShrinePanel(QWidget):
                               "밤엔 메기·장어, 비 오는 날엔 물고기가 잘 낚여요."
                               if "pond" in s.decor_pos else
                               "꾸미기 탭 → 🎋 정원에서 연못을 사서 놓으면 낚시할 수 있어요.")
+        self.inc_title.setText(f"⚔ 이변 해결 {incident.solved_total(s)}건")
+        inc = incident.active(s)
+        if inc is not None:
+            boss = "드러났어요 — 신사 앞에 나타나면 눌러서 탄막 승부!" if incident.ready(s) else "아직 몰라요"
+            self.inc_now.setText(f"⚠ 지금 {inc.name}({inc.kanji}) — {inc.desc}  새전 수입 ×{incident.MULTIPLIER:g}\n"
+                                 f"단서 {s.incident_clues}/{incident.CLUES}  ·  흑막은 {boss}")
+        elif s.shrine_level < incident.MIN_STAGE:
+            self.inc_now.setText(f"신사가 {incident.MIN_STAGE}단계가 되면 가끔 환상향에 이변이 일어나요.")
+        else:
+            self.inc_now.setText("지금은 평화로워요. 이변이 일어나면 신사 근처에 떠오르는 단서 구슬(?)을 3개 모아요.")
+        self.inc_dex.setText("   ".join(
+            f"{i.kanji[:2]} {'✔' * min(3, s.incidents_solved[k]) if s.incidents_solved.get(k) else '—'}"
+            for k, i in incident.INCIDENTS.items()))
+        self.inc_dex.setToolTip("\n".join(f"{i.name}: " + (f"{s.incidents_solved[k]}번 해결 · 흑막 {i.boss_name}"
+                                                          if s.incidents_solved.get(k) else "아직 해결 못 함")
+                                          for k, i in incident.INCIDENTS.items()))
         for t in self.fish_tiles:
             t.update()
 

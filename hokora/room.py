@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QWidget
 
 from . import achievements, expedition, fishing, moon, omamori, season, wardrobe, weather
 from .pet import _heart, _zzz
-from .render import CHARACTERS, Pose, draw_character
+from .render import CHARACTERS, Pose, draw_character, short_name
 from .sprites import DISPLAY_H
 
 if TYPE_CHECKING:
@@ -658,10 +658,10 @@ class RoomWindow(QWidget):
         if names:
             now = time.time()
             parts.append("원정 중: " + ", ".join(
-                f"{CHARACTERS[k].name.split()[-1]}({_left(expedition.left(e, now))})" for k, e in names.items()
+                f"{short_name(k)}({_left(expedition.left(e, now))})" for k, e in names.items()
                 if k in CHARACTERS))
         if self.invited:
-            parts.append("문을 닫으면 " + "·".join(CHARACTERS[k].name.split()[-1] for k in self.invited if k in CHARACTERS)
+            parts.append("문을 닫으면 " + "·".join(short_name(k) for k in self.invited if k in CHARACTERS)
                          + " 다시 밖으로")
         p.drawText(r.adjusted(14, 0, -14, 0), Qt.AlignLeft | Qt.AlignVCenter, "   ·   ".join(parts))
         p.setPen(QColor("#8C7479"))

@@ -218,6 +218,28 @@ class GameState:
     skill_lv: dict[str, int] = field(default_factory=dict)   # 친구 수련 (training.py): 친구 → 특기 레벨 (없으면 1)
     fireworks: int = 0               # 불꽃놀이 봉납 (fireworks.py): 쏘아 올린 횟수
     fireworks_spent: int = 0
+    letters: dict[str, list[int]] = field(default_factory=dict)   # 친구 편지 (letters.py): 친구 → 받은 편지 번호
+    letters_read: list[str] = field(default_factory=list)          # 읽은 편지 ("reimu:3")
+    janken_games: int = 0            # 가위바위보 (janken.py)
+    janken_wins: int = 0
+    janken_day: str = ""
+    janken_today: int = 0            # 오늘 새전을 받은 승리 수
+    janken_beaten: list[str] = field(default_factory=list)   # 오늘 이긴 친구 (처음 이기면 호감도)
+    dodge_clears: int = 0            # 탄막 피하기 (dodge.py): 끝까지 버틴 횟수
+    dodge_perfect: int = 0           # 한 번도 안 맞고 버틴 횟수
+    dodge_day: str = ""
+    dodge_today: int = 0             # 오늘 새전을 받은 횟수
+    hide_games: int = 0              # 숨바꼭질 (hideseek.py)
+    hide_found: int = 0
+    race_count: int = 0              # 요정 달리기 (race.py)
+    race_wins: int = 0
+    race_profit: int = 0
+    race_card: list = field(default_factory=list)   # 다음 경주 출전표 [[키, 배당], …]
+    incident: str = ""               # 이변 (incident.py): 지금 일어난 이변 (없으면 "")
+    incident_since: float = 0.0
+    incident_clues: int = 0
+    incident_next: float = 0.0       # 다음 이변이 일어날 수 있는 시각 (time.time, 0 = 아직 안 정함)
+    incidents_solved: dict[str, int] = field(default_factory=dict)
     ufo_shot: int = 0                # UFO 격추 (ufo.py)
     ufo_rescued: int = 0             # 끌려가는 친구를 잡아채서 구출
     ufo_taken: int = 0               # UFO 에 끌려간 횟수

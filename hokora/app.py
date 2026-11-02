@@ -21,6 +21,7 @@ from . import affection as aff
 from . import achievements, daily, expedition, festival, fishing, omamori, photo, season, torii, tutorial, wardrobe, weather
 from . import card, cucumber, goods, ink, lifesense, moon, offering, room, sound, ufo
 from . import fireworks, sengu, training
+from . import dodge, hideseek, incident, janken, letters, race
 from .settings import SettingsWindow
 from .diary import DiaryCard
 from .guests import fade as fade_window
@@ -42,7 +43,7 @@ from .pet import CURSOR, PetWindow
 from .prayer import WISHES, income_multiplier, pat_multiplier
 from .prayer import buy as buy_wish
 from .progress import UNLOCKS, newly_unlocked
-from .render import CHARACTERS, Pose, draw_character
+from .render import CHARACTERS, Pose, draw_character, short_name
 from .shrine import ShrineWindow
 from .torii import ToriiRow
 from .state import APP_NAME, DECOR, LOG_DIR, PAT_REWARD, SAISEN_BOX, SHRINE_SKINS, SaveStore
@@ -133,6 +134,15 @@ class Game(QObject):
         self._ink_canvas: ink.InkCanvas | None = None
         self._room: room.RoomWindow | None = None      # 신사 안 창
         self._room_in: set[str] = set()                # 신사 안을 볼 때 잠깐 들어간 친구
+        self._hiding: set[str] = set()                 # 숨바꼭질로 숨은 친구
+        self.hide_game: hideseek.HideGame | None = None
+        self._hide_ready = 0.0                         # 숨바꼭질을 다시 할 수 있는 시각 (monotonic)
+        self.dodge: dodge.DodgeWindow | None = None    # 탄막 피하기 창
+        self.race: race.RaceWindow | None = None       # 요정 달리기
+        self.ifx = incident.IncidentFx()               # 이변의 모습
+        self.clue: incident.ClueWindow | None = None   # 떠 있는 단서 구슬
+        self._clue_next = time.monotonic() + incident.CLUE_FIRST
+        self._boss_next = 0.0
         self.ufo: ufo.Ufo | None = None                # 누에의 UFO
         self._abducted: dict[str, float] = {}          # UFO 에 끌려간 친구 → 돌아오는 시각 (time.time)
         self._started = time.monotonic()
@@ -284,7 +294,11 @@ class Game(QObject):
         inks = [st.win for st in self.ink]
         offer = [self.offer_tray] if self.state.offering else []
         sky = self.ufo.windows() if self.ufo is not None else []
-        return [*fx, *row, *decors, *inks, self.shrine, *offer, *self.pets, *self.guests, *sky]
+        if self.state.incident and self.state.season_fx:
+            fx.append(self.ifx)
+        play = [w for w in (self.clue, self.race, self.dodge) if w is not None]
+        play += self.hide_game.windows() if self.hide_game is not None else []
+        return [*fx, *row, *decors, *inks, self.shrine, *offer, *self.pets, *self.guests, *sky, *play]
 
     @property
     def scale(self) -> float:
@@ -324,6 +338,13 @@ class Game(QObject):
         QTimer.singleShot(6500, self._check_achievements)
         QTimer.singleShot(4200, self._tutorial_show)
         QTimer.singleShot(5500, self._sengu_tick)                # 꺼 둔 동안 공사가 끝났을 수도
+        QTimer.singleShot(7500, self._check_letters)
+        forced = os.environ.get("HOKORA_INCIDENT", "")           # 시험용: 켜자마자 그 이변 (단서는 10초 뒤)
+        if forced in incident.INCIDENTS and not self.state.incident:
+            incident.start(self.state, forced)
+            self._clue_next = time.monotonic() + 10
+        self._sync_incident()
+        QTimer.singleShot(8500, self._incident_tick)
         self._refresh_festival()
         if self._away >= MIN_AWAY:
             QTimer.singleShot(2500, lambda: self._show_diary(self._away, time.time() - self._away,
@@ -353,8 +374,10 @@ class Game(QObject):
         if self.tip is not None:
             self._tutorial_follow()
         if (self.fx.isVisible() or self.torii_row.isVisible() or self.wfx.isVisible() or self.ffx.isVisible()
-                or self.offer_tray.isVisible()):
+                or self.offer_tray.isVisible() or self.ifx.isVisible()):
             g = self.ground_under(self.shrine.pos_x)
+            if self.ifx.isVisible():
+                self.ifx.follow(self.shrine.pos_x, g.y)
             if self.offer_tray.isVisible():
                 self.offer_tray.follow(self.shrine.pos_x, g.y, self.shrine.width())
             if self.ffx.isVisible():
@@ -403,6 +426,8 @@ class Game(QObject):
                 if self.ufo is not None:
                     self.ufo.cancel()
                     self.ufo = None
+                if self.dodge is not None:          # 탄막 승부 중이었으면 그만둠
+                    self.dodge.give_up()
             log.info("전체화면 %s → %s", "감지" if busy else "종료", "숨김" if busy else "다시 표시")
         if not busy:
             self._restack()
@@ -694,6 +719,8 @@ class Game(QObject):
         self._daily_check()                        # 새전 모으기·함께 지내기는 시간이 지나며 채워짐
         self._ufo_returns()
         self._ufo_roll()
+        self._check_letters()
+        self._incident_tick()
 
     def _new_day(self) -> None:
         """날짜가 바뀌면(켰을 때 포함) 오늘의 부탁을 새로 받고 출석 도장."""
@@ -784,6 +811,7 @@ class Game(QObject):
     def set_season_fx(self, on: bool) -> None:
         self.state.season_fx = on
         self._refresh_season()
+        self._sync_incident()
         log.info("계절 연출: %s", "켬" if on else "끔")
         self.save()
 
@@ -1239,12 +1267,296 @@ class Game(QObject):
         self.save()
         return lv
 
+    # ── 놀이: 가위바위보 · 탄막 피하기 · 숨바꼭질 · 요정 달리기 ──
+    def char_name(self, key: str) -> str:
+        return short_name(key)
+
+    def fade_out_pet(self, pet: PetWindow) -> None:
+        fade_window(pet, 0.0, 0.5, lambda: (pet.close(), pet.deleteLater()))
+
+    def janken(self, pet: PetWindow, hand: str) -> None:
+        s, key = self.state, pet.ch.key
+        theirs, result, reward, first = janken.play(s, key, hand)
+        pet.facing = 1 if self.cursor.x() > pet.pos_x else -1
+        if pet.grounded:
+            pet.act({"lose": "happy", "win": "startled"}.get(result, "wave"), 1.4)
+        text = f"{janken.HANDS[hand][0]} vs {janken.HANDS[theirs][0]}   {janken.line(key, result)}"
+        if reward:
+            text += f"  (새전 +{reward:,})"
+            self.shrine.set_saisen(s.saisen)
+            self.shrine.pop(f"+{reward:,}")
+        if not self.hidden_for_fullscreen:
+            say(text, pet.pos_x, pet.pos_y - 76, 3.0)
+        if first:                                           # 그날 그 친구에게 처음 이기면 조금 친해짐
+            self.later(1.5, lambda: pet in self.pets and self._add_affection(pet, 1))
+        log.info("가위바위보: %s %s vs %s → %s (+%d)", key, hand, theirs, result, reward)
+        self.save()
+
+    def start_dodge(self, key: str, boss: bool = False, on_end=None, near: float | None = None) -> bool:
+        """탄막 피하기 창을 연다. on_end 가 없으면 연습 (하루 5번까지 새전)."""
+        if self.dodge is not None or self.hidden_for_fullscreen:
+            return False
+
+        def ended(won: bool, hits: int) -> None:
+            self.dodge = None
+            if on_end is not None:
+                on_end(won, hits)
+            else:
+                self._dodge_practice_end(key, won, hits)
+        w = dodge.DodgeWindow(key, short_name(key), ended, dodge.BOSS_SECONDS if boss else dodge.PRACTICE_SECONDS, boss)
+        w.destroyed.connect(lambda *_: setattr(self, "dodge", None) if self.dodge is w else None)
+        self.dodge = w
+        cx = self.shrine.pos_x if near is None else near
+        y = self.ground_at(cx)
+        sc = self.app.screenAt(QPoint(round(cx), round(y) - 10)) or self.app.primaryScreen()
+        w.show_above(cx, y - 90, sc.availableGeometry())
+        log.info("탄막 피하기: %s (%s)", key, "흑막" if boss else "연습")
+        return True
+
+    def _dodge_practice_end(self, key: str, won: bool, hits: int) -> None:
+        s = self.state
+        amount = dodge.practice_reward(s, won, hits)
+        name = short_name(key)
+        if won:
+            msg = f"🎯 {name}의 탄막을 버텼다!" + ("  노피탄!" if hits == 0 else "")
+            msg += f"  새전 +{amount:,}" if amount else "  (오늘 연습 보상은 다 받았어요)"
+            if amount:
+                self.shrine.set_saisen(s.saisen)
+                self.shrine.pop(f"+{amount:,}")
+        else:
+            msg = f"💥 {name}의 탄막에 지고 말았다… 다시 도전!"
+        pet = next((p for p in self.pets if p.ch.key == key), None)
+        if pet is not None and not self.hidden_for_fullscreen:
+            if pet.grounded:
+                pet.act("bow" if won else "happy", 1.4)
+            say(msg, pet.pos_x, pet.pos_y - 76, 3.0)
+        else:
+            self._say_at_shrine(msg)
+        log.info("탄막 연습: %s %s (%d번 맞음, +%d)", key, "버팀" if won else "짐", hits, amount)
+        self.save()
+
+    def start_hide(self) -> bool:
+        if self.hide_game is not None or self.hidden_for_fullscreen:
+            return False
+        wait = self._hide_ready - time.monotonic()
+        if wait > 0:
+            self._say_at_shrine(f"🙈 다들 숨느라 지쳤대요. {int(wait // 60) + 1}분 뒤에 다시 놀아요")
+            return False
+        free = [p for p in self.pets if p.grounded and p.isVisible() and self.events.thief is not p]
+        if len(free) < hideseek.MIN_HIDERS:
+            self._say_at_shrine(f"🙈 숨바꼭질은 친구가 {hideseek.MIN_HIDERS}명 이상 나와 있어야 해요")
+            return False
+        self.events.cancel_play()
+        random.shuffle(free)
+        keys = [p.ch.key for p in free[:hideseek.MAX_HIDERS]]
+        self.hide_game = hideseek.HideGame(self, keys)
+        self.hide_game.start()
+        self._say_at_shrine(f"🙈 숨바꼭질! {hideseek.HIDE_TIME:.0f}초 안에 숨은 친구 {len(keys)}명을 찾아요")
+        return True
+
+    def hide_done(self) -> None:
+        self.hide_game = None
+        self._hide_ready = time.monotonic() + hideseek.COOLDOWN
+        self.save()
+
+    def open_race(self) -> None:
+        w = race.RaceBoard(self.state, self.start_race, running=self.race is not None)
+        self.keep(w)
+        w.show_near(QPoint(round(self.shrine.pos_x), round(self.shrine.y())))
+
+    def start_race(self, key: str, bet: int) -> bool:
+        s = self.state
+        if race.blocked(s, bet, self.race is not None) or self.hidden_for_fullscreen:
+            return False
+        c = race.card(s)
+        odds = race.odds_of(s, key)
+        winner = race.decide(c)
+        s.saisen -= bet
+        s.race_count += 1
+        self.shrine.set_saisen(s.saisen)
+        self.shrine.pop(f"-{bet:,}")
+        g = self.ground_under(self.shrine.pos_x)
+        sc = self.app.screenAt(QPoint(round(self.shrine.pos_x), round(g.y) - 10)) or self.app.primaryScreen()
+        w = race.RaceWindow(c, winner, sc.availableGeometry(), self.shrine.pos_x, g.y, bet_key=key,
+                            on_finish=lambda win: self._race_done(key, bet, odds, win),
+                            hidden=lambda: self.hidden_for_fullscreen)
+        w.destroyed.connect(lambda *_: setattr(self, "race", None) if self.race is w else None)
+        self.race = w
+        w.show()
+        self._say_at_shrine(f"🏁 요정 달리기 출발!  {race.NAMES[key]}에게 새전 {bet:,}")
+        log.info("요정 달리기: %s 에 %d (×%g), 1착 %s", key, bet, odds, winner)
+        self.save()
+        return True
+
+    def _race_done(self, key: str, bet: int, odds: float, winner: str) -> None:
+        s = self.state
+        s.race_card = race.new_card()                       # 다음 경주 출전표
+        if winner == key:
+            pay = int(bet * odds)
+            s.add_saisen(pay)
+            s.race_wins += 1
+            s.race_profit += pay - bet
+            self.shrine.set_saisen(s.saisen)
+            self.shrine.pop(f"+{pay:,}")
+            self._say_at_shrine(f"🏆 {race.NAMES[key]} 1착!  배당 ×{odds:g} → 새전 +{pay:,}")
+        else:
+            s.race_profit -= bet
+            self._say_at_shrine(f"🏁 1착은 {race.NAMES[winner]}…  {race.NAMES[key]}에게 건 새전은 신사에 봉납되었어요")
+        self.save()
+
+    # ── 친구 편지 ──
+    def _check_letters(self) -> None:
+        new = letters.deliver(self.state, list(self.state.unlocked))
+        if not new:
+            return
+        log.info("편지 %d통: %s", len(new), new)
+        self.save()
+        if self.hidden_for_fullscreen:
+            return
+        on_open = (lambda: self.open_letter(*new[0])) if len(new) == 1 else self.open_letterbook
+        self.show_card(letters.LetterNote(new, on_open))
+
+    def open_letter(self, key: str, n: int) -> None:
+        gift = letters.read(self.state, key, n)
+        w = letters.LetterWindow(key, n, gift)
+        self.keep(w)
+        w.show_above(self.shrine.pos_x, self.shrine.y() + 20)
+        self.save()
+
+    def open_letterbook(self) -> None:
+        w = letters.LetterBook(self.state, list(self.state.unlocked), self.open_letter)
+        self.keep(w)
+        w.show_near(QPoint(round(self.shrine.pos_x), round(self.shrine.y())))
+
+    # ── 이변 ──
+    def _sync_incident(self) -> None:
+        kind = self.state.incident if self.state.season_fx else ""
+        self.ifx.set_kind(kind)
+        show = bool(kind) and not self.hidden_for_fullscreen
+        if show != self.ifx.isVisible():
+            if show:
+                self.ifx.follow(self.shrine.pos_x, self.ground_under(self.shrine.pos_x).y)
+            self.ifx.setVisible(show)
+
+    def _incident_tick(self) -> None:
+        s = self.state
+        gone = incident.expire(s)
+        if gone is not None:
+            self._close_clue()
+            self._sync_incident()
+            self._say_at_shrine(f"🍃 {gone.name}이 저절로 가라앉았어요. 흑막은 끝내 모습을 드러내지 않았어요…")
+            log.info("이변이 저절로 가라앉음: %s", gone.key)
+            self.save()
+            return
+        if self.hidden_for_fullscreen or self.napping:
+            return
+        new = incident.roll(s)
+        if new is not None:
+            self._clue_next = time.monotonic() + incident.CLUE_FIRST
+            self._sync_incident()
+            self.show_card(DiaryCard(f"⚠ 이변 발생!  {new.name}", [
+                new.desc, "신사 근처에 떠오르는 단서 구슬(?)을 3개 모으면 흑막이 나타나요.",
+                f"이변이 이어지는 동안 참배객이 줄어 새전 수입 ×{incident.MULTIPLIER:g}"], new.kanji))
+            for p in self.pets:
+                if p.grounded:
+                    p.act("startled", 1.0)
+            log.info("이변 발생: %s", new.key)
+            self.save()
+            return
+        if not s.incident:
+            return
+        if incident.ready(s):
+            if time.monotonic() >= self._boss_next:
+                self.summon_boss()
+        elif self.clue is None and time.monotonic() >= self._clue_next:
+            self.spawn_clue()
+
+    def spawn_clue(self) -> bool:
+        inc = incident.active(self.state)
+        if inc is None or self.clue is not None or self.hidden_for_fullscreen:
+            return False
+        self._clue_next = time.monotonic() + random.uniform(*incident.CLUE_EVERY)
+        w = incident.ClueWindow(inc, self._clue_taken)
+        g = self.ground_under(self.shrine.pos_x)
+        pfs = [pf for pf in self.window_platforms if pf.x2 - pf.x1 > 160]
+        if pfs and random.random() < 0.35:                  # 가끔 창 위에
+            pf = random.choice(pfs)
+            x, y = random.uniform(pf.x1 + 50, pf.x2 - 50), pf.y - 46
+        else:                                               # 신사 옆 어딘가 (신사에 겹치지 않게)
+            side = random.choice((-1, 1))
+            x = self.shrine.pos_x + side * random.uniform(self.shrine.width() / 2 + 50, 520)
+            x = min(max(x, g.x1 + 40), g.x2 - 40)
+            y = g.y - 70 - random.uniform(0, 140)
+        w.move(round(x - w.S / 2), round(y - w.S / 2))
+        w.destroyed.connect(lambda *_: setattr(self, "clue", None) if self.clue is w else None)
+        self.clue = w
+        w.show()
+        self._say_at_shrine(f"🔮 {inc.name}의 단서가 어딘가에 떠올랐어요!")
+        log.info("이변 단서 구슬: (%.0f, %.0f)", x, y)
+        return True
+
+    def _clue_taken(self, w) -> None:
+        s = self.state
+        inc = incident.active(s)
+        if self.clue is w:
+            self.clue = None
+        if inc is None:
+            return
+        n = incident.add_clue(s)
+        text = inc.clues[n - 1]
+        if incident.ready(s):
+            self._say_at_shrine(f"🔮 단서 {n}/{incident.CLUES}: {text}  흑막이 곧 나타나요!")
+            self._boss_next = time.monotonic() + 8
+            self.later(8.5, self.summon_boss)
+        else:
+            self._say_at_shrine(f"🔮 단서 {n}/{incident.CLUES}: {text}")
+        log.info("단서 %d/%d (%s)", n, incident.CLUES, inc.key)
+        self.save()
+
+    def _close_clue(self) -> None:
+        if self.clue is not None:
+            self.clue.close()
+            self.clue = None
+
+    def summon_boss(self) -> bool:
+        v = self.visits
+        if not incident.ready(self.state) or v.visit is not None or self.hidden_for_fullscreen or self.napping:
+            return False
+        v.visit = incident.IncidentVisit(v)
+        self._boss_next = time.monotonic() + incident.BOSS_AGAIN
+        self._restack()
+        log.info("이변의 흑막 등장: %s", self.state.incident)
+        return True
+
+    def incident_fight_end(self, won: bool, hits: int) -> None:
+        if not won:
+            log.info("흑막에게 짐 (%d번 맞음)", hits)
+            return
+        got = incident.solve(self.state)
+        if got is None:
+            return
+        inc, amount = got
+        self._close_clue()
+        self._sync_incident()
+        self.shrine.set_saisen(self.state.saisen)
+        self.shrine.pop(f"+{amount:,}")
+        self.later(1.0, self._dance)
+        self.show_card(DiaryCard(f"⚔ {inc.name} 해결!", [
+            f"흑막은 {aff.josa(inc.boss_name, '이었다', '였다')}! 탄막 승부 끝에 이변을 멈췄다.", inc.after],
+            f"새전 +{amount:,}", f"해결한 이변 {incident.solved_total(self.state)}건"))
+        log.info("이변 해결: %s (+%d, %d번 맞음)", inc.key, amount, hits)
+        self.save()
+
+    def incident_boss_left(self, won: bool) -> None:
+        if not won:
+            self._boss_next = time.monotonic() + incident.BOSS_AGAIN
+
     # ── 붐빔 조절 ──
     def _eligible(self) -> list[str]:
         base = list(CHARACTERS) if os.environ.get("HOKORA_ALL") == "1" else self.state.unlocked
         away = expedition.away(self.state)
         return [k for k in base if k not in self.state.resting and k not in away and k not in self._room_in
-                and k not in self._abducted]
+                and k not in self._abducted and k not in self._hiding]
 
     # ── 놀잇감 (새전으로 엶) ──
     def use_goods(self, key: str) -> None:
@@ -1278,7 +1590,8 @@ class Game(QObject):
         base = list(CHARACTERS) if os.environ.get("HOKORA_ALL") == "1" else self.state.unlocked
         out = {p.ch.key for p in self.pets}
         away = expedition.away(self.state)
-        return [k for k in base if k in CHARACTERS and k not in out and k not in away and k not in self._abducted]
+        return [k for k in base if k in CHARACTERS and k not in out and k not in away and k not in self._abducted
+                and k not in self._hiding]
 
     def open_room(self) -> None:
         if self._room is not None:
@@ -1323,7 +1636,7 @@ class Game(QObject):
         if (self.ufo is not None or self.hidden_for_fullscreen or self.napping or self.visits.visit is not None
                 or time.monotonic() - self._started < ufo.FIRST_AFTER):
             return
-        if random.random() < ufo.CHANCE_PER_30S:
+        if random.random() < ufo.CHANCE_PER_30S * incident.ufo_boost(self.state):   # UFO 이변 중엔 자주
             self.summon_ufo()
 
     def summon_ufo(self) -> bool:
@@ -1879,7 +2192,8 @@ class Game(QObject):
         menu = QMenu()
         menu.setStyleSheet(MENU_STYLE)
         if pet in self.guests:                     # 손님: 말 걸기 (+ 스이카는 술 대접)
-            head = menu.addAction(f"{pet.ch.name}   (손님)")
+            boss = isinstance(self.visits.visit, incident.IncidentVisit) and self.visits.is_guest(pet)
+            head = menu.addAction(f"{pet.ch.name}   ({'이변의 흑막' if boss else '손님'})")
             head.setEnabled(False)
             self.visits.fill_menu(pet, menu)
             menu.addSeparator()
@@ -1889,6 +2203,16 @@ class Game(QObject):
         head = menu.addAction(f"{pet.ch.name}   {aff.hearts(s, key)}")
         head.setEnabled(False)
         menu.addAction("💬 말 걸기", lambda: self.talk_to(pet))
+        rps = menu.addMenu("✊ 가위바위보")
+        rps.setStyleSheet(MENU_STYLE)
+        for hk, (icon, hname) in janken.HANDS.items():
+            rps.addAction(f"{icon} {hname}", lambda hk=hk: self.janken(pet, hk))
+        shoot = menu.addAction(f"🎯 탄막 연습  (오늘 보상 {dodge.rewards_left(s)}/{dodge.DAILY_REWARDS})",
+                               lambda: self.start_dodge(key, near=pet.pos_x))
+        shoot.setEnabled(self.dodge is None)
+        got = letters.got(s, key)
+        if got:
+            menu.addAction(f"💌 받은 편지  ({len(got)}/{len(letters.LETTERS[key])})", self.open_letterbook)
         if key in training.EFFECTS:                           # 특기 수련
             lv, price = training.level(s, key), training.cost(s, key)
             skill, effect = training.EFFECTS[key]
@@ -1954,6 +2278,7 @@ class Game(QObject):
                 pet.pos_x, pet.pos_y - 76, 3.5)
             pet.hearts.extend([[0.0, pet.width() / 2 + dx, 40] for dx in (-12, 0, 12)])
             log.info("호감도: %s Lv.%d", pet.ch.key, lv)
+            self.later(4.0, self._check_letters)          # 하트가 늘면 편지가 옴
 
     def talk_to(self, pet: PetWindow) -> None:
         line, gained = aff.talk(self.state, pet.ch.key)
@@ -2129,6 +2454,20 @@ class Game(QObject):
         menu.addAction("신사 관리 · 도감", self.open_panel)
         menu.addAction("📸 사진 찍기", self.take_photo)
         menu.addAction("🪪 신사 명함 만들기", self.make_card)
+        play = menu.addMenu("🎮 놀이")
+        play.setStyleSheet(MENU_STYLE)
+        a = play.addAction("🙈 숨바꼭질" + ("  (하는 중)" if self.hide_game is not None else ""), self.start_hide)
+        a.setEnabled(self.hide_game is None)
+        play.addAction("🏁 요정 달리기 내기" + ("  (달리는 중)" if self.race is not None else ""), self.open_race)
+        shoot = play.addMenu(f"🎯 탄막 연습  (오늘 보상 {dodge.rewards_left(s)}/{dodge.DAILY_REWARDS})")
+        shoot.setStyleSheet(MENU_STYLE)
+        shoot.setEnabled(self.dodge is None and bool(self.pets))
+        for p in self.pets:
+            shoot.addAction(f"{short_name(p.ch.key)}의 탄막", lambda p=p: self.start_dodge(p.ch.key, near=p.pos_x))
+        tip = play.addAction("✊ 가위바위보는 친구를 우클릭")
+        tip.setEnabled(False)
+        unread = len(letters.unread(s))
+        menu.addAction("💌 편지함" + (f"  (안 읽은 편지 {unread})" if unread else ""), self.open_letterbook)
         for key in ("brush", "room"):
             g = goods.GOODS[key]
             text = g.use if key in s.goods else f"🔒 {g.use.split(' ', 1)[1]}  (새전 {g.price:,})"

@@ -19,6 +19,7 @@ NEWS_BOOST = 1.5        # 붕붕마루 신문 기사 효과: 수입 배수 (news
 NEWS_SECONDS = 30 * 60
 FAN_BOOST = 1.5         # 니토리의 증기 선풍기
 EEL_BOOST = 1.3         # 미스티아의 장어구이
+INCIDENT_SLUMP = 0.85   # 이변이 이어지는 동안 참배객이 줄어듦 (incident.py)
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,8 @@ def income_multiplier(s: GameState) -> float:
     if moon.is_full() and season.is_night():  # 보름달 밤
         m *= moon.FULL_INCOME
     m *= sengu.multiplier(s)                  # 식년천궁: 새로 지을 때마다 +10% (영구)
+    if s.incident:                            # 이변 중
+        m *= INCIDENT_SLUMP
     return m * (1 + omamori.bonus(s, "income"))
 
 

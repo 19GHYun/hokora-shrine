@@ -28,8 +28,8 @@ if os.environ.get("HOKORA_SMOKE_SHOW") != "1":
     os.environ.setdefault("QT_QPA_FONTDIR", "C:/Windows/Fonts")
 sys.path.insert(0, str(ROOT))
 
-from PySide6.QtCore import QPoint, Qt, QTimer  # noqa: E402
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtCore import QPoint, QPointF, Qt, QTimer  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMenu  # noqa: E402
 
 from hokora import app as hk  # noqa: E402
 from hokora import affection as aff  # noqa: E402
@@ -1110,6 +1110,358 @@ def t_fireworks3():
     check("특대 90발 · 피날레에 몰아서", len(sched) == 90 and sum(t > sched[-1] * 0.8 for t in sched) >= 30)
 
 
+def close_cards() -> None:
+    for c in list(game._card_queue):
+        c.close()
+
+
+def t_letters():
+    """친구 편지: 하트가 늘면 편지가 오고, 누르면 펼쳐짐 · 다섯 번째엔 옷감 · 편지함."""
+    from hokora import letters
+    from hokora.render import short_name
+    calm()
+    close_cards()
+    P.update({p.ch.key: p for p in game.pets})        # 앞 시험에서 다시 나온 친구는 새 창
+    s.letters, s.letters_read, s.affection = {}, [], {}
+    game._check_letters()
+    check("하트가 없으면 편지도 없음", letters.count(s) == 0 and not game._card_queue)
+    game._add_affection(P["reimu"], 5)
+    game._check_letters()
+    note = game._card_queue[-1] if game._card_queue else None
+    check("하트 1개 → 편지 1통 · 알림 카드", letters.got(s, "reimu") == [1] and isinstance(note, letters.LetterNote))
+    if note is not None:
+        note.on_open()
+    opened = [w for w in game._cards if isinstance(w, letters.LetterWindow)]
+    check("알림을 누르면 편지지가 펼쳐지고 읽음", opened and "reimu:1" in s.letters_read)
+    for w in opened:
+        w.close()
+    close_cards()
+    s.affection.update(marisa=150, cirno=40)
+    queued = len(game._card_queue)                    # 닫은 카드는 이벤트 루프가 돌아야 빠짐
+    game._check_letters()
+    note = game._card_queue[-1] if game._card_queue else None
+    check("이미 친한 친구 편지는 한꺼번에 · 알림은 한 장",
+          letters.got(s, "marisa") == [1, 2, 3, 4, 5] and letters.got(s, "cirno") == [1, 2, 3]
+          and len(game._card_queue) == queued + 1 and "8통" in note.title, getattr(note, "title", None))
+    cloth0 = s.cloth
+    gift = letters.read(s, "marisa", 5)
+    check("다섯 번째 편지엔 옷감", gift and s.cloth == cloth0 + letters.LAST_GIFT)
+    check("두 번 읽어도 선물은 한 번", letters.read(s, "marisa", 5) == "" and s.cloth == cloth0 + letters.LAST_GIFT)
+    book = letters.LetterBook(s, s.unlocked, lambda k, n: G.__setitem__("letter", (k, n)))
+    b = book.buttons
+    check("편지함: 받은 것만 열림 · 안 읽은 건 ●", b[("marisa", 1)].isEnabled() and b[("marisa", 1)].text().startswith("●")
+          and not b[("reimu", 2)].isEnabled() and b[("reimu", 1)].text() == "1")
+    b[("cirno", 2)].click()
+    check("편지함에서 누르면 그 편지", G.get("letter") == ("cirno", 2))
+    book.close()
+    win = letters.LetterWindow("remilia", 5, "선물")
+    check("편지지 그림", not win.grab().isNull())
+    win.close()
+    check("편지 45통 · 친구마다 5통 · 글이 다 있음", letters.TOTAL == 45 and all(len(v) == 5 for v in letters.LETTERS.values())
+          and all(a and b_ and c for v in letters.LETTERS.values() for a, b_, c in v))
+    check("짧은 이름 (레밀리아 · 레이센)", short_name("remilia") == "레밀리아" and short_name("reisen") == "레이센"
+          and short_name("reimu") == "레이무")
+    m = QMenu()
+    game._fill_menu(m)
+    texts = [a.text() for a in m.actions()]
+    check("메뉴: 💌 편지함 (안 읽은 편지) · 🎮 놀이", any(x.startswith("💌 편지함  (안 읽은 편지") for x in texts)
+          and "🎮 놀이" in texts, texts)
+    close_cards()
+
+
+def t_janken():
+    """가위바위보: 친구마다 버릇 · 이기면 새전 (하루 10번) · 그날 처음 이기면 호감도."""
+    from hokora import janken
+    rng = random.Random(3)
+    check("치르노는 거의 늘 바위", sum(janken.friend_hand("cirno", "paper", rng) == "rock" for _ in range(300)) > 250)
+    lose = sum(janken.judge("rock", janken.friend_hand("sakuya", "rock", rng)) == "lose" for _ in range(3000)) / 3000
+    check("사쿠야는 조금 잘 이김", 0.47 < lose < 0.6, lose)
+    check("판정", janken.judge("rock", "scissors") == "win" and janken.judge("rock", "paper") == "lose"
+          and janken.judge("paper", "paper") == "draw")
+
+    class Scissors:
+        def random(self):
+            return 0.99
+
+        def choice(self, seq):
+            return "scissors"
+    s.janken_day = ""
+    before = s.saisen
+    _theirs, result, reward, first = janken.play(s, "reimu", "rock", Scissors())
+    check("이기면 새전 · 그날 처음이면 호감도", result == "win" and reward == max(10, s.income_per_min) and first
+          and s.saisen == before + reward)
+    check("같은 날 두 번째 승리는 호감도 없음", not janken.play(s, "reimu", "rock", Scissors())[3])
+    for _ in range(12):
+        janken.play(s, "marisa", "rock", Scissors())
+    check("새전은 하루 10번까지", s.janken_today == janken.DAILY_REWARDS
+          and janken.play(s, "sanae", "rock", Scissors())[2] == 0)
+    n = s.janken_games
+    game.janken(P["sanae"], "paper")
+    check("친구 우클릭 → 가위바위보", s.janken_games == n + 1)
+
+
+def t_dodge():
+    """탄막 피하기: 끝까지 버티면 승리, 세 번 맞으면 짐, 패턴마다 탄, 연습 보상은 하루 5번."""
+    from hokora import dodge
+    calm()
+    w = dodge.DodgeWindow("reimu", "레이무", lambda won, hits: G.__setitem__("dodge", (won, hits)), 3.0,
+                          rng=random.Random(2))
+    w.soul_override = QPointF(20, 20)
+    for _ in range(int((dodge.READY + 3.0) / 0.05) + 3):
+        w.step(0.05)
+        w.bullets.clear()
+    check("끝까지 버티면 승리", w.result is True and w.hits == 0)
+    for _ in range(int(dodge.END_SHOW / 0.05) + 3):
+        w.step(0.05)
+    check("결과를 보여 준 뒤 끝 (on_end)", G.get("dodge") == (True, 0))
+    w2 = dodge.DodgeWindow("cirno", "치르노", lambda won, hits: G.__setitem__("dodge2", (won, hits)), 10.0,
+                           rng=random.Random(2))
+    w2.soul_override = QPointF(100, 100)
+    for _ in range(400):
+        w2.step(0.05)
+        if w2.result is not None and "dodge2" in G:
+            break
+        if w2.result is None:
+            w2.bullets.append([100.0, 100.0, 0.0, 0.0, 4.5, -1])
+    check("세 번 맞으면 짐 (맞은 뒤 잠깐 무적)", G.get("dodge2") == (False, dodge.LIVES), G.get("dodge2"))
+    shot = {}
+    for key in dodge.STYLES:
+        w3 = dodge.DodgeWindow(key, key, lambda *a: None, 6.0, boss=True, rng=random.Random(4))
+        w3.soul_override = QPointF(170, 200)
+        w3.inv_until = 1e9
+        most = 0
+        for _ in range(int((dodge.READY + 4.0) / 0.05)):
+            w3.step(0.05)
+            most = max(most, len(w3.bullets))
+        shot[key] = most
+        if key == "flandre":
+            check("탄막 상자 그림", not w3.grab().isNull())
+        w3.timer.stop()
+        w3.close()
+    check("친구 · 흑막마다 탄을 쏨", all(v >= 3 for v in shot.values()), shot)
+    s.dodge_day = ""
+    a = dodge.practice_reward(s, True, 0)
+    check("연습 보상: 노피탄이면 2배", a == max(50, s.income_per_min * 4) * 2)
+    check("지면 보상 없음", dodge.practice_reward(s, False, 3) == 0)
+    for _ in range(6):
+        dodge.practice_reward(s, True, 1)
+    check("연습 보상은 하루 5번까지", s.dodge_today == dodge.DAILY_REWARDS and dodge.rewards_left(s) == 0)
+    check("친구 탄막 연습 창이 열림", game.start_dodge("marisa", near=P["marisa"].pos_x)
+          and game.dodge is not None and game.dodge.isVisible())
+    check("한 번에 하나만", not game.start_dodge("reimu"))
+    if game.dodge is not None:
+        game.dodge.give_up()
+    check("오른쪽 클릭 · ✕ 로 그만두기", game.dodge is None)
+
+
+def t_hide():
+    """숨바꼭질: 친구들이 화면 곳곳에 숨음."""
+    from hokora import hideseek
+    calm()
+    close_cards()
+    game._hide_ready = 0.0
+    check("숨바꼭질 시작", game.start_hide() and game.hide_game is not None)
+    hg = G["hide"] = game.hide_game
+    if hg is None:
+        return
+    check("숨은 친구는 작업표시줄에서 빠짐", 2 <= len(hg.keys) <= hideseek.MAX_HIDERS
+          and all(k in game._hiding for k in hg.keys) and not any(p.ch.key in hg.keys for p in game.pets))
+    check("숨은 동안은 다시 나오지 않음", not any(k in game._eligible() for k in hg.keys))
+    check("하는 중엔 또 못 함", not game.start_hide())
+
+
+def t_hide2():
+    hg = G.get("hide")
+    if hg is None:
+        return
+    check("숨는 곳에 나타남", len(hg.spots) == len(hg.keys) and all(sp.isVisible() for sp in hg.spots.values()))
+    check("숨는 곳이 제각각", len({sp.kind for sp in hg.spots.values()}) == len(hg.spots),
+          [sp.kind for sp in hg.spots.values()])
+    hg.next_hint = 0.0
+    hg.tick()
+    check("힌트: 숨은 곳이 들썩", any(time.monotonic() < sp.wiggle_until for sp in hg.spots.values()))
+    before, found0 = s.saisen, s.hide_found
+    spots = list(hg.spots.values())
+    spots[0].mousePressEvent(None)
+    check("찾으면 새전", spots[0].found and s.saisen == before + hg.reward_each() and s.hide_found == found0 + 1)
+    for sp in spots[1:-1]:
+        sp.mousePressEvent(None)
+    G["hide_left"] = spots[-1]
+    hg.ends = time.monotonic() - 1
+    hg.tick()
+    check("시간이 다 되면 끝 · 못 찾은 친구는 드러남", hg.over and game.hide_game is None and spots[-1].alpha == 1.0)
+
+
+def t_hide3():
+    hg = G.get("hide")
+    if hg is None:
+        return
+    check("끝나면 모두 작업표시줄로", not game._hiding and all(any(p.ch.key == k for p in game.pets) for k in hg.keys))
+    check("결과 카드", any("숨바꼭질" in getattr(c, "title", "") for c in game._card_queue))
+    check("끝나면 잠깐 쉼", not game.start_hide())
+    game._hide_ready = 0.0
+    P.update({p.ch.key: p for p in game.pets})
+    close_cards()
+
+
+def t_race():
+    """요정 달리기: 배당 = 0.9 ÷ 이길 확률, 정한 1착이 그대로 들어옴."""
+    from hokora import race
+    rng = random.Random(5)
+    c = race.new_card(rng)
+    check("출전표: 넷 · 배당 1.2 이상", len(c) == 4 and all(o >= 1.2 for _k, o, _c in c), c)
+    total, n = 0.0, 20000
+    for _ in range(n):
+        cc = race.new_card(rng)
+        win, k = race.decide(cc, rng), rng.choice(race.RUNNERS)
+        total += next(o for kk, o, _c in cc if kk == k) if win == k else 0
+    check("길게 보면 신사가 10% 정도", 0.85 < total / n < 0.96, round(total / n, 3))
+    s.saisen = 500
+    check("새전이 모자라면 못 검", race.blocked(s, 1000, False))
+    s.saisen, s.race_card = 10 ** 6, []
+    count0 = s.race_count
+    odds = race.odds_of(s, "cirno")
+    orig, race.decide = race.decide, (lambda c, rng=None: "cirno")
+    try:
+        ok = game.start_race("cirno", 1000)
+    finally:
+        race.decide = orig
+    check("내기 걸고 출발", ok and game.race is not None and s.saisen == 10 ** 6 - 1000 and s.race_count == count0 + 1)
+    check("달리는 중엔 또 못 검", not game.start_race("luna", 1000))
+    w = game.race
+    if w is None:
+        return
+    T = race.RACE_SECONDS
+    check("1착은 정한 대로 들어옴", w.order(T)[0] == "cirno" and w.progress("cirno", T) == 1.0
+          and all(w.progress(k, T) < 1 for k in w.keys if k != "cirno"))
+    check("처음엔 모두 출발선", all(w.progress(k, 0.0) == 0.0 for k in w.keys))
+    check("경주로 그림", not w.grab().isNull())
+    G["race"] = odds
+    w.started -= T - 0.3
+
+
+def t_race2():
+    from hokora import race
+    odds = G.get("race")
+    if odds is None:
+        return
+    check("1착이면 건 새전 × 배당", s.saisen == 10 ** 6 - 1000 + int(1000 * odds) and s.race_wins >= 1,
+          (s.saisen, odds))
+    check("다음 출전표가 새로 나옴", len(s.race_card) == 4)
+    board = race.RaceBoard(s, lambda k, b: G.__setitem__("bet", (k, b)))
+    check("출전표 창: 4명 × 3가지", len(board.buttons) == 12 and all(b.isEnabled() for b in board.buttons.values()))
+    board.buttons[("star", 10_000)].click()
+    check("누르면 그 친구에게 건다", G.get("bet") == ("star", 10_000))
+    s.saisen = 5000
+    board = race.RaceBoard(s, lambda k, b: None)
+    check("새전이 모자란 칸은 못 누름", board.buttons[("luna", 1000)].isEnabled()
+          and not board.buttons[("luna", 10_000)].isEnabled())
+    board.close()
+    s.saisen = 10 ** 6
+
+
+def t_incident():
+    """이변: 때가 되면 일어남 → 수입 ×0.85 · 이변의 모습 · 단서 구슬."""
+    from hokora import incident
+    calm()
+    close_cards()
+    G["level"] = s.shrine_level
+    s.incident, s.incident_next, s.incident_clues, s.shrine_level = "", 0.0, 0, 1
+    check("신사 1단계엔 이변 없음", incident.roll(s, 1000.0) is None and not s.incident_next)
+    s.shrine_level = 2
+    check("처음엔 20~40분 뒤로 예약", incident.roll(s, 1000.0) is None and 2200 <= s.incident_next <= 3400)
+    base = G["base"] = prayer.income_multiplier(s)
+    s.incident_next = time.time() - 1
+    game._incident_tick()
+    inc = incident.active(s)
+    check("때가 되면 이변 발생 · 알림 카드", inc is not None
+          and any("이변 발생" in getattr(c, "title", "") for c in game._card_queue))
+    if inc is None:
+        return
+    check("이변 중엔 새전 수입 ×0.85", abs(prayer.income_multiplier(s) / base - incident.MULTIPLIER) < 1e-9)
+    check("신사 둘레에 이변의 모습", game.ifx.isVisible() and game.ifx.kind == s.incident and game.ifx in game.windows())
+    pics = []
+    for k in incident.INCIDENTS:
+        game.ifx.set_kind(k)
+        game.ifx._tick()
+        pics.append(game.ifx.grab().toImage())
+    game.ifx.set_kind(s.incident)
+    check("이변마다 모습이 다름", len({bytes(im.constBits()) for im in pics}) == 5)
+    s.incident = "ufo"
+    check("UFO 이변엔 UFO 4배", incident.ufo_boost(s) == 4.0)
+    s.incident = inc.key
+    game._clue_next = 0.0
+    game._incident_tick()
+    clue = game.clue
+    check("단서 구슬이 떠오름", clue is not None and clue.isVisible())
+    if clue is not None:
+        clue.mousePressEvent(None)
+    check("단서를 주우면 1/3", s.incident_clues == 1 and game.clue is None)
+    game.spawn_clue()
+    if game.clue is not None:
+        game.clue.born -= incident.CLUE_STAY + 1
+        game.clue._tick()
+    game.open_panel()
+    p = game.panel
+    check("모험 탭: 이변 현황", "단서 1/3" in p.inc_now.text() and inc.name in p.inc_now.text(), p.inc_now.text())
+    check("새전 수입 표시에 이변", inc.name in p.sub.text())
+    p.close()
+
+
+def t_incident2():
+    from hokora import dodge, incident
+    check("가만두면 단서 구슬은 사라짐", game.clue is None)
+    close_cards()
+    s.incident_clues = 2
+    game._clue_next = 0.0
+    game._incident_tick()
+    if game.clue is not None:
+        game.clue.mousePressEvent(None)
+    check("단서 3개 → 흑막이 드러남", incident.ready(s))
+    game.visits.visit = None
+    check("흑막 등장", game.summon_boss() and isinstance(game.visits.visit, incident.IncidentVisit))
+    v = game.visits.visit
+    if not isinstance(v, incident.IncidentVisit):
+        return
+    G["iv"] = v
+    check("흑막은 그 이변의 주인", v.boss.key == incident.active(s).boss)
+    m = QMenu()
+    game.visits.fill_menu(v.boss.pet, m)
+    check("우클릭 → ⚔ 탄막 승부", any("탄막 승부" in a.text() for a in m.actions()))
+    check("흑막을 누르면 탄막 승부 (20초)", v.fight() and game.dodge is not None and game.dodge.boss
+          and game.dodge.seconds == dodge.BOSS_SECONDS)
+    check("승부 중엔 또 못 함", not v.fight())
+    if game.dodge is not None:
+        game.dodge.give_up()
+    check("지면 이변은 그대로 · 다시 도전", s.incident and v.phase in ("taunt", "wait") and not v.fighting)
+    v.fight()
+    before, reward, solved0 = s.saisen, incident.reward(s), incident.solved_total(s)
+    d = game.dodge
+    if d is not None:
+        d.result, d.end_at = True, 0.0
+        d.step(0.01)
+    check("이기면 이변 해결 · 큰 새전", not s.incident and s.saisen == before + reward
+          and incident.solved_total(s) == solved0 + 1, (s.saisen - before, reward))
+    check("해결 카드", any("해결" in getattr(c, "title", "") for c in game._card_queue))
+    check("이변의 모습이 걷히고 수입도 원래대로", not game.ifx.isVisible()
+          and abs(prayer.income_multiplier(s) - G["base"]) < 1e-9)
+    check("다음 이변은 2~4일 뒤", 2 * 86400 - 5 <= s.incident_next - time.time() <= 4 * 86400)
+    check("흑막은 졌다며 돌아감", v.phase == "beaten")
+
+
+def t_incident3():
+    from hokora import incident
+    check("흑막이 돌아가면 방문 끝", game.visits.visit is None)
+    incident.start(s, "border", time.time() - incident.EXPIRE - 1)
+    game._incident_tick()
+    check("사흘 지나면 저절로 가라앉음", not s.incident and s.incident_next > time.time())
+    w = incident.ClueWindow(incident.INCIDENTS["spring"], lambda w: None)
+    check("단서 구슬 그림", not w.grab().isNull())
+    w.close()
+    s.shrine_level = G.get("level", s.shrine_level)
+    close_cards()
+
+
 def t_end():
     app.quit()
 
@@ -1123,7 +1475,9 @@ STEPS = [(t_core, 3000), (t_core2, 2500), (t_thief, 1600), (t_skill, 1800), (t_a
          (t_expedition2, 1000), (t_achieve, 1000), (t_fishing, 1000), (t_festival, 1000),
          (t_crowd, 1500), (t_crowd2, 1500), (t_crowd3, 2500), (t_tutorial, 2000), (t_options, 1500), (t_goods, 1800), (t_goods2, 1000), (t_ufo, 1500), (t_ufo2, 1200), (t_ufo3, 500),
          (t_cuke, 300), (t_offer, 1500), (t_offer2, 1500), (t_life, 1000), (t_settings, 500),
-         (t_sengu, 500), (t_train, 500), (t_fireworks, 2500), (t_fireworks2, 2600), (t_fireworks3, 300), (t_end, 0)]
+         (t_sengu, 500), (t_train, 500), (t_fireworks, 2500), (t_fireworks2, 2600), (t_fireworks3, 300),
+         (t_letters, 300), (t_janken, 300), (t_dodge, 500), (t_hide, 2600), (t_hide2, 3600), (t_hide3, 300),
+         (t_race, 1500), (t_race2, 300), (t_incident, 600), (t_incident2, 5500), (t_incident3, 300), (t_end, 0)]
 
 
 def run(i: int = 0) -> None:

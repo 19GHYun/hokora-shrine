@@ -513,6 +513,16 @@ GUESTS: dict[str, Character] = {
     "nitori": Character(key="nitori", name="카와시로 니토리", hair="#4A7EC8", hair_dark="#3460A0", eyes="#3478E0",
                         dress="#4A86B8", dress_dark="#346890", sleeves="#4A86B8", shoes="#3C6A9A"),
 }
+# 짧게 부를 때 (보통은 이름의 끝 단어. 성이 뒤에 오는 친구만 따로)
+SHORT_NAMES = {"remilia": "레밀리아", "flandre": "플랑드르", "reisen": "레이센", "mystia": "미스티아",
+               "patchouli": "파츄리", "sunny": "서니", "luna": "루나", "star": "스타"}
+
+
+def short_name(key: str) -> str:
+    if key in SHORT_NAMES:
+        return SHORT_NAMES[key]
+    ch = CHARACTERS.get(key) or GUESTS.get(key)
+    return ch.name.split()[-1] if ch else key
 
 
 def draw_character(p: QPainter, ch: Character, pose: Pose, rect: QRectF) -> None:
