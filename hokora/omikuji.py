@@ -10,7 +10,7 @@ from PySide6.QtCore import QPoint, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
-from . import omamori, training, weather
+from . import omamori, shintoku, training, weather
 from .render import CHARACTERS
 from .state import GameState
 
@@ -70,6 +70,7 @@ def draw(s: GameState, rng: random.Random | None = None, today: date | None = No
     elif s.omikuji_date != today_s:
         s.omikuji_extra = 0                                   # 날이 바뀌면 남은 "한 번 더"는 사라짐
     reward = int(fortune.reward * s.shrine_level * (1 + omamori.bonus(s, "omikuji")) * (1 + 0.05 * remi if fate else 1))
+    reward += shintoku.omikuji_bonus(s)                 # 신덕 운세: 분당 수입 × 10분·Lv
     s.add_saisen(reward)
     s.omikuji_date = (today or date.today()).isoformat()
     s.omikuji_count += 1

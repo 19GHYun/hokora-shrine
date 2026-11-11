@@ -12,7 +12,7 @@ import random
 import time
 from dataclasses import dataclass
 
-from . import omamori
+from . import omamori, shintoku
 from .state import GameState
 
 
@@ -72,9 +72,19 @@ def send(s: GameState, char: str, place: str, now: float | None = None) -> bool:
     if place not in PLACES or can_send(s, char):
         return False
     now = now or time.time()
-    s.expeditions.append({"char": char, "place": place, "start": now, "end": now + PLACES[place].hours * 3600,
+    s.expeditions.append({"char": char, "place": place, "start": now, "end": now + hours(s, place) * 3600,
                           "reward": reward_for(s, char, place)})
     return True
+
+
+def hours(s: GameState, place: str) -> float:
+    """그곳까지 다녀오는 시간 (신덕 '원정'만큼 짧아짐)."""
+    return PLACES[place].hours * shintoku.journey_scale(s)
+
+
+def fmt_hours(h: float) -> str:
+    m = round(h * 60)
+    return f"{m // 60}시간" + (f" {m % 60}분" if m % 60 else "") if m >= 60 else f"{m}분"
 
 
 def left(e: dict, now: float | None = None) -> float:

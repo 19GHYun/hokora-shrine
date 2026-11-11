@@ -11,18 +11,24 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
-from . import omamori, sengu
+from . import omamori, sengu, shintoku
 from .state import SAISEN_BOX, GameState
 
 MIN_AWAY = 10 * 60        # 이보다 짧게 비우면 일기는 쓰지 않음
 
 
+def box_cap(s: GameState) -> tuple[int, float]:
+    """새전함: (꺼져 있는 동안 최대 몇 시간, 수입의 몇 배) — 신덕 '새전함'만큼 늘어남."""
+    cap_h, rate, _ = SAISEN_BOX[s.box_level]
+    return cap_h + shintoku.offline_hours(s), rate
+
+
 def offline_income(s: GameState, seconds: float) -> int:
     """꺼져 있던 동안 새전함에 쌓인 새전 (새전함 단계만큼만, 최대 시간까지)."""
-    cap_h, rate, _ = SAISEN_BOX[s.box_level]
+    cap_h, rate = box_cap(s)
     pill = 2 if s.dream_pill else 1                          # 레이센의 꿈나라 약
     return int(s.income_per_min * min(seconds, cap_h * 3600) / 60 * rate * (1 + omamori.bonus(s, "offline")) * pill
-               * sengu.multiplier(s))
+               * sengu.multiplier(s) * shintoku.income_mult(s) * shintoku.offline_mult(s))
 
 
 def _hm(seconds: float) -> str:
@@ -224,7 +230,7 @@ def away_card(s: GameState, seconds: float, start: float, earned: int, offline: 
     lines = diary_lines(s, seconds, start) or ["모두 얌전히 신사를 지켰다."]
     sub = ""
     if offline:
-        cap_h, rate, _ = SAISEN_BOX[s.box_level]
+        cap_h, rate = box_cap(s)
         footer = f"새전함에 새전 +{earned:,}"
         sub = f"새전함 Lv.{s.box_level} · 최대 {cap_h}시간 · 수입의 {int(rate * 100)}%"
     else:

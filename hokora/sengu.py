@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import time
 
+from . import shintoku
 from .state import MAX_STAGE, GameState
 
 BASE_COST = 500_000
@@ -19,7 +20,18 @@ BOOST_EACH = 0.10
 
 
 def cost(s: GameState) -> int:
-    return BASE_COST * 2 ** s.sengu
+    """값 (신덕 '목수'면 Lv 마다 -2%). 정수로만 셈 — 30대째도 정확하게."""
+    return BASE_COST * 2 ** s.sengu * (50 - shintoku.level(s, "carpenter")) // 50
+
+
+def build_seconds(s: GameState) -> float:
+    """공사 시간 (신덕 '목수'면 Lv 마다 -5분)."""
+    return BUILD_SECONDS - shintoku.build_cut(s)
+
+
+def fmt_build(s: GameState) -> str:
+    m = round(build_seconds(s) / 60)
+    return "1시간" if m == 60 else f"{m}분"
 
 
 def multiplier(s: GameState) -> float:
@@ -59,7 +71,7 @@ def start(s: GameState, now: float | None = None) -> bool:
     if blocked(s, now):
         return False
     s.saisen -= cost(s)
-    s.sengu_until = (now if now is not None else time.time()) + BUILD_SECONDS
+    s.sengu_until = (now if now is not None else time.time()) + build_seconds(s)
     return True
 
 

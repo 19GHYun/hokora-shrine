@@ -244,6 +244,17 @@ class GameState:
     ufo_shot: int = 0                # UFO 격추 (ufo.py)
     ufo_rescued: int = 0             # 끌려가는 친구를 잡아채서 구출
     ufo_taken: int = 0               # UFO 에 끌려간 횟수
+    perks: dict[str, int] = field(default_factory=dict)   # 신덕 (shintoku.py): 강화 → 레벨
+    perk_resets: int = 0
+    shintoku_seen: bool = False      # 신덕 안내를 봤나
+    year_base: dict = field(default_factory=dict)   # 연말 결산 (yearend.py): 올해 시작할 때의 기록
+    year_last: dict = field(default_factory=dict)   # 지난해 결산 (해가 바뀔 때 만들어 둠)
+    wrapped_seen: int = 0            # 결산 카드를 저절로 보여 준 해
+    clean_day: str = ""              # 연말 대청소 (newyear.py): 마지막으로 대청소한 날
+    clean_days: int = 0              # 다 치운 날 수
+    clean_spots: int = 0             # 치운 먼지·거미줄 수
+    hatsumode_year: int = 0          # 새해 첫 참배를 한 해
+    nengajo: int = 0                 # 만든 연하장 수
     created: str = field(default_factory=lambda: datetime.now().isoformat(timespec="seconds"))
 
     @property

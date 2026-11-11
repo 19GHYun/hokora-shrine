@@ -164,7 +164,8 @@ def ready(s: "GameState") -> bool:
 
 
 def reward(s: "GameState") -> int:
-    return max(3000, s.income_per_min * 240)
+    from . import shintoku
+    return int(max(3000, s.income_per_min * 240) * shintoku.boss_mult(s))      # 신덕 퇴마
 
 
 def solve(s: "GameState", now: float | None = None) -> tuple[Incident, int] | None:

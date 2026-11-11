@@ -11,9 +11,9 @@ import random
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QPoint, QPointF, QRectF, QRegularExpression, Qt
+from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPainterPath, QPen, QRegularExpressionValidator
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from .state import GameState
 
@@ -136,6 +136,28 @@ def buy(s: GameState, n: int, now: datetime | None = None) -> int:
     return n
 
 
+def parse_amount(text: str) -> int:
+    """적은 개수 ("1,500" · "1500") → 정수. 비었거나 이상하면 0."""
+    digits = text.replace(",", "").strip()
+    return int(digits) if digits.isdigit() else 0
+
+
+def custom_check(s: GameState, n: int, now: datetime | None = None) -> tuple[str, str]:
+    """원하는 만큼 사고팔기: (미리 보기 글, 못 하는 까닭 — 할 수 있으면 "")."""
+    now = now or datetime.now()
+    if n <= 0:
+        return "", "개수를 적어 주세요"
+    if can_buy(now):
+        cost = n * s.cuke_base
+        if cost > s.saisen:
+            return f"새전 부족 (최대 {s.saisen // s.cuke_base:,}개)", "새전이 모자라요"
+        return f"새전 {cost:,}", ""
+    if n > s.cuke_have:
+        return f"가진 오이는 {s.cuke_have:,}개", "가진 오이보다 많아요"
+    gross = n * price_now(s, now)
+    return f"+{gross - fee(gross):,} (수수료 {fee(gross):,})", ""
+
+
 def fee(gross: int) -> int:
     """팔 때 떼는 수수료 (5%, 올림)."""
     return -(-gross * round(SELL_FEE * 100) // 100)
@@ -196,6 +218,26 @@ class CucumberWindow(QWidget):
         self.row = QHBoxLayout()
         self.btns: list[QPushButton] = []
         v.addLayout(self.row)
+        crow = QHBoxLayout()                            # 원하는 만큼 (개수를 적어서)
+        self.amount = QLineEdit()
+        self.amount.setPlaceholderText("원하는 개수")
+        self.amount.setValidator(QRegularExpressionValidator(QRegularExpression(r"[0-9,]{0,24}")))
+        self.amount.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.amount.setFixedWidth(130)
+        self.amount.setStyleSheet("QLineEdit { background: #FFFFFF; border: 1px solid #E3B7BF; border-radius: 8px;"
+                                  " padding: 4px 8px; font-size: 13px; color: #3A2A2E; }"
+                                  " QLineEdit:focus { border: 1px solid #3E8E5A; }")
+        self.amount.textChanged.connect(lambda _t: self._preview())
+        self.amount.returnPressed.connect(self._custom)
+        self.custom_btn = QPushButton(objectName="upgrade")
+        self.custom_btn.setCursor(Qt.PointingHandCursor)
+        self.custom_btn.clicked.connect(self._custom)
+        self.preview = QLabel(objectName="goal")
+        crow.addWidget(self.amount)
+        crow.addWidget(QLabel("개", objectName="goal"))
+        crow.addWidget(self.custom_btn)
+        crow.addWidget(self.preview, 1)
+        v.addLayout(crow)
         foot = QLabel("일요일·월요일 오전에 사서, 월요일 오후~토요일에 하루 두 번 바뀌는 값에 팔아요. "
                       f"팔 때 니토리가 수수료 {SELL_FEE:.0%}를 떼요. 다음 일요일이 되면 남은 오이는 시들어요.",
                       objectName="sub")
@@ -253,8 +295,34 @@ class CucumberWindow(QWidget):
         else:
             self.info.setText(f"가진 오이 없음  ·  지금까지 오이로 번 새전 {s.cuke_profit:+,}"
                               + (f"  ·  최고 시세 {s.cuke_best}" if s.cuke_best else ""))
+        self._preview()
         self.chart.update()
         self.adjustSize()
+
+    def _preview(self) -> None:
+        s = self.game.state
+        now = datetime.now()
+        self.custom_btn.setText("사기" if can_buy(now) else "팔기")
+        text, why = custom_check(s, parse_amount(self.amount.text()), now)
+        self.preview.setText(text)
+        self.custom_btn.setEnabled(not why)
+        self.custom_btn.setToolTip(why)
+
+    def _custom(self) -> None:
+        s = self.game.state
+        n = parse_amount(self.amount.text())
+        if custom_check(s, n)[1]:
+            return
+        if can_buy(datetime.now()):
+            got = buy(s, n)
+            if got:
+                self.game.on_cucumber(f"🥒 오이 {got:,}개를 샀다!")
+        else:
+            got = sell(s, n)
+            if got:
+                self.game.on_cucumber(f"🥒 오이 {n:,}개를 팔았다!  새전 +{got:,}")
+        self.amount.clear()
+        self.refresh()
 
     def _buy(self, n: int) -> None:
         got = buy(self.game.state, n)

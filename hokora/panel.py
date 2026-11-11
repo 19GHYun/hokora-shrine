@@ -12,8 +12,9 @@ from PySide6.QtWidgets import (QCheckBox, QGridLayout, QHBoxLayout, QLabel, QMen
 
 from . import affection as aff
 from . import achievements, daily, expedition, festival, fishing, moon, omamori, season, torii, wardrobe, weather
-from . import fireworks, incident, sengu, training
+from . import fireworks, incident, sengu, shintoku, training
 from .decor import decor_image
+from .diary import box_cap
 from .guests import GUEST_ABOUT, VISITS, guest_stage
 from .omikuji import can_draw
 from .prayer import (EEL_BOOST, FAN_BOOST, NEWS_BOOST, WISHES, blocked, eel_active, fan_active, fmt_left,
@@ -22,7 +23,7 @@ from .progress import UNLOCKS
 from .render import CHARACTERS, GUESTS, Pose, draw_character
 from .shrine import DRAW_STAGE, STAGE_SIZE
 from .sprites import image_sprites
-from .state import DECOR, GARDEN, SAISEN_BOX, SEASONAL, SHRINE_SKINS, SHRINE_STAGES, GameState, in_season
+from .state import DECOR, GARDEN, SEASONAL, SHRINE_SKINS, SHRINE_STAGES, GameState, in_season
 
 PORTRAIT = 64            # 도감 카드 (친구가 많아서 작게)
 G_PORTRAIT = 48          # 손님 카드
@@ -622,7 +623,14 @@ class ShrinePanel(QWidget):
         self.up_btn.setCursor(Qt.PointingHandCursor)
         self.up_btn.clicked.connect(self._upgrade)
         up.addLayout(col, 1)
-        up.addWidget(self.up_btn)
+        bcol = QVBoxLayout()                            # 천궁하기 밑에 신덕 단추 (신사가 가장 높은 단계일 때만)
+        bcol.setSpacing(4)
+        bcol.addWidget(self.up_btn)
+        self.toku_btn = QPushButton(objectName="ghost")
+        self.toku_btn.setCursor(Qt.PointingHandCursor)
+        self.toku_btn.clicked.connect(lambda: self._act("shintoku"))
+        bcol.addWidget(self.toku_btn)
+        up.addLayout(bcol)
         p1.addLayout(up)
 
         # ── 새전함 (꺼져 있는 동안의 수입) ──
@@ -887,7 +895,7 @@ class ShrinePanel(QWidget):
             cv = QVBoxLayout(card)
             cv.setContentsMargins(10, 6, 10, 6)
             cv.setSpacing(2)
-            title = QLabel(f"{pl.icon} {pl.name}  ·  {pl.hours:g}시간", objectName="name")
+            title = QLabel(f"{pl.icon} {pl.name}  ·  {expedition.fmt_hours(expedition.hours(state, pk))}", objectName="name")
             info = QLabel(objectName="goal")
             info.setWordWrap(True)
             btn = QPushButton(objectName="small")
@@ -1174,8 +1182,8 @@ class ShrinePanel(QWidget):
             if sengu.building(s):
                 remain = sengu.left(s)
                 self.up_label.setText(f"🏗 {gen + 1}대째 신사를 짓는 중…  {fmt_left(remain)} 남음")
-                self.up_bar.setRange(0, int(sengu.BUILD_SECONDS))
-                self.up_bar.setValue(int(sengu.BUILD_SECONDS - remain))
+                total = sengu.build_seconds(s)
+                set_bar(self.up_bar, int(max(0.0, total - remain)), int(total))
                 self.up_btn.setText("짓는 중")
                 self.up_btn.setEnabled(False)
             else:
@@ -1186,7 +1194,8 @@ class ShrinePanel(QWidget):
                 self.up_btn.setText("천궁하기")
                 why = sengu.blocked(s)
                 self.up_btn.setEnabled(not why)
-                self.up_btn.setToolTip(why or "1시간 동안 짓고, 다 지으면 새전 수입이 영구히 올라요. 다음 천궁은 값이 2배.")
+                self.up_btn.setToolTip(why or f"{sengu.fmt_build(s)} 동안 짓고, 다 지으면 새전 수입이 영구히 올라요 "
+                                              f"(+ 신덕 {gen + 1}점). 다음 천궁은 값이 2배.")
         else:
             nxt_name, nxt_income, _ = SHRINE_STAGES[s.shrine_level + 1]
             self.up_label.setText(f"다음: {nxt_name} (분당 {nxt_income})   {min(s.saisen, cost):,} / {cost:,} 새전")
@@ -1194,7 +1203,15 @@ class ShrinePanel(QWidget):
             self.up_btn.setText(f"{nxt_name}로 올리기")   # 신사·대신사 모두 받침 없음 → "로"
             self.up_btn.setEnabled(s.saisen >= cost)
 
-        cap_h, rate, _ = SAISEN_BOX[s.box_level]
+        at_top = cost is None
+        self.toku_btn.setVisible(at_top)
+        if at_top:
+            pts = shintoku.points(s)
+            can = any(not shintoku.blocked(s, k) for k in shintoku.PERKS)
+            self.toku_btn.setText(f"✨ 신덕 {pts}점" + (" ●" if can else "") if s.sengu else "✨ 신덕")
+            self.toku_btn.setToolTip("신덕(神徳): n대째 신사를 지을 때마다 n점. 수입·손님·원정·이변 등을 영구히 강화해요"
+                                     + ("" if s.sengu else " — 천궁으로 2대째 신사를 지으면 2점부터"))
+        cap_h, rate = box_cap(s)
         nxt = s.next_box_cost
         self.box_label.setText(f"새전함 Lv.{s.box_level} — 꺼져 있는 동안에도 최대 {cap_h}시간, 수입의 {int(rate * 100)}%를 모아요")
         if nxt is None:
@@ -1658,6 +1675,7 @@ class ShrinePanel(QWidget):
             return
         self.on_upgrade()
         self.refresh()
+        self._fit_tab(self.tabs.currentIndex())             # 가장 높은 단계가 되면 천궁·신덕 줄이 생김
 
     def _fit_tab(self, index: int) -> None:
         """지금 탭의 페이지만 보이게 하고 창 높이를 내용에 맞춤.

@@ -22,6 +22,7 @@ from . import achievements, daily, expedition, festival, fishing, omamori, photo
 from . import card, cucumber, goods, ink, lifesense, moon, offering, room, sound, ufo
 from . import fireworks, sengu, training
 from . import dodge, hideseek, incident, janken, letters, race
+from . import newyear, shintoku, yearend
 from .settings import SettingsWindow
 from .diary import DiaryCard
 from .guests import fade as fade_window
@@ -31,7 +32,7 @@ from .bubble import _alive as bubble_alive
 from .bubble import say
 from .daily import StampCard
 from .decor import DecorWindow
-from .diary import MIN_AWAY, PetalBurst, away_card, offline_income
+from .diary import MIN_AWAY, PetalBurst, away_card, box_cap, offline_income
 from .events import Events
 from .guests import BELL_PRICE, BELL_TEXT, Flash, Visits
 from .omikuji import FortuneSlip, can_draw
@@ -46,7 +47,7 @@ from .progress import UNLOCKS, newly_unlocked
 from .render import CHARACTERS, Pose, draw_character, short_name
 from .shrine import ShrineWindow
 from .torii import ToriiRow
-from .state import APP_NAME, DECOR, LOG_DIR, PAT_REWARD, SAISEN_BOX, SHRINE_SKINS, SaveStore
+from .state import APP_NAME, DECOR, LOG_DIR, PAT_REWARD, SHRINE_SKINS, SaveStore
 
 log = logging.getLogger("Hokora")
 ENTRY_SCRIPT = Path(sys.argv[0]).resolve()
@@ -144,6 +145,11 @@ class Game(QObject):
         self._clue_next = time.monotonic() + incident.CLUE_FIRST
         self._boss_next = 0.0
         self.ufo: ufo.Ufo | None = None                # 누에의 UFO
+        self.cleaning: newyear.Cleaning | None = None  # 연말 대청소
+        self._clean_at = time.monotonic() + random.uniform(*newyear.CLEAN_AFTER)
+        self._last_date = None                         # 마지막으로 본 날짜 (해가 바뀌는 순간 알아채기)
+        self._hatsumode_pending = False
+        self._wrapped: yearend.WrappedCard | None = None
         self._abducted: dict[str, float] = {}          # UFO 에 끌려간 친구 → 돌아오는 시각 (time.time)
         self._started = time.monotonic()
         tutorial.decide(self.state)
@@ -298,6 +304,7 @@ class Game(QObject):
             fx.append(self.ifx)
         play = [w for w in (self.clue, self.race, self.dodge) if w is not None]
         play += self.hide_game.windows() if self.hide_game is not None else []
+        play += self.cleaning.windows() if self.cleaning is not None else []
         return [*fx, *row, *decors, *inks, self.shrine, *offer, *self.pets, *self.guests, *sky, *play]
 
     @property
@@ -338,6 +345,7 @@ class Game(QObject):
         QTimer.singleShot(6500, self._check_achievements)
         QTimer.singleShot(4200, self._tutorial_show)
         QTimer.singleShot(5500, self._sengu_tick)                # 꺼 둔 동안 공사가 끝났을 수도
+        QTimer.singleShot(9000, self._shintoku_notice)
         if self.state.race_pending:                             # 지난번 달리는 중에 꺼졌으면 정산
             QTimer.singleShot(6500, lambda: self._race_done(earlier=True))
         QTimer.singleShot(7500, self._check_letters)
@@ -430,6 +438,8 @@ class Game(QObject):
                     self.ufo = None
                 if self.dodge is not None:          # 탄막 승부 중이었으면 그만둠
                     self.dodge.give_up()
+                if self.cleaning is not None:       # 대청소는 그만두고 나중에 다시
+                    self.cleaning.cancel()
             log.info("전체화면 %s → %s", "감지" if busy else "종료", "숨김" if busy else "다시 표시")
         if not busy:
             self._restack()
@@ -723,6 +733,7 @@ class Game(QObject):
         self._ufo_roll()
         self._check_letters()
         self._incident_tick()
+        self._clean_tick()
 
     def _new_day(self) -> None:
         """날짜가 바뀌면(켰을 때 포함) 오늘의 부탁을 새로 받고 출석 도장."""
@@ -738,6 +749,144 @@ class Game(QObject):
             log.info("출석 도장: 연속 %d일째 (+%d)", s.attend_streak, reward)
         if fresh or got is not None:
             self.save()
+        self._season_events()
+
+    # ── 연말연시: 결산 · 대청소 · 새해 첫 참배 ──
+    def _season_events(self) -> None:
+        s = self.state
+        d = yearend.today()
+        if yearend.rollover(s, d):
+            log.info("해가 바뀜: %d년 결산을 만들어 둠", d.year - 1)
+            self.save()
+        crossed = self._last_date is not None and d.year > self._last_date.year
+        self._last_date = d
+        if crossed:
+            self._new_year_moment(d.year)
+        if newyear.hatsumode_due(s, d) and not self._hatsumode_pending:
+            self._hatsumode_pending = True
+            self.later(20.0 if crossed else 6.0, self.hatsumode)
+        if yearend.auto_due(s, d):
+            self.later(14.0, lambda: self.open_wrapped(auto=True))
+
+    def _new_year_moment(self, year: int) -> None:
+        """켜 둔 채로 해가 바뀜: 「謹賀新年」 불꽃놀이 (공짜)."""
+        log.info("새해 %d년!", year)
+        self._say_at_shrine(f"🎆 {year}년 새해 복 많이 받으세요!")
+        for pet in self.pets:
+            if pet.grounded:
+                pet.react(True)
+        if self.fireworks_show is not None or self.hidden_for_fullscreen:
+            return
+        sc = self.app.screenAt(QPoint(round(self.shrine.pos_x), self.shrine.y())) or self.app.primaryScreen()
+        w = fireworks.FireworksShow(fireworks.SIZES["xl"], sc.availableGeometry(), self.shrine.pos_x,
+                                    text=f"{year}년 새해 복 많이 받으세요", big="謹賀新年",
+                                    hidden=lambda: self.hidden_for_fullscreen, on_burst=self._fireworks_cheer)
+        w.destroyed.connect(lambda *_: setattr(self, "fireworks_show", None))
+        self.fireworks_show = w
+        w.show()
+        self.shrine.raise_()
+
+    def hatsumode(self) -> bool:
+        """새해 첫 참배: 친구들이 신사 앞에 모여 소원을 빌고, 새해 새전 · 좋은 오미쿠지 · 호감도."""
+        self._hatsumode_pending = False
+        s = self.state
+        d = yearend.today()
+        if not newyear.hatsumode_due(s, d) or self.hidden_for_fullscreen or self.napping:
+            return False                                           # 못 했으면 다음 날짜 확인(30초) 때 다시
+        gift = newyear.hatsumode(s, d)
+        self.gather()
+        self.shrine.set_saisen(s.saisen)
+        self.shrine.pop(f"+{gift:,}")
+        if s.guest_bell and s.guest_bell_on and s.guest_bell_sound:
+            sound.play_suzu()                                     # 방울을 울리고
+        self._say_at_shrine(f"🎍 새해 첫 참배!  모두 모여 소원을 빌어요  ·  새해 새전 +{gift:,}")
+        out = {p.ch.key for p in self.pets}
+        for i, pet in enumerate(list(self.pets)):
+            self.later(1.8 + i * 0.25, lambda p=pet: p in self.pets and p.grounded and p.act("happy", 1.4))
+            self.later(3.0 + i * 0.4, lambda p=pet: p in self.pets and self._add_affection(p, newyear.HATSUMODE_HEARTS))
+        rest = [k for k in s.unlocked if k not in out]
+        for key in rest:                                          # 신사에서 쉬는 친구도
+            aff.add(s, key, newyear.HATSUMODE_HEARTS)
+        if rest:
+            self.later(5.0, self._check_letters)
+        self.later(4.0, lambda: self.show_card(newyear.NewYearCard(d.year, gift, lambda: self.make_nengajo(d.year))))
+        log.info("새해 첫 참배 %d: 새전 +%d", d.year, gift)
+        self.save()
+        return True
+
+    def make_nengajo(self, year: int | None = None) -> None:
+        year = year or yearend.today().year
+        img, path = newyear.save_nengajo(self.state, year, photo.photo_dir(), self.shrine.grab().toImage())
+        photo.to_clipboard(img)
+        self.state.nengajo += 1
+        self.show_card(PhotoCard(img, path, "🎍 연하장을 만들었어요 (클립보드에도)"))
+        log.info("연하장: %s", path)
+        self.save()
+
+    def open_wrapped(self, auto: bool = False) -> None:
+        s = self.state
+        d = yearend.today()
+        if auto and (not yearend.auto_due(s, d) or self.hidden_for_fullscreen):
+            return
+        data = yearend.current(s, d)
+        if data is None:
+            return
+        s.wrapped_seen = max(s.wrapped_seen, data["year"])
+        if self._wrapped is not None:
+            self._wrapped.close()
+        card = yearend.WrappedCard(s, data, self._save_wrapped)
+        self._wrapped = card
+        card.destroyed.connect(lambda *_: setattr(self, "_wrapped", None) if self._wrapped is card else None)
+        if auto:
+            self.show_card(card)
+        else:
+            self.keep(card)
+            card.show_above(self.shrine.pos_x, self.shrine.y() + 20)
+        log.info("%d년 결산 카드%s", data["year"], " (저절로)" if auto else "")
+        self.save()
+
+    def _save_wrapped(self, data: dict) -> None:
+        img, path = yearend.save_image(self.state, data, photo.photo_dir(), self.shrine.grab().toImage())
+        photo.to_clipboard(img)
+        log.info("결산 그림: %s", path)
+
+    def _clean_tick(self) -> None:
+        if self.cleaning is None and time.monotonic() >= self._clean_at and not newyear.clean_blocked(self.state):
+            self.start_cleaning(auto=True)
+
+    def start_cleaning(self, auto: bool = False) -> bool:
+        s = self.state
+        if (newyear.clean_blocked(s) or self.cleaning is not None or self.hide_game is not None
+                or self.dodge is not None or self.hidden_for_fullscreen or self.napping):
+            return False
+        if auto and winutil.idle_seconds() > 60:                  # 자리에 있을 때만 저절로
+            return False
+        self.events.cancel_play()
+        c = newyear.Cleaning(self)
+        self.cleaning = c
+        c.start()
+        self._say_at_shrine(f"🧹 연말 대청소!  {int(newyear.CLEAN_TIME)}초 안에 먼지·거미줄을 눌러 치워요 (거미줄은 두 번)")
+        self.save()
+        return True
+
+    def cleaning_done(self, c: "newyear.Cleaning", clear: bool, bonus: int, cloth: int, quiet: bool = False) -> None:
+        if self.cleaning is c:
+            self.cleaning = None
+        s = self.state
+        self.shrine.set_saisen(s.saisen)
+        if not quiet:
+            lines = [f"먼지·거미줄 {c.cleaned}/{c.total}곳을 치웠어요"
+                     + (f" (친구들이 {c.by_friends}곳)" if c.by_friends else "")]
+            if clear:
+                lines.append("반짝반짝! 깨끗한 신사에서 새해를 맞이해요.")
+                if s.clean_days == newyear.FULL_DAYS:
+                    lines.append(f"대청소 {newyear.FULL_DAYS}일 개근! 옷감 +{newyear.FULL_DAYS_CLOTH}")
+                self._say_at_shrine(f"🧹 대청소 끝!  보너스 새전 +{bonus:,} · 옷감 +{cloth}")
+            else:
+                lines.append("시간이 다 됐어요. 남은 먼지는 내일 또 치워요!")
+            footer = f"새전 +{c.earned + bonus:,}" + (f" · 옷감 +{cloth}" if cloth else "")
+            self.show_card(DiaryCard("🧹 연말 대청소", lines, footer, f"다 치운 날 {s.clean_days}일"))
+        self.save()
 
     def _daily_check(self) -> None:
         done, bonus = daily.check(self.state)
@@ -826,6 +975,7 @@ class Game(QObject):
                     "expedition": lambda v: self.send_expedition(*v), "title": self.set_title,
                     "festival": lambda _v: self.hold_festival(), "sengu": lambda _v: self.start_sengu(),
                     "fireworks": self.launch_fireworks, "train": self.train_friend,
+                    "shintoku": lambda _v: self.open_shintoku(), "perk": self.buy_perk,
                     "fireworks_running": lambda _v: self.fireworks_show is not None}
         return handlers[name](value)
 
@@ -1185,7 +1335,7 @@ class Game(QObject):
         self.shrine.set_saisen(s.saisen)
         self.shrine.pop(f"-{price:,}")
         self.shrine.set_building(True)
-        self._say_at_shrine(f"🏯 식년천궁! {sengu.generation(s) + 1}대째 신사를 짓기 시작했어요 (1시간)")
+        self._say_at_shrine(f"🏯 식년천궁! {sengu.generation(s) + 1}대째 신사를 짓기 시작했어요 ({sengu.fmt_build(s)})")
         for pet in self.pets:
             pet.react(True)
         log.info("식년천궁 시작 (%d) → %d대째", price, sengu.generation(s) + 1)
@@ -1199,8 +1349,10 @@ class Game(QObject):
             return
         self.shrine.set_building(False)
         gen = sengu.generation(s)
-        log.info("식년천궁 완성 → %d대째 (수입 ×%.1f)", gen, sengu.multiplier(s))
-        self._say_at_shrine(f"🏯 {gen}대째 신사 완성!  새전 수입 +{round(sengu.BOOST_EACH * 100 * s.sengu)}%")
+        gain = shintoku.gain_for(gen)
+        s.shintoku_seen = True                                    # 완성 카드가 신덕을 알려 줌
+        log.info("식년천궁 완성 → %d대째 (수입 ×%.1f, 신덕 +%d)", gen, sengu.multiplier(s), gain)
+        self._say_at_shrine(f"🏯 {gen}대째 신사 완성!  새전 수입 +{round(sengu.BOOST_EACH * 100 * s.sengu)}%  ·  ✨ 신덕 +{gain}점")
         if not self.hidden_for_fullscreen:
             burst = PetalBurst(self.shrine.pos_x, self.shrine.y() + self.shrine.height())
             self.keep(burst)
@@ -1209,9 +1361,55 @@ class Game(QObject):
         self.show_card(DiaryCard("🏯 식년천궁", [
             "낡은 신사를 정성껏 허물고, 같은 모습으로 새로 지어 올렸다.",
             "신님도 새 신사로 옮겨 가셨다. 친구들은 새 나무 냄새에 신이 났다."],
-            f"{gen}대째 신사 · 새전 수입 +{round(sengu.BOOST_EACH * 100 * s.sengu)}% (영구)",
-            f"다음 천궁은 새전 {sengu.cost(s):,}"))
+            f"{gen}대째 신사 · 새전 수입 +{round(sengu.BOOST_EACH * 100 * s.sengu)}% (영구) · 신덕 +{gain}점",
+            f"신덕은 신사 관리 → 신덕 강화에서 써요  ·  다음 천궁은 새전 {sengu.cost(s):,}"))
         self.save()
+
+    def _shintoku_notice(self) -> None:
+        """신덕이 생기기 전에 천궁한 신사: 그동안의 천궁만큼 신덕이 들어왔다고 한 번 알림."""
+        s = self.state
+        if s.shintoku_seen or not s.sengu:
+            return
+        s.shintoku_seen = True
+        self.show_card(DiaryCard("✨ 신덕(神徳)이 생겼어요", [
+            f"지금까지 {s.sengu}번 식년천궁을 해서 신덕 {shintoku.earned(s)}점이 모였어요.",
+            "n대째 신사를 지을 때마다 신덕 n점. 수입·손님·원정·이변 같은 걸 영구히 강화해요."],
+            f"신덕 {shintoku.points(s)}점", "신사 관리 → 신사 탭 → 신덕 강화"))
+        self.save()
+
+    # ── 신덕 ──
+    def open_shintoku(self) -> None:
+        if self.panel is not None:
+            self.panel.close()
+        w = shintoku.ShintokuBoard(self.state, self.buy_perk, self.reset_perks)
+        self.keep(w)
+        w.show_near(QPoint(round(self.shrine.pos_x), round(self.shrine.y())))
+
+    def buy_perk(self, key: str) -> int | None:
+        s = self.state
+        lv = shintoku.buy(s, key)
+        if lv is None:
+            return None
+        perk = shintoku.PERKS[key]
+        self._say_at_shrine(f"✨ 신덕: {perk.icon} {perk.name} Lv.{lv} — {perk.effect(lv)}")
+        for pet in self.pets:
+            if pet.grounded and random.random() < 0.5:
+                pet.act("happy", 1.2)
+        log.info("신덕: %s → Lv.%d (남은 %d점)", key, lv, shintoku.points(s))
+        self.save()
+        return lv
+
+    def reset_perks(self) -> bool:
+        s = self.state
+        price = shintoku.reset_cost(s)
+        if not shintoku.reset(s):
+            return False
+        self.shrine.set_saisen(s.saisen)
+        self.shrine.pop(f"-{price:,}")
+        self._say_at_shrine(f"✨ 신덕을 다시 나눠요 — {shintoku.points(s)}점을 돌려받았어요")
+        log.info("신덕 다시 나누기 (%d)", price)
+        self.save()
+        return True
 
     # ── 불꽃놀이 봉납 ──
     def launch_fireworks(self, key: str) -> bool:
@@ -1478,7 +1676,7 @@ class Game(QObject):
         inc = incident.active(self.state)
         if inc is None or self.clue is not None or self.hidden_for_fullscreen:
             return False
-        self._clue_next = time.monotonic() + random.uniform(*incident.CLUE_EVERY)
+        self._clue_next = time.monotonic() + random.uniform(*incident.CLUE_EVERY) * shintoku.clue_scale(self.state)
         w = incident.ClueWindow(inc, self._clue_taken)
         g = self.ground_under(self.shrine.pos_x)
         pfs = [pf for pf in self.window_platforms if pf.x2 - pf.x1 > 160]
@@ -2426,7 +2624,7 @@ class Game(QObject):
     def upgrade_box(self) -> None:
         if not self.state.upgrade_box():
             return
-        cap_h, rate, _ = SAISEN_BOX[self.state.box_level]
+        cap_h, rate = box_cap(self.state)
         log.info("새전함 → Lv.%d", self.state.box_level)
         self.shrine.set_saisen(self.state.saisen)
         self._say_at_shrine(f"새전함 Lv.{self.state.box_level}!  꺼져 있어도 최대 {cap_h}시간·{int(rate * 100)}% 모아요")
@@ -2472,6 +2670,22 @@ class Game(QObject):
         tip.setEnabled(False)
         unread = len(letters.unread(s))
         menu.addAction("💌 편지함" + (f"  (안 읽은 편지 {unread})" if unread else ""), self.open_letterbook)
+        d = yearend.today()
+        if d.month in (12, 1):                                     # 연말연시
+            ny = menu.addMenu("🎍 연말연시")
+            ny.setStyleSheet(MENU_STYLE)
+            data = yearend.current(s, d)
+            if data is not None:
+                ny.addAction(f"📜 {data['year']}년 결산 보기", self.open_wrapped)
+            if d.month == 12:
+                why = "" if self.cleaning is None else "하는 중"
+                why = why or newyear.clean_blocked(s, d)
+                a = ny.addAction("🧹 연말 대청소" + (f"  ({why})" if why else ""), self.start_cleaning)
+                a.setEnabled(not why)
+            else:
+                if newyear.hatsumode_due(s, d):
+                    ny.addAction("⛩ 새해 첫 참배하기", self.hatsumode)
+                ny.addAction("🎍 연하장 만들기", self.make_nengajo)
         for key in ("brush", "room"):
             g = goods.GOODS[key]
             text = g.use if key in s.goods else f"🔒 {g.use.split(' ', 1)[1]}  (새전 {g.price:,})"

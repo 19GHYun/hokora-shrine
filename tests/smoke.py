@@ -53,6 +53,7 @@ class FakeCursor:
 
 hk.QCursor = FakeCursor
 hk.winutil.left_button_down = lambda: False
+hk.winutil.fullscreen_app_running = lambda games_only=False: False   # 이 PC 에 영상·게임 전체화면이 떠 있어도 숨지 않게
 hk.winutil.idle_seconds = lambda: 0.0
 photo.photo_dir = lambda: TMP / "photos"
 photo.to_clipboard = lambda img: None
@@ -71,6 +72,8 @@ ev = game.events
 ev._play_next = ev._thief_next_check = time.monotonic() + 1e9     # 저절로 생기는 일은 막고 시험에서만
 ev._skill_at = {k: time.monotonic() for k in SKILL_COOLDOWN}     # 특기도 시험에서만 (시간 정지가 끼어들지 않게)
 game.visits._next = time.monotonic() + 1e9
+game._clean_at = time.monotonic() + 1e9            # 12월에 돌려도 대청소가 저절로 끼어들지 않게
+s.hatsumode_year = s.wrapped_seen = 9999           # 1월에 돌려도 새해 첫 참배·결산이 끼어들지 않게
 RESULTS: list[tuple[str, bool, str]] = []
 G: dict = {}
 
@@ -1503,6 +1506,363 @@ def t_incident3():
     close_cards()
 
 
+def t_shintoku():
+    """신덕: n대째 신사를 지을 때마다 n점, 강화는 영구 (수입·새전함·손님·오미쿠지·원정·퇴마·목수·미끼)."""
+    from hokora import diary, expedition, fishing, incident, sengu, shintoku
+    from hokora import omikuji as om
+    calm()
+    close_cards()
+    g = GameState(shrine_level=5)
+    check("천궁 전엔 신덕 0", shintoku.earned(g) == 0 and shintoku.points(g) == 0
+          and "천궁" in shintoku.blocked(g, "harvest"))
+    g.sengu = 1
+    check("2대째 신사 → 신덕 2점", shintoku.earned(g) == 2)
+    g.sengu = 13
+    check("14대째까지 지었으면 2+3+…+14 = 104점 (예전 천궁도 소급)", shintoku.earned(g) == 104)
+    base_inc, base_off = prayer.income_multiplier(g), diary.offline_income(g, 3600)
+    base_cost = sengu.cost(g)
+    for _ in range(3):
+        shintoku.buy(g, "harvest")
+    check("강화 값은 지금 레벨 + 1점 (1+2+3)", shintoku.level(g, "harvest") == 3 and shintoku.points(g) == 104 - 6)
+    check("풍요 Lv.3 → 수입 +9%", abs(prayer.income_multiplier(g) / base_inc - 1.09) < 1e-9)
+    g.perks = {"box": 2}
+    cap0 = diary.box_cap(GameState(shrine_level=5))[0]
+    check("새전함 Lv.2 → 꺼 둔 동안 +30%, 최대 시간 +2시간",
+          abs(diary.offline_income(g, 3600) / base_off - 1.3) < 0.01 and diary.box_cap(g)[0] == cap0 + 2,
+          diary.offline_income(g, 3600) / base_off)
+    g.perks = {"guests": 4}
+    check("참배객 Lv.4 → 손님 ×1.32", abs(shintoku.guest_mult(g) - 1.32) < 1e-9)
+    g.perks = {}
+    g1 = GameState(shrine_level=5, sengu=13)
+    g2 = GameState(shrine_level=5, sengu=13, perks={"fortune": 2})
+    r1, r2 = om.draw(g1, random.Random(4)), om.draw(g2, random.Random(4))
+    check("운세 Lv.2 → 오미쿠지 + 분당 수입 × 20분", r2.reward - r1.reward == g2.income_per_min * 20,
+          (r1.reward, r2.reward))
+    g.unlocked = ["reimu"]
+    g.perks = {"journey": 2}
+    expedition.send(g, "reimu", next(iter(expedition.PLACES)), now=1000.0)
+    e = g.expeditions[0]
+    check("원정 Lv.2 → 원정 시간 -10%",
+          abs((e["end"] - e["start"]) - expedition.PLACES[e["place"]].hours * 3600 * 0.9) < 1e-6)
+    g.perks = {"exorcism": 3}
+    check("퇴마 Lv.3 → 흑막 보상 ×1.6 · 단서 -15%",
+          incident.reward(g) == int(max(3000, g.income_per_min * 240) * 1.6) and abs(shintoku.clue_scale(g) - 0.85) < 1e-9)
+    g.perks = {"carpenter": 5}
+    check("목수 Lv.5 → 천궁 값 -10% · 공사 -25분 (정수로 정확히)",
+          sengu.cost(g) == base_cost * 9 // 10 and sengu.build_seconds(g) == 3600 - 1500 and sengu.fmt_build(g) == "35분")
+    g.perks = {"bait": 2}
+    check("미끼 Lv.2 → 하루 미끼 +6", fishing.bait(g) == fishing.BAIT_PER_DAY + 6)
+    g.perks = {"bait": 5}
+    check("최고 레벨이면 더 못 올림", shintoku.buy(g, "bait") is None and "최고" in shintoku.blocked(g, "bait"))
+    # 게임에서
+    s.shrine_level, s.sengu, s.sengu_until, s.perks, s.saisen = 5, 13, 0.0, {}, 10 ** 10
+    check("관리 창 단추로 강화", game.on_action("perk", "harvest") == 1 and s.perks == {"harvest": 1})
+    game._panel_tab = 0
+    game.open_panel()
+    pnl = game.panel
+    check("신사 탭: 천궁하기 밑에 신덕 단추 (남은 점수)", pnl.toku_btn.isVisible() and "103점" in pnl.toku_btn.text(),
+          pnl.toku_btn.text())
+    game.on_action("shintoku")
+    boards = [w for w in game._cards if isinstance(w, shintoku.ShintokuBoard)]
+    check("신덕 창이 열리고 관리 창은 닫힘", boards and boards[-1].isVisible() and (game.panel is None or not game.panel.isVisible()))
+    if boards:
+        b = boards[-1]
+        lv_label, now_label, btn = b.rows["harvest"]
+        btn.click()
+        check("신덕 창에서 +1", shintoku.level(s, "harvest") == 2 and "Lv.2/20" in lv_label.text(), lv_label.text())
+        price, saisen0 = shintoku.reset_cost(s), s.saisen
+        b.reset_btn.click()
+        check("다시 나누기는 두 번 눌러야", s.perks and "한 번 더" in b.reset_btn.text())
+        b.reset_btn.click()
+        check("다시 나누기: 다음 천궁 값의 10% → 점수를 모두 돌려받음",
+              not s.perks and s.saisen == saisen0 - price and price == sengu.cost(s) // 10
+              and shintoku.points(s) == 104 and s.perk_resets == 1)
+        b.close()
+    s.shrine_level = 4
+    game.open_panel()
+    check("최고 단계 전엔 신덕 단추 없음", not game.panel.toku_btn.isVisible())
+    game.panel.close()
+    s.shrine_level, s.sengu, s.shintoku_seen = 5, 3, False
+    game._shintoku_notice()
+    check("예전에 천궁한 신사엔 신덕 안내 카드 한 번", s.shintoku_seen and game._card_queue, len(game._card_queue))
+    close_cards()
+    n = len(game._card_queue)
+    game._shintoku_notice()
+    check("안내는 한 번만", len(game._card_queue) == n)
+    s.sengu, s.sengu_until, s.shintoku_seen = 3, time.time() - 1, False
+    game._sengu_tick()
+    check("천궁이 끝나면 신덕 +n (5대째 → 5점)", s.sengu == 4 and s.shintoku_seen and shintoku.earned(s) == 2 + 3 + 4 + 5)
+    close_cards()
+    s.sengu, s.sengu_until, s.perks, s.shrine_level = 0, 0.0, {}, G.get("level", s.shrine_level)
+
+
+def t_cuke2():
+    """오이: 원하는 개수를 적어서 사고팔기."""
+    from datetime import datetime as real_dt
+    now = [real_dt(2026, 10, 11, 10, 0)]                 # 일요일
+
+    class FakeDT(real_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return now[0]
+    cucumber.datetime = FakeDT
+    try:
+        check("개수 읽기 (쉼표 · 빈칸)", cucumber.parse_amount("1,234") == 1234 and cucumber.parse_amount("") == 0
+              and cucumber.parse_amount(" 77 ") == 77)
+        s.saisen, s.cuke_week, s.cuke_have, s.cuke_paid = 10 ** 6, "", 0, 0
+        cucumber.refresh(s)
+        w = cucumber.CucumberWindow(game)
+        w.show()
+        w.amount.setText("1,234")
+        check("적은 만큼 값 미리 보기", w.custom_btn.text() == "사기" and w.custom_btn.isEnabled()
+              and f"{1234 * s.cuke_base:,}" in w.preview.text(), w.preview.text())
+        w.amount.returnPressed.emit()
+        check("원하는 만큼 사기 (1,234개)", s.cuke_have == 1234 and s.cuke_paid == 1234 * s.cuke_base
+              and w.amount.text() == "")
+        most = s.saisen // s.cuke_base
+        w.amount.setText(str(most + 1))
+        check("새전이 모자라면 못 삼 (최대 몇 개인지 알려 줌)", not w.custom_btn.isEnabled() and f"{most:,}" in w.preview.text())
+        w.amount.setText("99999999999999999999")
+        check("아주 큰 수도 괜찮음 (Qt 정수 넘김 없음)", not w.custom_btn.isEnabled())
+        w.close()
+        now[0] = real_dt(2026, 10, 14, 15, 0)            # 수요일 오후
+        w = cucumber.CucumberWindow(game)
+        w.show()
+        w.amount.setText("234")
+        price = cucumber.price_now(s)
+        gross = 234 * price
+        check("파는 날엔 '팔기' + 받을 새전 미리 보기", w.custom_btn.text() == "팔기" and w.custom_btn.isEnabled()
+              and f"+{gross - cucumber.fee(gross):,}" in w.preview.text(), w.preview.text())
+        saisen0 = s.saisen
+        w.custom_btn.click()
+        check("원하는 만큼 팔기 (234개)", s.cuke_have == 1000 and s.saisen == saisen0 + gross - cucumber.fee(gross))
+        w.amount.setText("1001")
+        check("가진 것보다 많이는 못 팖", not w.custom_btn.isEnabled() and "1,000" in w.preview.text())
+        w.close()
+    finally:
+        cucumber.datetime = real_dt
+    s.cuke_have = s.cuke_paid = 0
+
+
+def t_yearend():
+    """연말 결산: 올해 기록 = 지금 - 올해 시작, 해가 바뀌면 지난해 결산을 남김."""
+    from datetime import date
+    from hokora import yearend
+    close_cards()
+    g = GameState(created="2026-09-29T10:00:00")
+    g.unlocked = ["reimu", "cirno"]
+    yearend.ensure_base(g, date(2026, 10, 1))
+    check("올해 시작 기록 (처음 만난 날부터, 0 에서)", g.year_base["year"] == 2026 and g.year_base["since"] == "2026-09-29")
+    g.pats, g.saisen_total, g.affection, g.guest_visits = 100, 5000, {"cirno": 30, "reimu": 10}, {"aya": 3, "sunny": 1}
+    g.fish_caught = 7
+    d = yearend.current(g, date(2026, 12, 25))
+    check("12월엔 올해 지금까지", d and d["v"]["pats"] == 100 and d["v"]["saisen"] == 5000 and d["days"] == 88,
+          d and d["days"])
+    check("가장 친해진 친구 · 가장 자주 온 손님", d["best"] == "cirno" and d["guest"] == "aya" and d["guest_n"] == 3)
+    check("숫자 카드는 0 을 뺌", [x[1] for x in yearend.top_stats(d, 9)] == ["다녀간 손님", "낚은 물고기"],
+          yearend.top_stats(d, 9))
+    check("11월엔 결산 없음", yearend.current(g, date(2026, 11, 30)) is None)
+    check("12월 20일부터 한 번 저절로", not yearend.auto_due(g, date(2026, 12, 19)) and yearend.auto_due(g, date(2026, 12, 20)))
+    g.wrapped_seen = 2026
+    check("본 뒤엔 저절로 안 뜸", not yearend.auto_due(g, date(2026, 12, 28)))
+    check("해가 바뀌면 지난해 결산을 남김", yearend.rollover(g, date(2027, 1, 1)) and g.year_last["year"] == 2026
+          and g.year_last["until"] == "2026-12-31" and g.year_base["year"] == 2027)
+    check("한 번만", not yearend.rollover(g, date(2027, 1, 2)))
+    g.pats += 5
+    j = yearend.current(g, date(2027, 1, 5))
+    check("1월엔 지난해 결산", j is not None and j["year"] == 2026 and j["v"]["pats"] == 100)
+    g.wrapped_seen = 0
+    check("12월에 못 봤으면 1월에 저절로", yearend.auto_due(g, date(2027, 1, 5)))
+    check("2월엔 없음", yearend.current(g, date(2027, 2, 1)) is None)
+    check("새해 기록은 새로 셈", yearend.current(g, date(2027, 12, 1))["v"]["pats"] == 5)
+    img = yearend.make_image(g, d)
+    check("결산 그림 (1200×675)", img.width() == 1200 and img.height() == 675 and not img.isNull())
+    # 게임에서: 결산 카드
+    orig = yearend.today
+    yearend.today = lambda: date(2026, 12, 24)
+    try:
+        s.year_base, s.wrapped_seen = {}, 0
+        game.open_wrapped()
+        card = game._wrapped
+        check("결산 카드가 열림", card is not None and card.isVisible() and s.wrapped_seen == 2026)
+        if card is not None:
+            from PySide6.QtTest import QTest
+            for _ in range(len(yearend.SLIDES) - 1):
+                QTest.mouseClick(card, Qt.LeftButton, pos=QPoint(100, 250))
+            check("눌러서 넘기면 마지막 장", card.slide == "end")
+            frames = [card.grab() for _ in range(1)]
+            check("카드 그림", not frames[0].isNull())
+            before = set((TMP / "photos").glob("*.png")) if (TMP / "photos").exists() else set()
+            QTest.mouseClick(card, Qt.LeftButton, pos=card.save_rect.center().toPoint())
+            after = set((TMP / "photos").glob("*.png"))
+            check("마지막 장에서 그림으로 저장", card.saved and len(after - before) == 1, after - before)
+            QTest.mouseClick(card, Qt.RightButton, pos=QPoint(100, 100))
+        menu = QMenu()
+        game._fill_menu(menu)
+        texts = [a.text() for a in menu.actions()]
+        sub = next((a.menu() for a in menu.actions() if a.text() == "🎍 연말연시"), None)
+        subs = [a.text() for a in sub.actions()] if sub else []
+        check("12월 메뉴: 🎍 연말연시 → 결산 · 대청소", sub is not None and any("2026년 결산" in t_ for t_ in subs)
+              and any("대청소" in t_ for t_ in subs), (texts, subs))
+        yearend.today = lambda: date(2026, 11, 11)
+        menu = QMenu()
+        game._fill_menu(menu)
+        check("다른 달엔 연말연시 메뉴 없음", all(a.text() != "🎍 연말연시" for a in menu.actions()))
+    finally:
+        yearend.today = orig
+
+
+def t_clean():
+    """연말 대청소: 12월 13일부터, 하루 한 번 90초 — 먼지는 한 번, 거미줄은 두 번, 친구도 도와줌."""
+    from datetime import date
+    from hokora import newyear, yearend
+    calm()
+    close_cards()
+    G["today"] = yearend.today
+    yearend.today = lambda: date(2026, 12, 20)
+    check("12월 12일엔 아직", "13일" in newyear.clean_blocked(s, date(2026, 12, 12)))
+    s.clean_day, s.clean_days, s.cloth = "", 0, 0
+    G["clean_saisen"] = s.saisen
+    check("대청소 시작", game.start_cleaning() and game.cleaning is not None)
+    c = game.cleaning
+    if c is None:
+        return
+    G["clean"] = c
+    check("먼지 9곳 · 거미줄 3곳이 화면에", c.total == 12 and sum(w.kind == "web" for w in c.spots) == 3
+          and all(w.isVisible() for w in c.spots) and all(w in game.windows() for w in c.spots))
+    check("오늘은 한 번만", s.clean_day == "2026-12-20" and "끝났" in newyear.clean_blocked(s) and not game.start_cleaning())
+    from PySide6.QtTest import QTest
+    dust = next(w for w in c.spots if w.kind == "dust")
+    saisen0 = s.saisen
+    QTest.mouseClick(dust, Qt.LeftButton)
+    check("먼지는 한 번 누르면 치움 (새전)", dust.cleaned and c.cleaned == 1 and s.saisen == saisen0 + newyear.spot_reward(s))
+    web = next(w for w in c.spots if w.kind == "web")
+    QTest.mouseClick(web, Qt.LeftButton)
+    check("거미줄은 한 번으론 안 됨", not web.cleaned and c.cleaned == 1)
+    QTest.mouseClick(web, Qt.LeftButton)
+    check("두 번이면 치움", web.cleaned and c.cleaned == 2)
+    c.next_help = 0.0
+    c.tick()
+    check("친구가 먼지를 치우러 감", len(c.helpers) == 1 and next(iter(c.helpers)).scripted, len(c.helpers))
+    if c.helpers:
+        pet, spot = next(iter(c.helpers.items()))
+        G["helper"] = (pet, spot)
+        pet.pos_x = spot.center_x
+        c.tick()
+
+
+def t_clean2():
+    from hokora import newyear
+    c = G.get("clean")
+    if c is None:
+        return
+    pet, spot = G.get("helper", (None, None))
+    check("친구가 치움", spot is not None and spot.cleaned and c.by_friends == 1 and not pet.scripted, c.by_friends)
+    cloth0, saisen0 = s.cloth, s.saisen                # 다른 일(UFO 에서 돌아온 친구의 선물 등)이 끼어들지 않게 바로 비교
+    for w in c.spots:
+        while not w.cleaned:
+            c.hit(w)
+    c.finish()
+    check("다 치우면 끝 · 보너스 · 옷감 +5", game.cleaning is None and c.over and s.clean_days == 1
+          and s.cloth - cloth0 == newyear.CLEAR_CLOTH and s.clean_spots >= 12
+          and s.saisen >= saisen0 + newyear.clear_bonus(s), (s.clean_days, s.cloth - cloth0))
+
+
+def t_clean3():
+    from hokora import newyear
+    c = G.get("clean")
+    check("끝나면 대청소 일기 카드", any("대청소" in getattr(k, "title", "") for k in game._card_queue))
+    check("먼지 창은 모두 닫힘", all(w.gone for w in c.spots))
+    close_cards()
+    s.clean_day, s.clean_days = "", newyear.FULL_DAYS - 1        # 5일째
+    game.start_cleaning()
+    c = game.cleaning
+    cloth0 = s.cloth
+    for w in c.spots:
+        while not w.cleaned:
+            c.hit(w)
+    c.finish()
+    check("5일 다 치우면 옷감 +30 더", s.clean_days == newyear.FULL_DAYS
+          and s.cloth - cloth0 == newyear.CLEAR_CLOTH + newyear.FULL_DAYS_CLOTH, s.cloth - cloth0)
+    close_cards()
+    s.clean_day = ""
+    game.start_cleaning()
+    c = game.cleaning
+    c.ends = time.monotonic() - 1
+    days = s.clean_days
+    c.tick()
+    check("시간이 다 되면 치운 만큼만 (보너스 없음)", game.cleaning is None and s.clean_days == days and c.over)
+    close_cards()
+    s.clean_day = ""
+    game.start_cleaning()
+    n = len(game._card_queue)
+    game.cleaning.cancel()
+    check("전체화면으로 그만두면 오늘 다시 할 수 있음 (카드 없이)", game.cleaning is None and s.clean_day == ""
+          and len(game._card_queue) == n)
+    from hokora import yearend
+    yearend.today = G["today"]
+
+
+def t_newyear():
+    """새해 첫 참배 (1월 1~7일): 새전 · 좋은 오미쿠지 · 호감도 · 연하장. 해가 바뀌는 순간엔 불꽃놀이."""
+    from datetime import date
+    from hokora import newyear, yearend
+    calm()
+    close_cards()
+    check("간지 (2026 병오 · 2027 정미 · 2024 갑진)",
+          newyear.zodiac(2026) == ("丙午年", "병오년", "붉은 말의 해")
+          and newyear.zodiac(2027) == ("丁未年", "정미년", "붉은 양의 해")
+          and newyear.zodiac(2024)[2] == "푸른 용의 해")
+    G["today2"] = yearend.today
+    yearend.today = lambda: date(2027, 1, 1)
+    s.hatsumode_year, s.fate_boost = 0, False
+    check("1월 1~7일, 그해 처음", newyear.hatsumode_due(s) and not newyear.hatsumode_due(s, date(2027, 1, 8))
+          and not newyear.hatsumode_due(s, date(2026, 12, 31)))
+    saisen0 = s.saisen
+    G["aff"] = {p.ch.key: s.affection.get(p.ch.key, 0) for p in game.pets}
+    check("새해 첫 참배", game.hatsumode() and s.hatsumode_year == 2027 and s.fate_boost
+          and s.saisen == saisen0 + newyear.hatsumode_gift(s))
+    check("한 해에 한 번", not newyear.hatsumode_due(s) and not game.hatsumode())
+    menu = QMenu()
+    game._fill_menu(menu)
+    sub = next((a.menu() for a in menu.actions() if a.text() == "🎍 연말연시"), None)
+    subs = [a.text() for a in sub.actions()] if sub else []
+    check("1월 메뉴: 연하장 만들기 (첫 참배는 이미 함)", any("연하장" in t_ for t_ in subs)
+          and not any("첫 참배" in t_ for t_ in subs), subs)
+
+
+def t_newyear2():
+    from datetime import date
+    from hokora import newyear, yearend
+    check("친구 모두 호감도 +2", all(s.affection.get(k, 0) >= v + newyear.HATSUMODE_HEARTS for k, v in G["aff"].items()),
+          {k: (v, s.affection.get(k, 0)) for k, v in G["aff"].items()})
+    cards = [k for k in game._card_queue if isinstance(k, newyear.NewYearCard)]
+    check("연하장 카드 (謹賀新年)", cards and not cards[0].grab().isNull())
+    before = set((TMP / "photos").glob("*.png"))
+    n0 = s.nengajo
+    if cards:
+        from PySide6.QtTest import QTest
+        cards[0].show()
+        QTest.mouseClick(cards[0], Qt.LeftButton, pos=cards[0].btn.center().toPoint())
+    after = set((TMP / "photos").glob("*.png"))
+    check("연하장 그림 저장", s.nengajo == n0 + 1 and len(after - before) == 1)
+    close_cards()
+    # 켜 둔 채로 해가 바뀜 → 불꽃놀이 · 지난해 결산
+    if game.fireworks_show is not None:
+        game.fireworks_show.close()
+    s.year_base = {"year": 2026, "since": "2026-09-29", "v": {}, "guests": {}, "aff": {}}
+    game._last_date = date(2026, 12, 31)
+    game._season_events()
+    fw = game.fireworks_show
+    check("해가 바뀌는 순간 「謹賀新年」 불꽃놀이 (공짜)", fw is not None and fw.big == "謹賀新年" and fw.show_.key == "xl")
+    check("지난해 결산을 남김", s.year_last.get("year") == 2026 and s.year_base["year"] == 2027)
+    if fw is not None:
+        fw.close()
+    close_cards()
+    yearend.today = G["today2"]
+    s.hatsumode_year = s.wrapped_seen = 9999
+
+
 def t_end():
     app.quit()
 
@@ -1518,7 +1878,9 @@ STEPS = [(t_core, 3000), (t_core2, 2500), (t_thief, 1600), (t_skill, 1800), (t_a
          (t_cuke, 300), (t_offer, 1500), (t_offer2, 1500), (t_life, 1000), (t_settings, 500),
          (t_sengu, 500), (t_train, 500), (t_fireworks, 2500), (t_fireworks2, 2600), (t_fireworks3, 300),
          (t_letters, 300), (t_janken, 300), (t_dodge, 500), (t_hide, 2600), (t_hide2, 3600), (t_hide3, 300),
-         (t_race, 1500), (t_race2, 300), (t_incident, 600), (t_incident2, 5500), (t_incident3, 300), (t_end, 0)]
+         (t_race, 1500), (t_race2, 300), (t_incident, 600), (t_incident2, 5500), (t_incident3, 300),
+         (t_shintoku, 600), (t_cuke2, 300), (t_yearend, 600), (t_clean, 1500), (t_clean2, 1500), (t_clean3, 600),
+         (t_newyear, 7500), (t_newyear2, 600), (t_end, 0)]
 
 
 def run(i: int = 0) -> None:

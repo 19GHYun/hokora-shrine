@@ -80,7 +80,7 @@ class FireworksShow(QWidget):
 
     def __init__(self, show: Show, area: QRect, center_x: float, text: str = "",
                  hidden: Callable[[], bool] | None = None, on_burst: Callable[[int], None] | None = None,
-                 rng: random.Random | None = None):
+                 rng: random.Random | None = None, big: str = "奉納"):
         super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnTopHint
                          | Qt.NoDropShadowWindowHint | Qt.WindowTransparentForInput | Qt.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
@@ -88,6 +88,7 @@ class FireworksShow(QWidget):
         self.setAttribute(Qt.WA_DeleteOnClose, True)
         self.show_ = show
         self.text = text
+        self.big = big                       # 특대 끝에 뜨는 큰 글자 (새해엔 「謹賀新年」)
         self.hidden = hidden or (lambda: False)
         self.on_burst = on_burst
         self.rng = rng or random.Random()
@@ -211,7 +212,7 @@ class FireworksShow(QWidget):
         big.setBold(True)
         big.setPixelSize(int(min(h * 0.32, 150)))
         path = QPainterPath()
-        path.addText(0, 0, big, "奉納")
+        path.addText(0, 0, big, self.big)
         br = path.boundingRect()
         path.translate(w / 2 - br.center().x(), h * 0.42 - br.center().y())
         glow = QColor(255, 210, 120, int(90 * alpha))

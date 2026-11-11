@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable
 
-from . import moon, omamori, season, sengu, weather
+from . import moon, omamori, season, sengu, shintoku, weather
 from .state import GameState
 
 INCOME_BOOST = 2        # 번영 기원: 수입 배수
@@ -72,6 +72,7 @@ def income_multiplier(s: GameState) -> float:
     if moon.is_full() and season.is_night():  # 보름달 밤
         m *= moon.FULL_INCOME
     m *= sengu.multiplier(s)                  # 식년천궁: 새로 지을 때마다 +10% (영구)
+    m *= shintoku.income_mult(s)              # 신덕 풍요: +3%·Lv (영구)
     if s.incident:                            # 이변 중
         m *= INCIDENT_SLUMP
     return m * (1 + omamori.bonus(s, "income"))

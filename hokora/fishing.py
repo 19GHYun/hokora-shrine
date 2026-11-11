@@ -19,7 +19,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
-from . import season, weather
+from . import season, shintoku, weather
 from .sprites import SPRITE_DIR
 from .state import GameState
 
@@ -57,7 +57,7 @@ FISH = {c.key: c for c in [
 def bait(s: GameState) -> int:
     """오늘 남은 미끼 (날이 바뀌면 다시 채워짐)."""
     if s.fish_bait_date != date.today().isoformat():
-        return BAIT_PER_DAY
+        return BAIT_PER_DAY + shintoku.extra_bait(s)           # 신덕 미끼
     return s.fish_bait
 
 

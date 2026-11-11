@@ -25,7 +25,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
 from . import affection as aff
-from . import moon, offering, omamori, season, wardrobe, weather
+from . import moon, offering, omamori, season, shintoku, wardrobe, weather
 from .decor import decor_image
 from .bubble import say
 from .news import NewsCard, answer_for, make_article
@@ -1874,6 +1874,7 @@ class Visits:
             kind, self._forced = self._forced, ""
             self.start(kind)
         elif random.random() < (VISIT_CHANCE * (1 + omamori.bonus(g.state, "guest")) * weather.current().guests
+                                * shintoku.guest_mult(g.state)                                     # 신덕 참배객
                                 * (3.0 if g.state.festival_until > time.time() else 1.0)          # 예대제엔 손님이 몰려옴
                                 * (moon.NEW_GUESTS if moon.is_new() and season.is_night() else 1.0)  # 그믐 밤
                                 * (offering.BOOST if g.state.offering else 1.0)):                  # 공물
