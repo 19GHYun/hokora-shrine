@@ -175,6 +175,14 @@ class DodgeWindow(QWidget):
         self.close()
         self.on_end(won, self.hits)
 
+    def closeEvent(self, e) -> None:
+        if self.timer.isActive():                       # finish() 를 거치지 않고 닫힘 → 그만둔 것으로
+            self.timer.stop()
+            if self.result is None:
+                self.hits = max(self.hits, LIVES)
+            self.on_end(bool(self.result), self.hits)
+        super().closeEvent(e)
+
     # ── 탄 ──
     def _every(self, name: str, period: float, dt: float) -> int:
         """period 초마다 한 번 → 이번 틱에 쏠 횟수."""

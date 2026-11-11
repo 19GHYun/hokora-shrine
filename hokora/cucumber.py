@@ -155,7 +155,8 @@ def sell(s: GameState, n: int, now: datetime | None = None) -> int:
     cost = round(s.cuke_paid * n / s.cuke_have)
     s.cuke_have -= n
     s.cuke_paid -= cost
-    s.add_saisen(got)
+    s.saisen += got
+    s.saisen_total += max(0, got - cost)          # 산 값을 돌려받는 몫은 '모은 새전'에 세지 않음
     s.cuke_profit += got - cost
     s.cuke_best = max(s.cuke_best, price)
     return got

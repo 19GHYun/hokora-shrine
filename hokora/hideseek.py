@@ -12,8 +12,8 @@ import random
 import time
 from typing import TYPE_CHECKING, Callable
 
-from PySide6.QtCore import QRect, QRectF, Qt, QTimer
-from PySide6.QtGui import QPainter, QPixmap, QTransform
+from PySide6.QtCore import QPoint, QRect, QRectF, Qt, QTimer
+from PySide6.QtGui import QGuiApplication, QPainter, QPixmap, QTransform
 from PySide6.QtWidgets import QWidget
 
 from . import affection as aff
@@ -173,8 +173,10 @@ class HideGame:
             x, y = area.left(), ground.y - h
         elif kind == "edge_right":
             x, y = area.right() - w + 1, ground.y - h
-        elif kind == "ceiling":
-            x, y = self.rng.uniform(area.left() + 80, area.right() - 80), area.top()
+        elif kind == "ceiling":                                          # 그 자리 모니터의 위쪽 끝
+            x = self.rng.uniform(area.left() + 80, area.right() - 80)
+            sc = QGuiApplication.screenAt(QPoint(round(x), round(ground.y) - 1))
+            y = sc.availableGeometry().top() if sc is not None else area.top()
         elif kind == "window":
             pf = self.rng.choice(g.window_platforms)
             x, y = self.rng.uniform(pf.x1 + 10, max(pf.x1 + 11, pf.x2 - w - 10)), pf.y - h + 3

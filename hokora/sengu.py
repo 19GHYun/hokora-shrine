@@ -23,8 +23,12 @@ def cost(s: GameState) -> int:
 
 
 def multiplier(s: GameState) -> float:
-    """지은 횟수만큼 수입 배율 (짓는 중인 것은 다 지어야 들어감)."""
-    return 1 + BOOST_EACH * s.sengu
+    """지은 횟수만큼 수입 배율 (짓는 중인 것은 다 지어야 들어감).
+
+    다 지었지만 아직 완성 처리(finish) 전인 것도 센다 — 꺼 둔 동안 끝났으면 그동안의 수입에도 들어가게.
+    """
+    done = 1 if s.sengu_until and not building(s) else 0
+    return 1 + BOOST_EACH * (s.sengu + done)
 
 
 def building(s: GameState, now: float | None = None) -> bool:

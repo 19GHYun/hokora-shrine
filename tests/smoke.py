@@ -941,8 +941,11 @@ def t_cuke():
     check("월요일 오전엔 아직 못 팖", cucumber.sell(s, 10) == 0 and cucumber.can_buy(now[0]))
     now[0] = real_dt(2026, 10, 14, 15, 0)                # 수요일 오후
     price = cucumber.price_now(s)
+    total0, basis = s.saisen_total, round(s.cuke_paid * 50 / s.cuke_have)
     got = cucumber.sell(s, 50)
     gross = 50 * price
+    check("판 돈 중 산 값(원금)은 '모은 새전'에 안 셈", s.saisen_total == total0 + max(0, got - basis),
+          (s.saisen_total - total0, got, basis))
     check("그때 시세대로 팔기 (수수료 5% 빼고)", got == gross - cucumber.fee(gross) and s.cuke_have == 10_050
           and price == cucumber.prices(s)[5] and s.cuke_fees == cucumber.fee(gross) > 0, (got, gross))
     check("평일엔 못 삼", cucumber.buy(s, 10) == 0)
@@ -1025,6 +1028,25 @@ def t_sengu():
     game.shrine.set_building(False)
     for c in list(game._card_queue):
         c.close()
+    s.sengu, s.sengu_until = 0, time.time() - 1
+    check("꺼 둔 동안 다 지은 천궁도 바로 수입에 (+10%)", abs(sengu.multiplier(s) - 1.1) < 1e-9)
+    s.sengu_until = 0.0
+    saisen0 = s.saisen
+    for n, money in ((13, 10 ** 9), (30, 10 ** 16)):       # 천궁 값이 21억(Qt 정수)을 넘어도 창이 열림
+        s.sengu, s.saisen = n, money
+        p = None
+        try:
+            game.open_panel()
+            p = game.panel
+            bar = p.up_bar
+            check(f"{n + 1}대째에도 관리 창이 열림 (천궁 값 {sengu.cost(s):,})",
+                  p is not None and bar.maximum() == 1000 and 0 <= bar.value() <= 1000 and p.up_btn.text() == "천궁하기",
+                  (bar.value(), bar.maximum()))
+        except Exception as e:
+            check(f"{n + 1}대째에도 관리 창이 열림", False, repr(e))
+        if p is not None:
+            p.close()
+    s.saisen = saisen0
     s.sengu = 0                                    # 다른 시험의 수입 계산에 끼어들지 않게
 
 
@@ -1252,6 +1274,9 @@ def t_dodge():
     if game.dodge is not None:
         game.dodge.give_up()
     check("오른쪽 클릭 · ✕ 로 그만두기", game.dodge is None)
+    w4 = dodge.DodgeWindow("reimu", "레이무", lambda won, hits: G.__setitem__("dodge4", (won, hits)), 5.0)
+    w4.close()
+    check("창이 그냥 닫혀도 (Alt+F4) 진 것으로 알림", G.get("dodge4") == (False, dodge.LIVES), G.get("dodge4"))
 
 
 def t_hide():
@@ -1320,6 +1345,7 @@ def t_race():
     check("새전이 모자라면 못 검", race.blocked(s, 1000, False))
     s.saisen, s.race_card = 10 ** 6, []
     count0 = s.race_count
+    G["race_total"] = s.saisen_total
     odds = race.odds_of(s, "cirno")
     orig, race.decide = race.decide, (lambda c, rng=None: "cirno")
     try:
@@ -1328,6 +1354,8 @@ def t_race():
         race.decide = orig
     check("내기 걸고 출발", ok and game.race is not None and s.saisen == 10 ** 6 - 1000 and s.race_count == count0 + 1)
     check("달리는 중엔 또 못 검", not game.start_race("luna", 1000))
+    check("달리는 동안 내기가 저장됨 (꺼도 다음에 정산)", s.race_pending[:2] == ["cirno", 1000]
+          and s.race_pending[3] == "cirno")
     w = game.race
     if w is None:
         return
@@ -1348,6 +1376,19 @@ def t_race2():
     check("1착이면 건 새전 × 배당", s.saisen == 10 ** 6 - 1000 + int(1000 * odds) and s.race_wins >= 1,
           (s.saisen, odds))
     check("다음 출전표가 새로 나옴", len(s.race_card) == 4)
+    check("정산하면 내기 기록은 지움", not s.race_pending)
+    check("'모은 새전'엔 번 만큼만 (건 새전은 빼고)", s.saisen_total == G["race_total"] + int(1000 * odds) - 1000,
+          s.saisen_total - G["race_total"])
+    s.race_pending = ["luna", 2000, 2.5, "luna"]       # 달리는 중에 꺼졌던 내기
+    before = s.saisen
+    game._race_done(earlier=True)
+    check("지난번 달리던 내기를 켤 때 정산", s.saisen == before + 5000 and not s.race_pending)
+    game._race_done(earlier=True)
+    check("두 번 정산하지 않음", s.saisen == before + 5000)
+    s.race_pending = ["star", 3000, 3.0, "sunny"]
+    before, profit0 = s.saisen, s.race_profit
+    hk.race.settle(s)
+    check("진 내기는 건 새전만 잃음", s.saisen == before and s.race_profit == profit0 - 3000)
     board = race.RaceBoard(s, lambda k, b: G.__setitem__("bet", (k, b)))
     check("출전표 창: 4명 × 3가지", len(board.buttons) == 12 and all(b.isEnabled() for b in board.buttons.values()))
     board.buttons[("star", 10_000)].click()

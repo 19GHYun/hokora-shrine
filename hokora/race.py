@@ -59,6 +59,27 @@ def decide(c: list[list], rng: random.Random | None = None) -> str:
     return rng.choices(keys, weights=[1 / o for _k, o, _c in c])[0]
 
 
+def settle(s: GameState) -> tuple[str, int, float, str, int] | None:
+    """달리는 중이던 내기를 정산 → (건 친구, 건 새전, 배당, 1착, 받은 새전). 없으면 None.
+
+    건 새전은 이미 빠져 있으므로, 이기면 돌려받는 몫(원금)은 '모은 새전'에 세지 않고 번 만큼만 센다.
+    """
+    if len(s.race_pending) != 4:
+        s.race_pending = []
+        return None
+    key, bet, odds, winner = s.race_pending
+    s.race_pending = []
+    s.race_card = new_card()                        # 다음 경주 출전표
+    pay = 0
+    if winner == key:
+        pay = int(bet * odds)
+        s.saisen += bet
+        s.add_saisen(pay - bet)
+        s.race_wins += 1
+    s.race_profit += pay - bet
+    return key, bet, odds, winner, pay
+
+
 def blocked(s: GameState, bet: int, running: bool) -> str:
     if running:
         return "지금 달리는 중이에요"

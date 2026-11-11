@@ -235,6 +235,7 @@ class GameState:
     race_wins: int = 0
     race_profit: int = 0
     race_card: list = field(default_factory=list)   # 다음 경주 출전표 [[키, 배당], …]
+    race_pending: list = field(default_factory=list)   # 달리는 중인 내기 [키, 건 새전, 배당, 1착] (끄면 다음에 정산)
     incident: str = ""               # 이변 (incident.py): 지금 일어난 이변 (없으면 "")
     incident_since: float = 0.0
     incident_clues: int = 0

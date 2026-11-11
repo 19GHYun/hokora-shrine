@@ -66,6 +66,13 @@ QTabBar::tab:hover { color: #9E1027; }
 _portraits: dict[tuple, QPixmap] = {}
 
 
+def set_bar(bar: QProgressBar, value: int, goal: int) -> None:
+    """진행 막대를 천분율로 채운다. Qt 막대는 32비트 정수라 새전 그대로 넣으면
+    21억을 넘는 순간 OverflowError 로 창이 안 열린다 (14대째 천궁 값 40억)."""
+    bar.setRange(0, 1000)
+    bar.setValue(int(1000 * min(1.0, value / goal)) if goal > 0 else 1000)
+
+
 def portrait(key: str, size: int, silhouette: bool, skin: str | None = None) -> QPixmap:
     """도감용 얼굴(서 있는 모습). 못 만난 캐릭터는 검은 실루엣. skin 이면 그 옷을 입은 모습."""
     ck = (key, size, silhouette, skin)
@@ -1175,8 +1182,7 @@ class ShrinePanel(QWidget):
                 price = sengu.cost(s)
                 self.up_label.setText(f"🏯 식년천궁 → {gen + 1}대째 신사 (새전 수입 +{sengu.BOOST_EACH:.0%} 영구)\n"
                                       f"새전 {min(s.saisen, price):,} / {price:,}")
-                self.up_bar.setRange(0, price)
-                self.up_bar.setValue(min(s.saisen, price))
+                set_bar(self.up_bar, s.saisen, price)
                 self.up_btn.setText("천궁하기")
                 why = sengu.blocked(s)
                 self.up_btn.setEnabled(not why)
@@ -1184,8 +1190,7 @@ class ShrinePanel(QWidget):
         else:
             nxt_name, nxt_income, _ = SHRINE_STAGES[s.shrine_level + 1]
             self.up_label.setText(f"다음: {nxt_name} (분당 {nxt_income})   {min(s.saisen, cost):,} / {cost:,} 새전")
-            self.up_bar.setRange(0, cost)
-            self.up_bar.setValue(min(s.saisen, cost))
+            set_bar(self.up_bar, s.saisen, cost)
             self.up_btn.setText(f"{nxt_name}로 올리기")   # 신사·대신사 모두 받침 없음 → "로"
             self.up_btn.setEnabled(s.saisen >= cost)
 
@@ -1311,8 +1316,7 @@ class ShrinePanel(QWidget):
             icon.setText(daily.icon(task))
             title.setText(daily.text(task))
             n = min(daily.count(s, task), task["goal"])
-            bar.setRange(0, task["goal"])
-            bar.setValue(task["goal"] if task["done"] else n)
+            set_bar(bar, task["goal"] if task["done"] else n, task["goal"])
             if task["done"]:
                 status.setText(f"✓ 들어줬어요   새전 +{task['reward']:,}")
                 self._role(status, "done")

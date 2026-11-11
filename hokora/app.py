@@ -338,6 +338,8 @@ class Game(QObject):
         QTimer.singleShot(6500, self._check_achievements)
         QTimer.singleShot(4200, self._tutorial_show)
         QTimer.singleShot(5500, self._sengu_tick)                # 꺼 둔 동안 공사가 끝났을 수도
+        if self.state.race_pending:                             # 지난번 달리는 중에 꺼졌으면 정산
+            QTimer.singleShot(6500, lambda: self._race_done(earlier=True))
         QTimer.singleShot(7500, self._check_letters)
         forced = os.environ.get("HOKORA_INCIDENT", "")           # 시험용: 켜자마자 그 이변 (단서는 10초 뒤)
         if forced in incident.INCIDENTS and not self.state.incident:
@@ -1373,12 +1375,13 @@ class Game(QObject):
         winner = race.decide(c)
         s.saisen -= bet
         s.race_count += 1
+        s.race_pending = [key, bet, odds, winner]           # 다 달리기 전에 꺼도 다음에 정산
         self.shrine.set_saisen(s.saisen)
         self.shrine.pop(f"-{bet:,}")
         g = self.ground_under(self.shrine.pos_x)
         sc = self.app.screenAt(QPoint(round(self.shrine.pos_x), round(g.y) - 10)) or self.app.primaryScreen()
         w = race.RaceWindow(c, winner, sc.availableGeometry(), self.shrine.pos_x, g.y, bet_key=key,
-                            on_finish=lambda win: self._race_done(key, bet, odds, win),
+                            on_finish=lambda _win: self._race_done(),
                             hidden=lambda: self.hidden_for_fullscreen)
         w.destroyed.connect(lambda *_: setattr(self, "race", None) if self.race is w else None)
         self.race = w
@@ -1388,20 +1391,20 @@ class Game(QObject):
         self.save()
         return True
 
-    def _race_done(self, key: str, bet: int, odds: float, winner: str) -> None:
+    def _race_done(self, earlier: bool = False) -> None:
+        got = race.settle(self.state)
+        if got is None:                                     # 이미 정산함 (끄면서 정산한 뒤 등)
+            return
+        key, bet, odds, winner, pay = got
         s = self.state
-        s.race_card = race.new_card()                       # 다음 경주 출전표
-        if winner == key:
-            pay = int(bet * odds)
-            s.add_saisen(pay)
-            s.race_wins += 1
-            s.race_profit += pay - bet
+        before = "지난번 요정 달리기: " if earlier else ""
+        if pay:
             self.shrine.set_saisen(s.saisen)
             self.shrine.pop(f"+{pay:,}")
-            self._say_at_shrine(f"🏆 {race.NAMES[key]} 1착!  배당 ×{odds:g} → 새전 +{pay:,}")
+            self._say_at_shrine(f"🏆 {before}{race.NAMES[key]} 1착!  배당 ×{odds:g} → 새전 +{pay:,}")
         else:
-            s.race_profit -= bet
-            self._say_at_shrine(f"🏁 1착은 {race.NAMES[winner]}…  {race.NAMES[key]}에게 건 새전은 신사에 봉납되었어요")
+            self._say_at_shrine(f"🏁 {before}1착은 {race.NAMES[winner]}…  {race.NAMES[key]}에게 건 새전은 신사에 봉납되었어요")
+        log.info("요정 달리기 정산: %s 에 %d, 1착 %s → %d", key, bet, winner, pay)
         self.save()
 
     # ── 친구 편지 ──
@@ -2225,7 +2228,8 @@ class Game(QObject):
                 done.setEnabled(False)
             else:
                 why = training.blocked(s, key)
-                act = sub.addAction(f"Lv.{lv + 1}로 올리기   새전 {price:,}", lambda: self.train_friend(key))
+                ro = "으로" if lv + 1 in (3, 6, 10) else "로"           # 삼·육·십 은 받침
+                act = sub.addAction(f"Lv.{lv + 1}{ro} 올리기   새전 {price:,}", lambda: self.train_friend(key))
                 act.setEnabled(not why)
                 if why:
                     note = sub.addAction(why)
@@ -2523,6 +2527,8 @@ class Game(QObject):
             log.debug("저장: 새전 %d", self.state.saisen)
 
     def quit(self) -> None:
+        if self.state.race_pending:                         # 달리는 중에 끄면 결과대로 정산하고 끔
+            race.settle(self.state)
         self.save()
         self.app.quit()
 
